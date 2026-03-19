@@ -35,6 +35,9 @@ The Dispatcher then distributes the manifest and scope to all reviewers.
 * Only coordinates and manages the review process.
 * **Completion gate:** The Dispatcher must verify that **all reviewer reports have been submitted** before initiating the Cross-Review Phase. If any report is missing, the Dispatcher blocks progression and flags the incomplete reviewer.
 * **Arbitration:** During the Cross-Review Phase, if reviewers cannot reach consensus on a disputed finding, the Dispatcher makes the **final call** on severity and confirmation status with written reasoning.
+* **Report generation:** Once the Cross-Review Phase is complete and the final joint report is assembled, the Dispatcher must write **all reports** as a single Markdown file into the **App root folder** (`BPP.Backend.NET/BPP.Backend.NET.App/ImplPlans/`). The filename must be derived from `@SPEC_MD_TASK` (lowercased, spaces/special chars replaced with `-`, prefixed with the current date: `{task-name}-{YYYY-MM-DD}.md`). The file must contain:
+  1. **Joint Audit Report** (the final consolidated table with confirmed/unconfirmed/rejected issues, fix order, and summary)
+  2. **Individual Reviewer Reports** — each reviewer's original independent report, in full, under a clearly labeled `## {Reviewer Name} — Individual Report` heading
 
 ---
 
