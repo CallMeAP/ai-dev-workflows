@@ -9,7 +9,7 @@ Audit the implementation of **`@SPEC_MD_TASK`** defined in **`@SPEC_MD`** to det
 * deadlocks
 * deviations from the specification
 
-Use a **5-agent system** with strict role separation.
+Use a **6-agent system** with strict role separation.
 
 ---
 
@@ -31,6 +31,8 @@ The Dispatcher then distributes the manifest and scope to all reviewers.
 
 * Performs **no code changes**.
 * Only coordinates and manages the review process.
+* **Completion gate:** The Dispatcher must verify that **all reviewer reports have been submitted** before initiating the Cross-Review Phase. If any report is missing, the Dispatcher blocks progression and flags the incomplete reviewer.
+* **Arbitration:** During the Cross-Review Phase, if reviewers cannot reach consensus on a disputed finding, the Dispatcher makes the **final call** on severity and confirmation status with written reasoning.
 
 ---
 
@@ -51,7 +53,7 @@ Produces an **independent security review report**.
 
 ---
 
-## 3. Spec Compliance Reviewer
+## 3. Spec Compliance Reviewer A
 
 Focus: **Specification compliance**
 
@@ -70,7 +72,32 @@ Produces an **independent spec compliance report**.
 
 ---
 
-## 4. Performance Reviewer Agent
+## 4. Spec Compliance Reviewer B
+
+Focus: **Specification compliance (independent second opinion)**
+
+Performs the **same review as Spec Compliance Reviewer A** (agent 3), but **independently and without seeing Agent 3's report**.
+
+Cross-checks the implementation against **`@SPEC_MD`**.
+
+Checks for:
+
+* missing functionality from the spec
+* incorrect implementation of specified behavior
+* logical deviations from the spec
+* incomplete features
+* behavior mismatches
+* unimplemented edge cases
+
+Produces an **independent spec compliance report**.
+
+> **Why two spec reviewers?** Spec compliance is the highest-value category — having two independent reviewers increases coverage and reduces blind spots. Their reports are compared during the Cross-Review Phase.
+
+> **Isolation rule:** The Dispatcher hands the manifest to A and B **simultaneously**. Neither report is shared with the other until **both** are submitted.
+
+---
+
+## 5. Performance Reviewer Agent
 
 Focus: **Performance issues**
 
@@ -89,7 +116,7 @@ Produces an **independent performance review report**.
 
 ---
 
-## 5. Bug / Logic Reviewer Agent
+## 6. Bug / Logic Reviewer Agent
 
 Focus: **Logic correctness and edge cases**
 
@@ -107,6 +134,18 @@ Produces an **independent bug / logic review report**.
 
 ---
 
+# Severity Rubric
+
+All reviewers must use this shared rubric when assigning severity:
+
+| Severity | Definition | Examples |
+|----------|-----------|----------|
+| **high** | Data loss, security breach, crash, or core spec requirement completely missing/broken | SQL injection, unhandled null causing 500, entire feature not implemented |
+| **medium** | Incorrect behavior, spec deviation, or degraded performance that affects users | Wrong business logic output, N+1 queries on hot paths, missing auth check on non-critical endpoint |
+| **low** | Minor issues, style violations, edge cases unlikely to occur in practice | Missing `AsNoTracking()` on low-traffic read, off-by-one on pagination edge case, CLAUDE.md convention violation |
+
+---
+
 # Cross-Review Phase
 
 After all reviewers finish their **independent reports**:
@@ -118,7 +157,7 @@ Each reviewer must:
 3. **Challenge weak claims** and attempt to disprove them
 4. **Flag new issues** discovered while reading other reports
 
-**Confirmation rule:** An issue is **confirmed** when **2 or more reviewers agree** on it. Issues with only 1 supporter are marked as **unconfirmed** and included separately.
+**Confirmation rule:** An issue is **confirmed** when **2 or more reviewers agree** on it. Issues with only 1 supporter are marked as **unconfirmed** and included separately. Issues actively **disproven** by 2+ reviewers are marked as **rejected** (with reasoning) and listed separately for transparency.
 
 ---
 
@@ -138,4 +177,6 @@ Reviewers produce a **joint audit report** returned to the **Dispatcher Agent**.
 
 1. **Confirmed Issues** (2+ reviewers agree)
 2. **Unconfirmed Issues** (single reviewer, kept for visibility)
-3. **Summary** — total counts by severity and category
+3. **Rejected Issues** (2+ reviewers disproved, with reasoning)
+4. **Recommended Fix Order** — confirmed issues sorted by severity (high → low), grouped by file to minimize context-switching
+5. **Summary** — total counts by severity and category
