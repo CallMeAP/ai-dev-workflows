@@ -9,9 +9,9 @@ Audit the implementation of **`@SPEC_MD_TASK`** defined in **`@SPEC_MD`** to det
 * deadlocks
 * deviations from the specification
 
-Use a **6-agent system** with strict role separation.
+Use a **7-agent system** with strict role separation.
 
-> **Important:** You (the root agent receiving this prompt) **are** the Dispatcher. Do NOT spawn a separate agent for the Dispatcher role. You coordinate directly and only spawn sub-agents for the five reviewer roles.
+> **Important:** You (the root agent receiving this prompt) **are** the Dispatcher. Do NOT spawn a separate agent for the Dispatcher role. You coordinate directly and only spawn sub-agents for the six reviewer roles.
 
 ---
 
@@ -136,6 +136,39 @@ Produces an **independent bug / logic review report**.
 
 ---
 
+## 7. Coding Style Reviewer Agent
+
+Focus: **Service implementation coding style** — compared against a known clean reference codebase.
+
+**Reference codebase:** `/home/alex/Entwicklung/bpp/bpp-file/BPP.File.NET/BPP.File.NET.API`
+
+This agent reads the reference implementation files (especially services) and then compares the reviewed code against them. The focus is on **service-layer style**, not DTOs, controllers, or mapping profiles.
+
+**Key reference files to read first:**
+
+* `Services/Upload/BrokernetFileUploadService.cs` — orchestration service with numbered steps, guard clauses, private helpers below public methods
+* `Services/BrokernetFile/BrokernetFileService.cs` — minimal service, clean repository access
+* `Services/Upload/BrokernetFileValidationService.cs` — validation logic with steps and early returns
+* `Services/BrokernetFile/BrokernetFileAutoSignService.cs` — business rules with guard clauses
+
+**Checklist — report violations of:**
+
+* **Guard clauses & early returns** — methods must use early `throw` / `return` instead of deep `if`/`else` nesting. Max 2 levels of nesting allowed before flagging.
+* **Numbered step comments** — public orchestration methods must have `// (1) ...`, `// (2) ...` comments (German) describing each logical step. Missing step comments = finding.
+* **Private helpers below their public method** — private methods that serve a specific public method must sit directly below it, not at the bottom of the file.
+* **BaseService field usage** — services inheriting `BaseService` must use `_repositoryWrapper`, `_mapper`, `_logger`, `_auditContextService` (protected fields), never the constructor params directly.
+* **LINQ style** — method syntax only, full descriptive lambda names (`.Where(entity => ...)` not `.Where(e => ...)`), explicit variable types for queries (no `var` for entity queries).
+* **Async discipline** — all I/O methods `async Task`, suffixed `Async`, no `.Result` / `.Wait()`.
+* **Logging** — uses `CommonLoggerUtil.LogDebug` / `LogDebugAsJson`, not `Debug.WriteLine` or raw `_logger.Debug`.
+* **Error handling** — correct exception types (`BrokernetServiceNotFoundException` for 404, `BrokernetServiceException` for business errors, `BrokerException` for user-facing).
+* **Repository query pattern** — `QueryAllAsNoTracking()` for reads, `QueryAll()` for writes.
+
+> **How to review:** For each service file in scope, read the corresponding reference file(s) from bpp-file, then compare structure and style. Report deviations as findings with concrete line references.
+
+Produces an **independent coding style review report**.
+
+---
+
 # Severity Rubric
 
 All reviewers must use this shared rubric when assigning severity:
@@ -173,7 +206,7 @@ Reviewers produce a **joint audit report** returned to the **Dispatcher Agent**.
 |---|-------|----------|----------|--------------|----------|
 | 1 | Description of the issue | low / medium / high | Agent name | Agreeing agent(s) | security / spec / performance / bug |
 
-**Categories:** `security`, `spec-compliance`, `performance`, `bug-logic`
+**Categories:** `security`, `spec-compliance`, `performance`, `bug-logic`, `coding-style`
 
 **Sections:**
 

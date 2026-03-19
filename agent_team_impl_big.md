@@ -59,6 +59,27 @@ The team should consist of **four agents with clearly defined roles**.
 
 **Blocker escalation:** If during implementation the Implementer discovers that the task breakdown is wrong (missing dependency, scope too large, conflicting requirements), the Implementer must **stop and flag a blocker** to the Dispatcher instead of working around it. The Dispatcher re-splits or re-scopes the task before work continues.
 
+**Service Implementation Style Rules (mandatory):**
+
+The Implementer must read the reference codebase at `/home/alex/Entwicklung/bpp/bpp-file/BPP.File.NET/BPP.File.NET.API/Services/` before writing service code. Key reference files:
+
+* `Upload/BrokernetFileUploadService.cs` — orchestration with numbered steps, guard clauses
+* `BrokernetFile/BrokernetFileService.cs` — minimal clean service
+* `Upload/BrokernetFileValidationService.cs` — validation with early returns
+* `BrokernetFile/BrokernetFileAutoSignService.cs` — business rules with guard clauses
+
+**Enforce these rules in all service implementations:**
+
+1. **Guard clauses & early returns** — use early `throw` / `return`, no deep `if`/`else` nesting (max 2 levels)
+2. **Numbered step comments** — public orchestration methods must have `// (1) ...`, `// (2) ...` comments (German) describing each logical step
+3. **Private helpers below their public method** — not at the bottom of the file
+4. **BaseService field usage** — use `_repositoryWrapper`, `_mapper`, `_logger`, `_auditContextService` (protected fields), never constructor params directly
+5. **LINQ style** — method syntax only, full descriptive lambda names (`.Where(entity => ...)` not `.Where(e => ...)`), explicit variable types for queries
+6. **Async discipline** — all I/O methods `async Task`, suffixed `Async`, no `.Result` / `.Wait()`
+7. **Logging** — use `CommonLoggerUtil.LogDebug` / `LogDebugAsJson`, not `Debug.WriteLine` or raw `_logger.Debug`
+8. **Error handling** — `BrokernetServiceNotFoundException` for 404, `BrokernetServiceException` for business errors, `BrokerException` for user-facing
+9. **Repository queries** — `QueryAllAsNoTracking()` for reads, `QueryAll()` for writes
+
 ---
 
 ## 3. Code Reviewer Agent A
@@ -72,15 +93,28 @@ Checks:
 * adherence to the Dispatcher's approved plan
 * code quality and maintainability
 * **`CLAUDE.md` convention compliance** (naming, patterns, field usage, LINQ style, etc.)
+* **service implementation coding style** (see checklist below)
 * security and reliability
 * architectural issues
 * edge cases and risks
+
+**Service Style Checklist (compare against reference at `/home/alex/Entwicklung/bpp/bpp-file/BPP.File.NET/BPP.File.NET.API/Services/`):**
+
+* Guard clauses & early returns — no deep `if`/`else` nesting (max 2 levels)
+* Numbered step comments `// (1) ...`, `// (2) ...` (German) on public orchestration methods
+* Private helpers placed directly below their public method
+* BaseService protected fields used (`_repositoryWrapper`, `_mapper`, etc.), not constructor params
+* LINQ: method syntax, full lambda names (`.Where(entity => ...)`), explicit query variable types
+* Async: all I/O `async Task` + `Async` suffix, no `.Result` / `.Wait()`
+* Logging via `CommonLoggerUtil.LogDebug` / `LogDebugAsJson`, not `Debug.WriteLine`
+* Correct exception types (`BrokernetServiceNotFoundException`, `BrokernetServiceException`, `BrokerException`)
+* `QueryAllAsNoTracking()` for reads, `QueryAll()` for writes
 
 **Review Output Format:**
 
 | # | Issue | Severity | Category | Fix Required |
 |---|-------|----------|----------|--------------|
-| 1 | Description | low / medium / high | correctness / spec / quality / security / convention / edge-case | Actionable fix description |
+| 1 | Description | low / medium / high | correctness / spec / quality / security / convention / coding-style / edge-case | Actionable fix description |
 
 **Verdict:** **APPROVED** or **REVISIONS REQUIRED**
 
@@ -99,15 +133,28 @@ Checks:
 * adherence to the Dispatcher's approved plan
 * code quality and maintainability
 * **`CLAUDE.md` convention compliance** (naming, patterns, field usage, LINQ style, etc.)
+* **service implementation coding style** (see checklist below)
 * security and reliability
 * architectural issues
 * edge cases and risks
+
+**Service Style Checklist (compare against reference at `/home/alex/Entwicklung/bpp/bpp-file/BPP.File.NET/BPP.File.NET.API/Services/`):**
+
+* Guard clauses & early returns — no deep `if`/`else` nesting (max 2 levels)
+* Numbered step comments `// (1) ...`, `// (2) ...` (German) on public orchestration methods
+* Private helpers placed directly below their public method
+* BaseService protected fields used (`_repositoryWrapper`, `_mapper`, etc.), not constructor params
+* LINQ: method syntax, full lambda names (`.Where(entity => ...)`), explicit query variable types
+* Async: all I/O `async Task` + `Async` suffix, no `.Result` / `.Wait()`
+* Logging via `CommonLoggerUtil.LogDebug` / `LogDebugAsJson`, not `Debug.WriteLine`
+* Correct exception types (`BrokernetServiceNotFoundException`, `BrokernetServiceException`, `BrokerException`)
+* `QueryAllAsNoTracking()` for reads, `QueryAll()` for writes
 
 **Review Output Format:**
 
 | # | Issue | Severity | Category | Fix Required |
 |---|-------|----------|----------|--------------|
-| 1 | Description | low / medium / high | correctness / spec / quality / security / convention / edge-case | Actionable fix description |
+| 1 | Description | low / medium / high | correctness / spec / quality / security / convention / coding-style / edge-case | Actionable fix description |
 
 **Verdict:** **APPROVED** or **REVISIONS REQUIRED**
 
