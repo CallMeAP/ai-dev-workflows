@@ -13,7 +13,7 @@ Use a **3-agent system** with strict role separation.
 **Access:** Read-only
 **Responsibilities**
 
-* Read **`CLAUDE.md`** for project conventions.
+* Read **`/home/alex/Entwicklung/bpp/bpp-backend/CLAUDE.md`** for project conventions.
 * Identify all service files in `@FILES`.
 * Assign files to the Analyzer, then orchestrate the refactoring loop.
 * Track progress per file as a done checklist.
@@ -36,14 +36,14 @@ Use a **3-agent system** with strict role separation.
    * `BrokernetFile/BrokernetFileService.cs` — minimal clean service
    * `Upload/BrokernetFileValidationService.cs` — validation with early returns
    * `BrokernetFile/BrokernetFileAutoSignService.cs` — business rules with guard clauses
-2. Read `CLAUDE.md` for project conventions.
+2. Read `/home/alex/Entwicklung/bpp/bpp-backend/CLAUDE.md` for project conventions.
 3. For each service file in `@FILES`, produce a **style deviation report**.
 
 **Style Checklist — flag violations of:**
 
 | # | Rule | What to look for |
 |---|------|-----------------|
-| 1 | **Guard clauses & early returns** | Deep `if`/`else` nesting (>2 levels). Must use early `throw` / `return` instead. |
+| 1 | **Max 2 levels of nesting** | Any nesting deeper than 2 levels (loops and conditionals count equally). Use guard clauses (`continue` / `throw` / `return`) to flatten, or extract inner logic into a private helper method. |
 | 2 | **Numbered step comments** | Public orchestration methods missing `// (1) ...`, `// (2) ...` comments (German) on each logical step. |
 | 3 | **Private helper placement** | Private methods serving a public method must sit directly below it, not at file bottom. |
 | 4 | **BaseService field usage** | Services inheriting `BaseService` using constructor params instead of protected fields (`_repositoryWrapper`, `_mapper`, `_logger`, `_auditContextService`). |
@@ -100,7 +100,7 @@ Use a **3-agent system** with strict role separation.
 
 1. Dispatcher identifies all service files in `@FILES`
 2. Dispatcher assigns all files to **Style Analyzer**
-3. Style Analyzer reads reference files + `CLAUDE.md`, produces deviation report per file
+3. Style Analyzer reads reference files + `/home/alex/Entwicklung/bpp/bpp-backend/CLAUDE.md`, produces deviation report per file
 4. Dispatcher reviews report, assigns files one-by-one to **Refactorer**
 5. Refactorer fixes violations, reports back
 6. Dispatcher marks file as done, assigns next file
