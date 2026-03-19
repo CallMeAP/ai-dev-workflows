@@ -3,9 +3,11 @@ Task: `@SPEC_MD_TASK`
 
 Create a team of agents to implement **`@SPEC_MD_TASK`** defined in **`@SPEC_MD`**.
 
-The team should consist of **four agents with clearly defined roles**:
+The team should consist of **four agents with clearly defined roles**.
 
-## 1. Dispatcher Agent (Coordinator)
+> **Important:** You (the root agent receiving this prompt) **are** the Dispatcher. Do NOT spawn a separate agent for the Dispatcher role. You coordinate directly and only spawn sub-agents for the Implementer and Reviewers.
+
+## 1. Dispatcher Agent (Coordinator) — YOU, the root agent
 
 **Access:** Read-only (write access only to `@SPEC_MD` for marking tasks as completed)
 **Responsibilities**

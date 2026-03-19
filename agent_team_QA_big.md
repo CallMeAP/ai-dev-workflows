@@ -11,9 +11,11 @@ Audit the implementation of **`@SPEC_MD_TASK`** defined in **`@SPEC_MD`** to det
 
 Use a **6-agent system** with strict role separation.
 
+> **Important:** You (the root agent receiving this prompt) **are** the Dispatcher. Do NOT spawn a separate agent for the Dispatcher role. You coordinate directly and only spawn sub-agents for the five reviewer roles.
+
 ---
 
-## 1. Dispatcher Agent (Read-Only)
+## 1. Dispatcher Agent (Read-Only) — YOU, the root agent
 
 * Has **read-only access** to the repository and `@SPEC_MD`.
 * Responsible for **identifying the relevant implementation** of `@SPEC_MD_TASK`.
