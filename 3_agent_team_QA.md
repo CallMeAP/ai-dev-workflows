@@ -149,8 +149,9 @@ Analyzes the implementation for:
 * unhandled edge cases in business logic
 * incorrect state transitions
 * error handling that swallows or misroutes exceptions
+* **`// TODO` and `//` comment audit** — check all `// TODO` comments: are they still relevant, already resolved, or left behind by mistake? Also check inline `//` comments for stale/misleading descriptions that no longer match the code.
 
-> **How to review:** Trace execution paths for each public method — happy path, error path, and edge cases (null inputs, empty collections, boundary values). Check state transitions are valid and complete. Verify exception handling doesn't swallow errors or return incorrect responses.
+> **How to review:** Trace execution paths for each public method — happy path, error path, and edge cases (null inputs, empty collections, boundary values). Check state transitions are valid and complete. Verify exception handling doesn't swallow errors or return incorrect responses. Grep for `// TODO` in all in-scope files and verify each one.
 
 Produces an **independent bug / logic review report**.
 

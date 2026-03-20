@@ -80,7 +80,8 @@ The team should consist of **five agents with clearly defined roles**.
    * Nullable reference type warnings — fix with proper null checks or explicit nullability
    * Any other compiler/analyzer warnings — resolve, do not suppress
 8. **Run tests** — run `dotnet test` (if tests exist) and fix any failures before proceeding
-9. **Create/update feature documentation** at `/home/alex/Entwicklung/ai-dev-workflows/memory/2_docs/{Feature}.md` (one file per feature/module/service):
+9. **TODO audit** — grep for `// TODO` in all modified files. Remove resolved TODOs, ensure remaining ones are intentional and assigned (e.g. `// TODO @Name: description`). Also check for stale `//` comments that no longer match the code.
+10. **Create/update feature documentation** at `/home/alex/Entwicklung/ai-dev-workflows/memory/2_docs/{Feature}.md` (one file per feature/module/service):
    * **Overview** — what the feature does and why it exists
    * **Architecture** — high-level flow, involved services/components and how they interact
    * **API Contracts** — endpoints, request/response shapes, status codes
@@ -88,7 +89,7 @@ The team should consist of **five agents with clearly defined roles**.
    * **Business Rules** — domain logic, validation rules, edge cases
    * **Dependencies** — external services, other modules, config requirements
    * If a `/home/alex/Entwicklung/ai-dev-workflows/memory/2_docs/{Feature}.md` already exists, **update** it — don't create a duplicate
-10. Provide **change summary**:
+11. Provide **change summary**:
    * files modified
    * key decisions
    * assumptions
