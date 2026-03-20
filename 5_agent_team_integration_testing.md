@@ -12,6 +12,18 @@ Provided via conversation context (opened file, message, or attached file).
 
 Create a team of agents to write **end-to-end integration tests** that exercise the full request pipeline: **your controllers → services → real external VERA API**. Tests spin up the app via `WebApplicationFactory<Program>`, call your own endpoints over HTTP, and validate the full response chain. The VERA API serves as **source of truth** — your DTOs, mappings, and service logic must match what VERA actually returns.
 
+> **Build configuration:** The `VeraDebugTestController` is wrapped in `#if DEBUG`. All integration tests **must** use `--configuration Debug` for builds and test runs, and the `WebApplicationFactory` must be configured with `Debug` build config so the debug controller endpoints are available.
+
+### Ground Truth Comparison Strategy
+
+Phase 2 (correctness) tests must follow a **two-step comparison pattern** — not just assert response shape, but compare against real VERA data:
+
+1. **Get ground truth:** Resolve the VERA API client (`IConnectorVeraApiClient`) and session context (`IVeraApiSessionContext`) directly from the `WebApplicationFactory`'s DI container (`factory.Services`). Initialize the session context with test credentials and call the raw VERA API (e.g. `Search3Async`, `CustomerAsync`, `RisksAsync`, `AddressesAsync`, `BankAccountsAsync`, `LinkedObjectNamesAsync`). This response is the **known truth**.
+2. **Get our response:** Call the corresponding controller endpoint (e.g. `VeraDebugTestController.SearchCustomers()` or `GetCustomerDetails()`) via `HttpClient` from the factory. Deserialize the response into our DTO.
+3. **Compare field-by-field:** Assert that every field in our DTO matches the corresponding field from the raw VERA response. Use the same search parameters / customer ID so both calls return the same data. Pick a specific result entry from the VERA response as the comparison anchor.
+
+This pattern catches: wrong mappings, missing fields, type mismatches, silent data loss, and incorrect null handling — all validated against what VERA actually returns, not hardcoded expectations.
+
 The team should consist of **four agents with clearly defined roles**.
 
 > **Important:** You (the root agent receiving this prompt) **are** the Dispatcher. Do NOT spawn a separate agent for the Dispatcher role. You coordinate directly and only spawn sub-agents for the Test Architect, Test Implementer, and Test Reviewer.
@@ -61,14 +73,15 @@ Explore the codebase to design the integration test infrastructure. The Test Imp
 **Must explore:**
 
 1. **Controllers** — all non-debug controllers, their routes, HTTP methods, request/response DTOs, and which services they call
-2. **Services** — the service layer behind each controller — what VERA API calls they make, how they map responses
-3. **DTOs & Mappings** — your response DTOs, AutoMapper profiles, and how they map from VERA's raw response to your API's response shape
-4. **External API clients** — HTTP client factories, connector services, generated client code (`*ConnectorClient.g.cs`)
-5. **App startup (`Program.cs`)** — DI registration, middleware pipeline, auth configuration — needed to configure `WebApplicationFactory<Program>`
-6. **Config structure** — how API URLs, credentials, and feature toggles are configured in `appsettings.json`
-7. **Existing test patterns** — NUnit setup, naming conventions, helper methods, base classes
-8. **Auth mechanism** — how your app authenticates incoming requests (JWT middleware, API key) AND how it authenticates outbound calls to VERA (client cert, bearer token)
-9. **Rate limits / API constraints** — check if the VERA API has documented rate limits, throttling, or fair-use policies. Design test infrastructure to respect them.
+2. **Debug controllers** — `VeraDebugTestController` (`#if DEBUG` only) — these bypass auth middleware with hardcoded credentials and are the primary test targets. Map each debug endpoint to its production counterpart.
+3. **Services** — the service layer behind each controller — what VERA API calls they make, how they map responses
+4. **DTOs & Mappings** — your response DTOs, AutoMapper profiles, and how they map from VERA's raw response to your API's response shape
+5. **External API clients** — HTTP client factories, connector services, generated client code (`*ConnectorClient.g.cs`). **Crucially:** document how to resolve `IConnectorVeraApiClient` and `IVeraApiSessionContext` from DI — tests need these to call VERA directly for ground truth comparison.
+6. **App startup (`Program.cs`)** — DI registration, middleware pipeline, auth configuration — needed to configure `WebApplicationFactory<Program>`
+7. **Config structure** — how API URLs, credentials, and feature toggles are configured in `appsettings.json`
+8. **Existing test patterns** — NUnit setup, naming conventions, helper methods, base classes
+9. **Auth mechanism** — how your app authenticates incoming requests (JWT middleware, API key) AND how it authenticates outbound calls to VERA (client cert, bearer token)
+10. **Rate limits / API constraints** — check if the VERA API has documented rate limits, throttling, or fair-use policies. Design test infrastructure to respect them.
 
 **Produces:**
 
@@ -80,12 +93,18 @@ Explore the codebase to design the integration test infrastructure. The Test Imp
    * Auth strategy for tests: how to authenticate requests to your own endpoints (bypass JWT middleware or use test tokens)
    * Test data setup/teardown strategy
 
-2. **Test case specifications** (per controller endpoint):
+2. **Ground truth helper design:**
+   * How to resolve `IConnectorVeraApiClient` + `IVeraApiSessionContext` from the factory's DI container
+   * How to initialize the session context with test credentials (see `VeraDebugTestController.EnsureSessionContextInitializedAsync` as reference)
+   * Helper method signature for calling VERA raw and returning the unprocessed response
+   * Which raw VERA API method maps to which controller endpoint (e.g. `Search3Async` → `SearchCustomers`, `CustomerAsync` + `AddressesAsync` + ... → `GetCustomerDetails`)
+
+3. **Test case specifications** (per controller endpoint):
    * Your endpoint route + HTTP method
    * Full chain: Controller → Service → VERA API call
    * Expected response (status code, body structure from your DTOs)
    * **Smoke check:** Does it return 200 without crashing?
-   * **Correctness check:** Compare your DTO response fields against VERA's raw API response — are all fields mapped? Are types correct? Are nullable fields handled?
+   * **Correctness check:** Ground truth comparison — call VERA raw, call our endpoint, compare field-by-field. Specify exactly which VERA response fields map to which DTO fields.
    * Edge cases: invalid input, not found, VERA API error
    * Test data prerequisites (e.g., known VERA customer IDs for testing)
 
@@ -132,9 +151,10 @@ Implement integration test infrastructure and test cases as designed by the Test
    3. Run the test — `dotnet test --filter "TestName"`
    4. **If test passes** → proceed to next test
    5. **If test fails because of a test bug** → fix the test, retry (max 2 attempts)
-   6. **If test fails because of a small implementation bug** → fix inline (flag to Dispatcher first), retry
-   7. **If test fails because of a large implementation bug** → escalate to Dispatcher for Hotfix team. Mark test `[Ignore("Bug: {description} — pending hotfix")]`. Proceed to next test.
-   8. **If test still fails after 2 fix attempts by Implementer** → escalate to Dispatcher for Hotfix team. Mark test `[Ignore]`. Proceed to next test.
+   6. **If test fails because of a mapping/DTO bug** (ground truth comparison shows mismatch) → this is a **production code bug**, not a test bug. VERA is always right. Fix the mapping/DTO/service logic in production code, update affected unit tests, then re-run the integration test to verify the fix. Flag to Dispatcher before applying: `"Mapping mismatch: {DTO field} — VERA returns {X}, our DTO has {Y}. Fixing in {file}."`
+   7. **If test fails because of another small implementation bug** → fix inline (flag to Dispatcher first), retry
+   8. **If test fails because of a large implementation bug** → escalate to Dispatcher for Hotfix team. Mark test `[Ignore("Bug: {description} — pending hotfix")]`. Proceed to next test.
+   9. **If test still fails after 2 fix attempts by Implementer** → escalate to Dispatcher for Hotfix team. Mark test `[Ignore]`. Proceed to next test.
 6. After all tests: run full `dotnet test` **without filter** (runs all unit + integration tests) to verify no regressions — especially important if production code was fixed inline
 7. **TODO audit** — grep for `// TODO` in modified files, clean up
 8. Provide **change summary**
@@ -159,7 +179,7 @@ Implement integration test infrastructure and test cases as designed by the Test
 | 14 | **Sequential execution** | All integration test fixtures must use `[NonParallelizable]` to prevent concurrent API calls against the VERA API. Never run multiple integration tests in parallel — the external API is a shared resource, not a load-test target. |
 | 15 | **Configurable call delay** | The base test class must include a configurable delay between API calls (default: 500ms), read from `appsettings.Test.json` (`"IntegrationTests:ApiCallDelayMs": 500`). This prevents rapid-fire requests even in sequential mode. |
 | 16 | **Two-phase testing** | **Phase 1 (smoke):** Call each endpoint, assert it returns a success status code (2xx) and doesn't crash. **Phase 2 (correctness):** Validate response body — all DTO fields populated correctly, types match, nullable fields handled, no silent data loss from bad mappings. Phase 1 tests must all pass before Phase 2 begins. |
-| 17 | **VERA as source of truth** | When a test reveals a mismatch between your DTO/mapping and what VERA actually returns, the VERA response is correct. Flag the mismatch as a bug in your code (mapping, DTO, service logic), not a test issue. Log the raw VERA response and your mapped response for comparison. |
+| 17 | **VERA as source of truth + fix cycle** | Phase 2 tests compare our DTO against VERA's raw response (ground truth pattern). When a mismatch is found: (1) VERA is always correct — the bug is in our mapping/DTO/service, never in the test expectation. (2) Fix the production code (mapping, DTO, service logic). (3) Re-run the same integration test to verify the fix. (4) Log both the raw VERA response and our mapped response for comparison in test output. |
 | 18 | **Mapping completeness** | For each endpoint, verify that **every field** returned by VERA is either (a) mapped to your response DTO, or (b) intentionally excluded with a documented reason. Silently dropped fields = bug. |
 
 **Also follows general style rules #1-18 from `2_agent_team_impl.md`.**
@@ -175,6 +195,7 @@ Performs a **single independent review** of the integration tests.
 **Checks:**
 
 * Tests call your own endpoints via `WebApplicationFactory` (full stack, no mocked services)
+* **Ground truth pattern used** — Phase 2 tests call VERA directly via DI-resolved client, then call our endpoint, then compare field-by-field. Tests must NOT use hardcoded expected values as truth — only VERA's live response.
 * Response assertions are meaningful (not just `!= null` — check actual field values, types, completeness)
 * **Mapping completeness** — every VERA field is accounted for in response DTOs (mapped or explicitly excluded)
 * Error scenarios covered (invalid input, 404, 400)
@@ -296,9 +317,9 @@ If `/home/alex/Entwicklung/ai-dev-workflows/memory/6_hotfix/` contains reports f
 Implement end-to-end integration tests for the specified controllers/flows with:
 
 * full-stack testing via `WebApplicationFactory` (Controller → Service → real VERA API)
+* **Debug build configuration** — required for `#if DEBUG` controller endpoints
 * **Phase 1:** Smoke tests — every endpoint runs without crashing
-* **Phase 2:** Correctness — DTOs, mappings, and response shapes match VERA's actual responses
-* VERA API as source of truth for mapping validation
+* **Phase 2:** Correctness — ground truth comparison (call VERA raw → call our endpoint → diff field-by-field). VERA API is always source of truth. If our mappings don't match → fix production code, re-verify.
 * CI/CD ready configuration
 * test isolation and independence
 
