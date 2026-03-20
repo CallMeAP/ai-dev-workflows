@@ -251,6 +251,8 @@ Each reviewer must:
 
 **Confirmation rule:** An issue is **confirmed** when **2 or more reviewers agree** on it. Issues with only 1 supporter are marked as **unconfirmed** and included separately. Issues actively **disproven** by 2+ reviewers are marked as **rejected** (with reasoning) and listed separately for transparency.
 
+**Reviewer divergence escalation:** If a HIGH severity finding is flagged by one reviewer but not mentioned by any other reviewer, the Dispatcher must independently verify the finding before classifying it as unconfirmed. Do not auto-dismiss a HIGH finding just because only one reviewer caught it.
+
 ---
 
 # Final Output

@@ -68,6 +68,7 @@ The team should consist of **five agents with clearly defined roles**.
    * files to modify
    * components/services to create
    * dependencies
+   * **state trace** (if the task involves modifying entity state, flag resets, or ordering of mutations): include a step-by-step before/after trace showing the state at each step — this surfaces sequencing bugs early
 4. Submit plan to **Dispatcher for approval**
 5. **Wait for Dispatcher approval** (if plan is rejected, revise and resubmit — see Workflow Loop)
 6. Implement changes
@@ -258,6 +259,7 @@ For each task in the scope:
 * Both APPROVED → **APPROVED**
 * Either REVISIONS REQUIRED → **REVISIONS REQUIRED** (union of all medium/high findings)
 * Conflicting severity on same issue → Dispatcher decides final severity
+* **Reviewer divergence escalation:** If one reviewer flags a HIGH issue and the other missed it entirely (approved without mentioning it), the Dispatcher must independently verify the finding before deciding. Do not auto-dismiss a HIGH finding just because only one reviewer caught it.
 
 **If APPROVED → Dispatcher marks task as completed in the spec → next task**
 **If REVISIONS REQUIRED:**
