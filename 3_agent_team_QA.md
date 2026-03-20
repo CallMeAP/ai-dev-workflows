@@ -3,8 +3,6 @@
 The user provides:
 - A **spec file** describing the feature/task to audit
 - The **task scope** (which part of the spec to audit, or all of it)
-- A **report directory** where the final report should be written
-
 Provided via conversation context (opened file, message, or attached file).
 
 ---
@@ -51,7 +49,7 @@ Use an **8-agent system** with strict role separation.
 * **Stale agent recovery:** If a sub-agent has not reported back within ~60 seconds, check if it has made any file changes (e.g. via `git status`). If it has made changes, continue waiting. If no changes, terminate it and spawn a fresh agent with the same task.
 * **Completion gate:** The Dispatcher must verify that **all reviewer reports have been submitted** before initiating the Cross-Review Phase. If any report is missing, the Dispatcher blocks progression and flags the incomplete reviewer.
 * **Arbitration:** During the Cross-Review Phase, if reviewers cannot reach consensus on a disputed finding, the Dispatcher makes the **final call** on severity and confirmation status with written reasoning.
-* **Report generation:** Once the Cross-Review Phase is complete and the final joint report is assembled, the Dispatcher must write **all reports** as a single Markdown file into the provided report directory. The filename must be derived from the task name (lowercased, spaces/special chars replaced with `-`, prefixed with the current date: `{task-name}-{YYYY-MM-DD}.md`). The file must contain:
+* **Report generation:** Once the Cross-Review Phase is complete and the final joint report is assembled, the Dispatcher must write **all reports** as a single Markdown file into `reports/`. The filename must be derived from the task name (lowercased, spaces/special chars replaced with `-`, prefixed with the current date: `{task-name}-{YYYY-MM-DD}.md`). If the file already exists, append an increment: `-2`, `-3`, etc. Never overwrite existing reports. The file must contain:
   1. **Joint Audit Report** (the final consolidated table with confirmed/unconfirmed/rejected issues, fix order, and summary)
   2. **Individual Reviewer Reports** — each reviewer's original independent report, in full, under a clearly labeled `## {Reviewer Name} — Individual Report` heading
 
