@@ -35,8 +35,16 @@ The team should consist of **five agents with clearly defined roles**.
 * No code changes (except marking tasks as completed in the spec file).
 * Only coordinates, validates plans, and delegates work.
 * **Heartbeat:** While waiting for a sub-agent, print a short status message (e.g. `"⏳ Waiting for Implementer..."`) every ~15 seconds to keep the conversation alive. Never go silent while waiting.
-* **Stale agent recovery:** If a sub-agent has not reported back within ~60 seconds, check if it has made any file changes (e.g. via `git status`). If it has made changes, continue waiting. If no changes, terminate it and spawn a fresh agent with the same task.
 * **Sub-agent heartbeat:** All sub-agents must print a short progress message (e.g. `"Working on: implementing service method..."`) every ~30 seconds during long-running tasks. This lets the Dispatcher detect stalls without pinging.
+* **Stale agent recovery:** The Dispatcher must never manually ping a sub-agent and wait passively. Instead, follow this escalation ladder automatically:
+  1. **After ~45 seconds of silence** — check `git diff` for file changes by the sub-agent.
+     * If changes detected → continue waiting, reset timer.
+     * If no changes → proceed to step 2.
+  2. **Send one message** to the sub-agent: `"Status?"` — wait ~20 seconds for a response.
+     * If it responds → continue waiting, reset timer.
+     * If no response → proceed to step 3.
+  3. **Terminate and respawn** — kill the stale agent and spawn a fresh one with the same task. Do NOT ping again or wait further.
+  * **Max respawns per task: 2.** If the second respawn also stalls, the Dispatcher must apply the fix directly (for write agents) or skip and log the issue (for read-only agents).
 
 ---
 

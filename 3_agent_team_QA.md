@@ -46,11 +46,19 @@ Use an **8-agent system** with strict role separation.
 * Performs **no code changes**.
 * Only coordinates and manages the review process.
 * **Heartbeat:** While waiting for sub-agents, print a short status message (e.g. `"⏳ Waiting for Security Reviewer..."`) every ~15 seconds to keep the conversation alive. Never go silent while waiting.
-* **Stale agent recovery:** If a sub-agent has not reported back within ~60 seconds, check if it has made any file changes (e.g. via `git status`). If it has made changes, continue waiting. If no changes, terminate it and spawn a fresh agent with the same task.
 * **Sub-agent heartbeat:** All sub-agents must print a short progress message (e.g. `"Working on: reviewing security of endpoint X..."`) every ~30 seconds during long-running tasks. This lets the Dispatcher detect stalls without pinging.
+* **Stale agent recovery:** The Dispatcher must never manually ping a sub-agent and wait passively. Instead, follow this escalation ladder automatically:
+  1. **After ~45 seconds of silence** — check `git diff` for file changes by the sub-agent.
+     * If changes detected → continue waiting, reset timer.
+     * If no changes → proceed to step 2.
+  2. **Send one message** to the sub-agent: `"Status?"` — wait ~20 seconds for a response.
+     * If it responds → continue waiting, reset timer.
+     * If no response → proceed to step 3.
+  3. **Terminate and respawn** — kill the stale agent and spawn a fresh one with the same task. Do NOT ping again or wait further.
+  * **Max respawns per task: 2.** If the second respawn also stalls, the Dispatcher must skip the reviewer and log the gap in the final report.
 * **Completion gate:** The Dispatcher must verify that **all reviewer reports have been submitted** before initiating the Cross-Review Phase. If any report is missing, the Dispatcher blocks progression and flags the incomplete reviewer.
 * **Arbitration:** During the Cross-Review Phase, if reviewers cannot reach consensus on a disputed finding, the Dispatcher makes the **final call** on severity and confirmation status with written reasoning.
-* **Report generation:** Once the Cross-Review Phase is complete and the final joint report is assembled, the Dispatcher must write **all reports** as a single Markdown file into `QA/`. The filename format is `{task-name}-phase-{N}-{YYYY-MM-DD}.md` (task name lowercased, spaces/special chars replaced with `-`, `{N}` is the current phase/run number — check existing files in `QA/` to determine the next number). If the file already exists, append an increment: `-2`, `-3`, etc. Never overwrite existing reports. The file must contain:
+* **Report generation:** Once the Cross-Review Phase is complete and the final joint report is assembled, the Dispatcher must write **all reports** as a single Markdown file into `QA/`. The filename format is `QA-{task-name}-phase-{N}-{YYYY-MM-DD}.md` (task name lowercased, spaces/special chars replaced with `-`, `{N}` is the current phase/run number — check existing files in `QA/` to determine the next number). If the file already exists, append an increment: `-2`, `-3`, etc. Never overwrite existing reports. The file must contain:
   1. **Joint Audit Report** (the final consolidated table with confirmed/unconfirmed/rejected issues, fix order, and summary)
   2. **Individual Reviewer Reports** — each reviewer's original independent report, in full, under a clearly labeled `## {Reviewer Name} — Individual Report` heading
 
