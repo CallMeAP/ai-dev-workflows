@@ -262,7 +262,7 @@ After **all tasks** in the scope are completed:
 1. Dispatcher collects all reports, plans, verdicts, and revision histories from the full run
 2. Dispatcher spawns the **Process Reviewer** with this complete history
 3. Process Reviewer produces a retrospective report
-4. Dispatcher writes the retrospective to `reports/process-retrospective-{YYYY-MM-DD}.md` (separate from the spec — the retrospective is about the workflow, not the feature). If the file already exists, append an increment: `-2`, `-3`, etc. Never overwrite existing reports.
+4. Dispatcher writes the retrospective to `retrospectives/process-retrospective-phase-{N}-{YYYY-MM-DD}.md` where `{N}` is the current phase/run number (check existing files in `retrospectives/` to determine the next number). If the file already exists, append an increment: `-2`, `-3`, etc. Never overwrite existing retrospectives.
 
 ---
 

@@ -118,7 +118,7 @@ Use a **3-agent system** with strict role separation.
 4. Dispatcher reviews report, assigns files one-by-one to **Refactorer**
 5. Refactorer fixes violations, reports back
 6. Dispatcher marks file as done, assigns next file
-7. After all files done, Dispatcher produces final summary and writes it to `reports/refactor-style-{YYYY-MM-DD}.md`. If the file already exists, append an increment: `-2`, `-3`, etc. Never overwrite existing reports.
+7. After all files done, Dispatcher prints the final summary to the terminal (do NOT write to a file).
 
 **Final summary format:**
 
