@@ -3,9 +3,9 @@ Task: `@SPEC_MD_TASK`
 
 Create a team of agents to implement **`@SPEC_MD_TASK`** defined in **`@SPEC_MD`**.
 
-The team should consist of **four agents with clearly defined roles**.
+The team should consist of **five agents with clearly defined roles**.
 
-> **Important:** You (the root agent receiving this prompt) **are** the Dispatcher. Do NOT spawn a separate agent for the Dispatcher role. You coordinate directly and only spawn sub-agents for the Implementer and Reviewers.
+> **Important:** You (the root agent receiving this prompt) **are** the Dispatcher. Do NOT spawn a separate agent for the Dispatcher role. You coordinate directly and only spawn sub-agents for the Implementer, Reviewers, and Process Reviewer.
 
 ## 1. Dispatcher Agent (Coordinator) — YOU, the root agent
 
@@ -52,7 +52,15 @@ The team should consist of **four agents with clearly defined roles**.
 4. Submit plan to **Dispatcher for approval**
 5. **Wait for Dispatcher approval** (if plan is rejected, revise and resubmit — see Workflow Loop)
 6. Implement changes
-7. Provide **change summary**:
+7. **Create/update feature documentation** at `docs/{Feature}.md` (one file per feature/module/service):
+   * **Overview** — what the feature does and why it exists
+   * **Architecture** — high-level flow, involved services/components and how they interact
+   * **API Contracts** — endpoints, request/response shapes, status codes
+   * **Usage Examples** — typical request/response examples, key scenarios
+   * **Business Rules** — domain logic, validation rules, edge cases
+   * **Dependencies** — external services, other modules, config requirements
+   * If a `docs/{Feature}.md` already exists, **update** it — don't create a duplicate
+8. Provide **change summary**:
    * files modified
    * key decisions
    * assumptions
@@ -94,6 +102,7 @@ Checks:
 * code quality and maintainability
 * **`CLAUDE.md` convention compliance** (naming, patterns, field usage, LINQ style, etc.)
 * **service implementation coding style** (see checklist below)
+* **documentation quality** (see documentation checklist below)
 * security and reliability
 * architectural issues
 * edge cases and risks
@@ -110,11 +119,20 @@ Checks:
 * Correct exception types (`BrokernetServiceNotFoundException`, `BrokernetServiceException`, `BrokerException`)
 * `QueryAllAsNoTracking()` for reads, `QueryAll()` for writes
 
+**Documentation Checklist (`docs/{Feature}.md`):**
+
+* File exists for the implemented feature/module/service
+* Contains: overview, architecture, API contracts, usage examples, business rules, dependencies
+* Accurate — matches what the code actually does (no stale/copy-paste content)
+* Updated (not duplicated) if the file already existed
+* Describes **what** and **why**, not **how**
+* German used for business domain terms, consistent with codebase style
+
 **Review Output Format:**
 
 | # | Issue | Severity | Category | Fix Required |
 |---|-------|----------|----------|--------------|
-| 1 | Description | low / medium / high | correctness / spec / quality / security / convention / coding-style / edge-case | Actionable fix description |
+| 1 | Description | low / medium / high | correctness / spec / quality / security / convention / coding-style / documentation / edge-case | Actionable fix description |
 
 **Verdict:** **APPROVED** or **REVISIONS REQUIRED**
 
@@ -134,6 +152,7 @@ Checks:
 * code quality and maintainability
 * **`CLAUDE.md` convention compliance** (naming, patterns, field usage, LINQ style, etc.)
 * **service implementation coding style** (see checklist below)
+* **documentation quality** (see documentation checklist below)
 * security and reliability
 * architectural issues
 * edge cases and risks
@@ -150,11 +169,20 @@ Checks:
 * Correct exception types (`BrokernetServiceNotFoundException`, `BrokernetServiceException`, `BrokerException`)
 * `QueryAllAsNoTracking()` for reads, `QueryAll()` for writes
 
+**Documentation Checklist (`docs/{Feature}.md`):**
+
+* File exists for the implemented feature/module/service
+* Contains: overview, architecture, API contracts, usage examples, business rules, dependencies
+* Accurate — matches what the code actually does (no stale/copy-paste content)
+* Updated (not duplicated) if the file already existed
+* Describes **what** and **why**, not **how**
+* German used for business domain terms, consistent with codebase style
+
 **Review Output Format:**
 
 | # | Issue | Severity | Category | Fix Required |
 |---|-------|----------|----------|--------------|
-| 1 | Description | low / medium / high | correctness / spec / quality / security / convention / coding-style / edge-case | Actionable fix description |
+| 1 | Description | low / medium / high | correctness / spec / quality / security / convention / coding-style / documentation / edge-case | Actionable fix description |
 
 **Verdict:** **APPROVED** or **REVISIONS REQUIRED**
 
@@ -166,6 +194,55 @@ Checks:
 
 ---
 
+## 5. Process Reviewer Agent (Retrospective)
+
+Runs **once after all tasks are completed** — not per task. Reviews the entire workflow history and produces a retrospective.
+
+**Input:** The Dispatcher provides the Process Reviewer with all accumulated reports from the full run:
+* Task breakdowns and scope decisions
+* Implementer plans (approved and rejected)
+* All code review reports (A and B, all rounds)
+* Merged verdicts and revision histories
+* Blocker escalations (if any)
+* Known issues (if any)
+
+**Analyzes:**
+
+* **Workflow efficiency** — unnecessary steps, redundant back-and-forth, bottlenecks
+* **Plan quality** — were plans rejected often? Why? Pattern in rejections?
+* **Review consistency** — did A and B frequently disagree? Were severity ratings calibrated?
+* **Scope accuracy** — were tasks well-scoped or did blockers/re-scopes happen frequently?
+* **Communication clarity** — were handoffs clear? Did the Implementer have enough context?
+* **Documentation quality** — were `docs/` files useful or boilerplate?
+
+**Output Format:**
+
+```markdown
+## Process Retrospective
+
+### Workflow Efficiency
+- [findings]
+
+### Recurring Patterns
+- [patterns across tasks — e.g. "plan rejections always due to missing X"]
+
+### Recommendations
+| # | Recommendation | Impact | Rationale |
+|---|---------------|--------|-----------|
+| 1 | ... | high / medium / low | ... |
+
+### Metrics
+- Tasks completed: X
+- Plan revision rounds: X total (avg Y per task)
+- Code review rounds: X total (avg Y per task)
+- Blockers escalated: X
+- Known issues accepted: X
+```
+
+> **Why a separate agent?** Individual agents lack cross-task perspective. The Process Reviewer sees the full picture and can identify systemic improvements that no per-task review can catch.
+
+---
+
 # Severity Rubric
 
 All reviewers must use this shared rubric when assigning severity:
@@ -174,7 +251,7 @@ All reviewers must use this shared rubric when assigning severity:
 |----------|-----------|----------|
 | **high** | Data loss, security breach, crash, or core spec requirement completely missing/broken | SQL injection, unhandled null causing 500, entire feature not implemented |
 | **medium** | Incorrect behavior, spec deviation, or degraded performance that affects users | Wrong business logic output, N+1 queries on hot paths, missing auth check on non-critical endpoint |
-| **low** | Minor issues, style violations, edge cases unlikely to occur in practice | Missing `AsNoTracking()` on low-traffic read, naming convention mismatch, `CLAUDE.md` style violation |
+| **low** | Minor issues, style violations, edge cases unlikely to occur in practice | Missing `AsNoTracking()` on low-traffic read, naming convention mismatch, `CLAUDE.md` style violation, missing docs on simple getter |
 
 ---
 
@@ -201,6 +278,15 @@ For each task in `@SPEC_MD_TASK`:
 **If REVISIONS REQUIRED → Implementer receives merged report, fixes issues → review repeats from step 5**
 
 **Max revision rounds: 3.** If still not approved after 3 rounds, the Reviewers and Dispatcher must jointly decide whether to accept with known issues or escalate. All **accepted known issues** must be logged in a `## Known Issues` section at the bottom of `@SPEC_MD` with: issue description, severity, reason for acceptance, and associated task.
+
+## End-of-Run Retrospective
+
+After **all tasks** in `@SPEC_MD_TASK` are completed:
+
+1. Dispatcher collects all reports, plans, verdicts, and revision histories from the full run
+2. Dispatcher spawns the **Process Reviewer** with this complete history
+3. Process Reviewer produces a retrospective report
+4. Dispatcher appends the retrospective as `## Process Retrospective` at the bottom of `@SPEC_MD`
 
 ---
 
