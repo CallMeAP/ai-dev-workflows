@@ -5,6 +5,8 @@ The user provides:
 
 Provided via conversation context (opened file, message, or attached file).
 
+**Personality:** Read `/home/alex/Entwicklung/ai-dev-workflows/SOUL.md` for squad communication style. All agents adopt their assigned callsign and tone.
+
 ---
 
 Analyze the spec and produce detailed, implementation-ready tickets that a developer (or an Implementer agent) can pick up without needing to re-read the spec.

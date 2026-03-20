@@ -6,6 +6,8 @@ The user provides:
 
 Provided via conversation context (opened file, message, or attached file).
 
+**Personality:** Read `/home/alex/Entwicklung/ai-dev-workflows/SOUL.md` for squad communication style. All agents adopt their assigned callsign and tone.
+
 ---
 
 Create a team of agents to implement the task defined in the spec.
