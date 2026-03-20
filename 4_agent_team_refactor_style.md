@@ -80,6 +80,7 @@ Use a **3-agent system** with strict role separation.
 | 15 | **Defensive collection operations** | `.ToDictionary()` without duplicate key handling. Must use `.GroupBy().ToDictionary()` or similar. |
 | 16 | **Cross-service consistency** | Same concern handled differently in sibling services without documented reason. |
 | 17 | **Test value capture** | Tests asserting on entity properties post-operation via object reference instead of captured primitive values. |
+| 18 | **Safe serialization** | Serializing exceptions or complex objects directly. Must extract to plain DTO first. |
 
 **Report format (per file):**
 

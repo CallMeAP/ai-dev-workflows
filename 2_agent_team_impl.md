@@ -126,6 +126,7 @@ The Implementer must read the reference codebase at `/home/alex/Entwicklung/bpp/
 | 15 | **Defensive collection operations** | `.ToDictionary()` crashes on duplicate keys. Use `.GroupBy().ToDictionary(g => g.Key, g => g.First())` or check for duplicates first. Same applies to other collection methods that throw on duplicates. |
 | 16 | **Cross-service consistency** | When implementing logic that also exists in a sibling service (e.g. email uniqueness, dedup, fallback chains), check how the sibling handles it and align behavior. Inconsistent handling of the same concern across services = finding. |
 | 17 | **Test value capture** | In tests, capture primitive values (strings, numbers) before the service call, then assert on the captured value — not on entity properties post-operation. Services may mutate entity properties after the operation (e.g. nulling fields), causing assertions via object reference to fail silently. |
+| 18 | **Safe serialization** | Never serialize exceptions or complex objects directly (e.g. `JsonSerializer.Serialize(exception)`). Exceptions contain non-serializable members (`TargetSite`, inner exceptions) that crash at runtime. Extract relevant fields (message, stack trace) into a plain DTO before serializing. |
 
 ---
 

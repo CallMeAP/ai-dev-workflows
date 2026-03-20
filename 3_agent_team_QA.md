@@ -202,6 +202,7 @@ Focus: **Full `CLAUDE.md` compliance and service implementation coding style** â
 | 15 | **Defensive collection operations** | `.ToDictionary()` without duplicate key handling. Must use `.GroupBy().ToDictionary()` or similar. |
 | 16 | **Cross-service consistency** | Same concern (e.g. email uniqueness, dedup) handled differently in sibling services without documented reason. |
 | 17 | **Test value capture** | Tests asserting on entity properties post-operation via object reference instead of captured primitive values. Service mutations propagate through references and break assertions silently. |
+| 18 | **Safe serialization** | Serializing exceptions or complex objects directly (`JsonSerializer.Serialize(exception)`). Exceptions have non-serializable members that crash at runtime. Must extract to plain DTO first. |
 
 > **How to review:** For `CLAUDE.md` checks, compare each in-scope file against the relevant convention section. For service style, read the corresponding reference file(s) from bpp-file, then compare structure and style. Report **concrete line numbers** and a **short suggested fix** for each violation. If a file has zero violations, report it as **CLEAN** â€” do not skip it.
 
