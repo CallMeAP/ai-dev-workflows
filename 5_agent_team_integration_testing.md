@@ -10,7 +10,7 @@ Provided via conversation context (opened file, message, or attached file).
 
 ---
 
-Create a team of agents to write **integration tests** that call external APIs over HTTP and verify responses and side effects.
+Create a team of agents to write **end-to-end integration tests** that exercise the full request pipeline: **your controllers → services → real external VERA API**. Tests spin up the app via `WebApplicationFactory<Program>`, call your own endpoints over HTTP, and validate the full response chain. The VERA API serves as **source of truth** — your DTOs, mappings, and service logic must match what VERA actually returns.
 
 The team should consist of **four agents with clearly defined roles**.
 
@@ -23,10 +23,10 @@ The team should consist of **four agents with clearly defined roles**.
 
 * Read the test requirements from the user prompt.
 * **Check for prior hotfix reports** in `/home/alex/Entwicklung/ai-dev-workflows/memory/6_hotfix/` — if this is a re-run after hotfixes, identify which `[Ignore]`'d tests should now be re-enabled and re-verified.
-* Analyze the existing API client code, connector services, and external API contracts in the codebase.
+* Analyze the existing controllers, services, DTOs, mappings, and external VERA API contracts in the codebase.
 * Before assigning any work, produce:
-  1. **API Manifest** — list of external APIs/endpoints involved, their auth mechanism, request/response shapes.
-  2. **Test Case Breakdown** — ordered list of test cases with dependencies, tracked as a done checklist. Each test case should be **~1 logical scenario** (e.g. one endpoint success + error).
+  1. **Endpoint Manifest** — list of all non-debug controllers and their endpoints (routes, HTTP methods, request/response DTOs). Include the full chain: Controller → Service → VERA API call.
+  2. **Test Case Breakdown** — ordered list of test cases with dependencies, tracked as a done checklist. Each test case should be **~1 logical scenario** (e.g. one endpoint success + error). **Phase 1 (smoke):** Does each endpoint run without crashing? **Phase 2 (correctness):** Are mappings, DTOs, and response shapes correct vs. what VERA actually returns?
 * Assign work to Test Architect first, then Test Implementer.
 * **Approve the Test Architect's design** before greenlighting implementation.
 * Track progress on the done checklist.
@@ -60,27 +60,34 @@ Explore the codebase to design the integration test infrastructure. The Test Imp
 
 **Must explore:**
 
-1. **External API clients** — HTTP client factories, connector services, generated client code (`*ConnectorClient.g.cs`)
-2. **API contracts** — request/response DTOs, endpoints, HTTP methods, auth headers
-3. **Config structure** — how API URLs, credentials, and feature toggles are configured in `appsettings.json`
-4. **Existing test patterns** — NUnit setup, naming conventions, helper methods, base classes
-5. **Auth mechanism** — JWT, API key, cookie — how the app authenticates with external APIs
-6. **Rate limits / API constraints** — check if the external API has documented rate limits, throttling, or fair-use policies. Design test infrastructure to respect them.
+1. **Controllers** — all non-debug controllers, their routes, HTTP methods, request/response DTOs, and which services they call
+2. **Services** — the service layer behind each controller — what VERA API calls they make, how they map responses
+3. **DTOs & Mappings** — your response DTOs, AutoMapper profiles, and how they map from VERA's raw response to your API's response shape
+4. **External API clients** — HTTP client factories, connector services, generated client code (`*ConnectorClient.g.cs`)
+5. **App startup (`Program.cs`)** — DI registration, middleware pipeline, auth configuration — needed to configure `WebApplicationFactory<Program>`
+6. **Config structure** — how API URLs, credentials, and feature toggles are configured in `appsettings.json`
+7. **Existing test patterns** — NUnit setup, naming conventions, helper methods, base classes
+8. **Auth mechanism** — how your app authenticates incoming requests (JWT middleware, API key) AND how it authenticates outbound calls to VERA (client cert, bearer token)
+9. **Rate limits / API constraints** — check if the VERA API has documented rate limits, throttling, or fair-use policies. Design test infrastructure to respect them.
 
 **Produces:**
 
 1. **Test infrastructure design:**
-   * Base test class with HTTP client setup, auth, common helpers
-   * `appsettings.Test.json` structure (gitignored, CI/CD overrides via env vars)
-   * NuGet packages needed (if any beyond existing)
+   * `WebApplicationFactory<Program>` setup — how to spin up the app with real VERA connectivity but test-appropriate config
+   * Base test class with `HttpClient` from the factory, auth bypass/setup for incoming requests, common helpers
+   * `appsettings.Test.json` structure (gitignored, CI/CD overrides via env vars) — must include real VERA API credentials
+   * NuGet packages needed (`Microsoft.AspNetCore.Mvc.Testing`, etc.)
+   * Auth strategy for tests: how to authenticate requests to your own endpoints (bypass JWT middleware or use test tokens)
    * Test data setup/teardown strategy
 
-2. **Test case specifications** (per endpoint/flow):
-   * Endpoint, HTTP method, request shape
-   * Expected response (status code, body structure)
-   * Edge cases: auth failure, timeout, invalid input, not found
-   * Test data prerequisites
-   * Cleanup requirements
+2. **Test case specifications** (per controller endpoint):
+   * Your endpoint route + HTTP method
+   * Full chain: Controller → Service → VERA API call
+   * Expected response (status code, body structure from your DTOs)
+   * **Smoke check:** Does it return 200 without crashing?
+   * **Correctness check:** Compare your DTO response fields against VERA's raw API response — are all fields mapped? Are types correct? Are nullable fields handled?
+   * Edge cases: invalid input, not found, VERA API error
+   * Test data prerequisites (e.g., known VERA customer IDs for testing)
 
 **Rules**
 
@@ -136,7 +143,7 @@ Implement integration test infrastructure and test cases as designed by the Test
 
 | # | Rule | What to look for |
 |---|------|-----------------|
-| 1 | **Real HTTP calls** | Tests must call actual external APIs — no mocking of HttpClient or HTTP handlers. |
+| 1 | **Full-stack via WebApplicationFactory** | Tests must call your own controller endpoints via `HttpClient` from `WebApplicationFactory<Program>`. The app's services then call the real VERA API. No mocking of HttpClient, services, or HTTP handlers. |
 | 2 | **Config via appsettings.Test.json** | API URLs, credentials, and timeouts in `appsettings.Test.json` (gitignored). CI/CD overrides via environment variables. |
 | 3 | **Test isolation** | Each test sets up and cleans up its own test data. No test depends on another test's side effects. No test execution order dependency. |
 | 4 | **Configurable timeouts** | All external API calls must have configurable timeouts. Tests must not hang indefinitely on network issues. |
@@ -151,6 +158,9 @@ Implement integration test infrastructure and test cases as designed by the Test
 | 13 | **Cleanup on failure** | Use `[TearDown]` (not just `[OneTimeTearDown]`) so cleanup runs regardless of test outcome. Never rely on test success for data cleanup — failed tests must not leave orphaned test data. |
 | 14 | **Sequential execution** | All integration test fixtures must use `[NonParallelizable]` to prevent concurrent API calls against the VERA API. Never run multiple integration tests in parallel — the external API is a shared resource, not a load-test target. |
 | 15 | **Configurable call delay** | The base test class must include a configurable delay between API calls (default: 500ms), read from `appsettings.Test.json` (`"IntegrationTests:ApiCallDelayMs": 500`). This prevents rapid-fire requests even in sequential mode. |
+| 16 | **Two-phase testing** | **Phase 1 (smoke):** Call each endpoint, assert it returns a success status code (2xx) and doesn't crash. **Phase 2 (correctness):** Validate response body — all DTO fields populated correctly, types match, nullable fields handled, no silent data loss from bad mappings. Phase 1 tests must all pass before Phase 2 begins. |
+| 17 | **VERA as source of truth** | When a test reveals a mismatch between your DTO/mapping and what VERA actually returns, the VERA response is correct. Flag the mismatch as a bug in your code (mapping, DTO, service logic), not a test issue. Log the raw VERA response and your mapped response for comparison. |
+| 18 | **Mapping completeness** | For each endpoint, verify that **every field** returned by VERA is either (a) mapped to your response DTO, or (b) intentionally excluded with a documented reason. Silently dropped fields = bug. |
 
 **Also follows general style rules #1-18 from `2_agent_team_impl.md`.**
 
@@ -164,9 +174,10 @@ Performs a **single independent review** of the integration tests.
 
 **Checks:**
 
-* Tests actually call external APIs (no mocked HTTP)
-* Response assertions are meaningful (not just `!= null`)
-* Error scenarios covered (auth, timeout, 404, 400)
+* Tests call your own endpoints via `WebApplicationFactory` (full stack, no mocked services)
+* Response assertions are meaningful (not just `!= null` — check actual field values, types, completeness)
+* **Mapping completeness** — every VERA field is accounted for in response DTOs (mapped or explicitly excluded)
+* Error scenarios covered (invalid input, 404, 400)
 * Test isolation — no order dependency, proper cleanup
 * No hardcoded test data or credentials
 * Config is CI/CD ready (env var overrides work)
@@ -190,8 +201,8 @@ Performs a **single independent review** of the integration tests.
 
 | Severity | Definition | Examples |
 |----------|-----------|----------|
-| **high** | Test gives false confidence, misses critical failures, or leaks credentials | Assert only status code but not response body, hardcoded API key, test passes even when API is down |
-| **medium** | Missing error coverage, flaky test design, or CI/CD incompatibility | No timeout handling, test depends on execution order, hardcoded test IDs |
+| **high** | Test gives false confidence, misses critical failures, or leaks credentials | Assert only status code but not response body, hardcoded API key, test passes even when VERA is down, silently dropped VERA fields not caught |
+| **medium** | Missing error coverage, flaky test design, mapping gap, or CI/CD incompatibility | No timeout handling, test depends on execution order, hardcoded test IDs, DTO field mapped with wrong type |
 | **low** | Style, naming, minor assertion improvements | Missing `[Category]`, assertion could be more specific, naming mismatch |
 
 **NOT a finding (do not flag):**
@@ -248,6 +259,14 @@ If `/home/alex/Entwicklung/ai-dev-workflows/memory/6_hotfix/` contains reports f
 - Ignored (pending hotfix): X
 - Ignored (timeout): X
 
+### Smoke Results (Phase 1)
+| # | Endpoint | Status | Notes |
+|---|----------|--------|-------|
+
+### Mapping Findings (Phase 2)
+| # | Endpoint | DTO/Field | Issue | VERA Returns | Our DTO Has |
+|---|----------|-----------|-------|-------------|-------------|
+
 ### Bugs Fixed Inline
 | # | File | Bug Description | How Integration Test Caught It |
 |---|------|----------------|-------------------------------|
@@ -274,11 +293,13 @@ If `/home/alex/Entwicklung/ai-dev-workflows/memory/6_hotfix/` contains reports f
 
 # Objective
 
-Implement integration tests for the specified API endpoints/flows with:
+Implement end-to-end integration tests for the specified controllers/flows with:
 
-* real external API calls (no mocking)
+* full-stack testing via `WebApplicationFactory` (Controller → Service → real VERA API)
+* **Phase 1:** Smoke tests — every endpoint runs without crashing
+* **Phase 2:** Correctness — DTOs, mappings, and response shapes match VERA's actual responses
+* VERA API as source of truth for mapping validation
 * CI/CD ready configuration
-* comprehensive error scenario coverage
 * test isolation and independence
 
 **All agents must consult the project's `CLAUDE.md` for general coding guidelines and conventions.**

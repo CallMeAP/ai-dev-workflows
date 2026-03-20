@@ -13,6 +13,8 @@ Provided via conversation context (opened file, message, or attached file).
 
 Lightweight hotfix team for targeted bug fixes, small changes, and emergency patches. No tickets, no dual review, no architect. Fast in, fast out.
 
+**Integration test context:** Bugs escalated from the integration testing team (workflow 5) typically involve the full request chain: Controller → Service → VERA API. Common bug types: wrong DTO mapping, missing fields, type mismatches, incorrect VERA API response handling. The VERA API response is always the **source of truth** — if your code doesn't match what VERA returns, your code is wrong.
+
 The team should consist of **three agents with clearly defined roles**.
 
 > **Important:** You (the root agent receiving this prompt) **are** the Dispatcher. Do NOT spawn a separate agent for the Dispatcher role. You coordinate directly and only spawn sub-agents for the Hotfix Implementer and Hotfix Reviewer.
@@ -164,6 +166,10 @@ What was wrong and why.
 ### Fix Applied
 | # | File | Change |
 |---|------|--------|
+
+### Mapping Fixes (if applicable)
+| # | DTO/Field | Was | Should Be (per VERA) |
+|---|-----------|-----|---------------------|
 
 ### Tests
 - Unit tests added/updated: [list]
