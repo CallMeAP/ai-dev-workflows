@@ -47,6 +47,7 @@ Use an **8-agent system** with strict role separation.
 * Only coordinates and manages the review process.
 * **Heartbeat:** While waiting for sub-agents, print a short status message (e.g. `"⏳ Waiting for Security Reviewer..."`) every ~15 seconds to keep the conversation alive. Never go silent while waiting.
 * **Stale agent recovery:** If a sub-agent has not reported back within ~60 seconds, check if it has made any file changes (e.g. via `git status`). If it has made changes, continue waiting. If no changes, terminate it and spawn a fresh agent with the same task.
+* **Sub-agent heartbeat:** All sub-agents must print a short progress message (e.g. `"Working on: reviewing security of endpoint X..."`) every ~30 seconds during long-running tasks. This lets the Dispatcher detect stalls without pinging.
 * **Completion gate:** The Dispatcher must verify that **all reviewer reports have been submitted** before initiating the Cross-Review Phase. If any report is missing, the Dispatcher blocks progression and flags the incomplete reviewer.
 * **Arbitration:** During the Cross-Review Phase, if reviewers cannot reach consensus on a disputed finding, the Dispatcher makes the **final call** on severity and confirmation status with written reasoning.
 * **Report generation:** Once the Cross-Review Phase is complete and the final joint report is assembled, the Dispatcher must write **all reports** as a single Markdown file into `QA/`. The filename format is `{task-name}-phase-{N}-{YYYY-MM-DD}.md` (task name lowercased, spaces/special chars replaced with `-`, `{N}` is the current phase/run number — check existing files in `QA/` to determine the next number). If the file already exists, append an increment: `-2`, `-3`, etc. Never overwrite existing reports. The file must contain:
@@ -181,6 +182,8 @@ Focus: **Full `CLAUDE.md` compliance and service implementation coding style** �
 | 7 | **Logging** | `Debug.WriteLine`, raw `_logger.Debug()` instead of `CommonLoggerUtil.LogDebug` / `LogDebugAsJson`. |
 | 8 | **Error handling** | Wrong exception type — must use `BrokernetServiceNotFoundException` (404), `BrokernetServiceException` (business), `BrokerException` (user-facing). |
 | 9 | **Repository queries** | `QueryAllAsNoTracking()` for reads, `QueryAll()` for writes. Mixed up = finding. |
+| 10 | **Validate before mutate** | All validation and early-return checks must come before any persistent state changes. Never modify entity state before confirming the operation should proceed. |
+| 11 | **EF tracking verification** | Every entity that is mutated or saved must be loaded via a tracked query (`QueryAll()`), not `QueryAllAsNoTracking()`. This is a common source of silent data corruption. |
 
 > **How to review:** For `CLAUDE.md` checks, compare each in-scope file against the relevant convention section. For service style, read the corresponding reference file(s) from bpp-file, then compare structure and style. Report **concrete line numbers** and a **short suggested fix** for each violation. If a file has zero violations, report it as **CLEAN** — do not skip it.
 

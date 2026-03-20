@@ -33,6 +33,7 @@ Use a **3-agent system** with strict role separation.
 * Only coordinates, validates, and delegates.
 * **Heartbeat:** While waiting for a sub-agent, print a short status message (e.g. `"⏳ Waiting for Codebase Analyst..."`) every ~15 seconds to keep the conversation alive. Never go silent while waiting.
 * **Stale agent recovery:** If a sub-agent has not reported back within ~60 seconds, check if it has made any file changes (e.g. via `git status`). If it has made changes, continue waiting. If no changes, terminate it and spawn a fresh agent with the same task.
+* **Sub-agent heartbeat:** All sub-agents must print a short progress message (e.g. `"Working on: analyzing entity relationships..."`) every ~30 seconds during long-running tasks. This lets the Dispatcher detect stalls without pinging.
 
 ---
 

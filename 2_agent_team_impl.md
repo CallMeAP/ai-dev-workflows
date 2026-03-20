@@ -36,6 +36,7 @@ The team should consist of **five agents with clearly defined roles**.
 * Only coordinates, validates plans, and delegates work.
 * **Heartbeat:** While waiting for a sub-agent, print a short status message (e.g. `"⏳ Waiting for Implementer..."`) every ~15 seconds to keep the conversation alive. Never go silent while waiting.
 * **Stale agent recovery:** If a sub-agent has not reported back within ~60 seconds, check if it has made any file changes (e.g. via `git status`). If it has made changes, continue waiting. If no changes, terminate it and spawn a fresh agent with the same task.
+* **Sub-agent heartbeat:** All sub-agents must print a short progress message (e.g. `"Working on: implementing service method..."`) every ~30 seconds during long-running tasks. This lets the Dispatcher detect stalls without pinging.
 
 ---
 
@@ -105,6 +106,8 @@ The Implementer must read the reference codebase at `/home/alex/Entwicklung/bpp/
 | 7 | **Logging** | `Debug.WriteLine`, raw `_logger.Debug()` instead of `CommonLoggerUtil.LogDebug` / `LogDebugAsJson`. |
 | 8 | **Error handling** | Wrong exception type — must use `BrokernetServiceNotFoundException` (404), `BrokernetServiceException` (business), `BrokerException` (user-facing). |
 | 9 | **Repository queries** | `QueryAllAsNoTracking()` for reads, `QueryAll()` for writes. Mixed up = violation. |
+| 10 | **Validate before mutate** | All validation and early-return checks must come before any persistent state changes. Never modify entity state before confirming the operation should proceed. |
+| 11 | **EF tracking verification** | Before submitting, verify every entity that is mutated or saved was loaded via a tracked query (`QueryAll()`), not `QueryAllAsNoTracking()`. This is a common source of silent data corruption. |
 
 ---
 
@@ -249,7 +252,9 @@ For each task in the scope:
 * Conflicting severity on same issue → Dispatcher decides final severity
 
 **If APPROVED → Dispatcher marks task as completed in the spec → next task**
-**If REVISIONS REQUIRED → Implementer receives merged report, fixes issues → review repeats from step 5**
+**If REVISIONS REQUIRED:**
+* **Trivial fixes** (one-line changes, obvious typos, missing attribute) → Dispatcher may apply the fix directly without spawning a new Implementer agent, then re-submit to review.
+* **Non-trivial fixes** → Implementer receives merged report, fixes issues → review repeats from step 5.
 
 **Re-review scope (rounds 2+):** Reviewers focus on the **flagged issues** and check for **regressions** in surrounding code. No need to re-review the full implementation from scratch.
 

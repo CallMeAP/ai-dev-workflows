@@ -31,6 +31,7 @@ Use a **3-agent system** with strict role separation.
 * Only coordinates and delegates.
 * **Heartbeat:** While waiting for a sub-agent, print a short status message (e.g. `"⏳ Waiting for Refactorer..."`) every ~15 seconds to keep the conversation alive. Never go silent while waiting.
 * **Stale agent recovery:** If a sub-agent has not reported back within ~60 seconds, check if it has made any file changes (e.g. via `git status`). If it has made changes, continue waiting. If no changes, terminate it and spawn a fresh agent with the same task.
+* **Sub-agent heartbeat:** All sub-agents must print a short progress message (e.g. `"Working on: refactoring guard clauses..."`) every ~30 seconds during long-running tasks. This lets the Dispatcher detect stalls without pinging.
 
 ---
 
@@ -61,6 +62,8 @@ Use a **3-agent system** with strict role separation.
 | 7 | **Logging** | `Debug.WriteLine`, raw `_logger.Debug()` instead of `CommonLoggerUtil.LogDebug` / `LogDebugAsJson`. |
 | 8 | **Error handling** | Wrong exception type — must use `BrokernetServiceNotFoundException` (404), `BrokernetServiceException` (business), `BrokerException` (user-facing). |
 | 9 | **Repository queries** | `QueryAllAsNoTracking()` for reads, `QueryAll()` for writes. Mixed up = finding. |
+| 10 | **Validate before mutate** | All validation and early-return checks must come before any persistent state changes. Never modify entity state before confirming the operation should proceed. |
+| 11 | **EF tracking verification** | Every entity that is mutated or saved must be loaded via a tracked query (`QueryAll()`), not `QueryAllAsNoTracking()`. This is a common source of silent data corruption. |
 
 **Report format (per file):**
 
