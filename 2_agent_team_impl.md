@@ -119,6 +119,11 @@ The Implementer must read the reference codebase at `/home/alex/Entwicklung/bpp/
 | 9 | **Repository queries** | `QueryAllAsNoTracking()` for reads, `QueryAll()` for writes. Mixed up = violation. |
 | 10 | **Validate before mutate** | All validation and early-return checks must come before any persistent state changes. Never modify entity state before confirming the operation should proceed. |
 | 11 | **EF tracking verification** | Before submitting, verify every entity that is mutated or saved was loaded via a tracked query (`QueryAll()`), not `QueryAllAsNoTracking()`. This is a common source of silent data corruption. |
+| 12 | **PII masking in logs** | Never log email addresses, phone numbers, or other PII in plaintext. Use masked/redacted values in log messages (e.g. `a***@example.com`). GDPR violation if debug logs reach centralized logging. |
+| 13 | **Reuse existing utilities** | Before writing a new helper/utility method, check if an identical or similar one already exists in the codebase or sibling services. Duplicate static methods across services = violation. |
+| 14 | **Fetch before clear** | When replacing collections (addresses, contacts, etc.), fetch the new data from the external API FIRST, then clear+replace only after the fetch succeeds. Never clear local state before confirming the replacement data is available. |
+| 15 | **Defensive collection operations** | `.ToDictionary()` crashes on duplicate keys. Use `.GroupBy().ToDictionary(g => g.Key, g => g.First())` or check for duplicates first. Same applies to other collection methods that throw on duplicates. |
+| 16 | **Cross-service consistency** | When implementing logic that also exists in a sibling service (e.g. email uniqueness, dedup, fallback chains), check how the sibling handles it and align behavior. Inconsistent handling of the same concern across services = finding. |
 
 ---
 
@@ -130,7 +135,7 @@ Checks:
 
 * correctness and logical soundness
 * completeness against the spec
-* adherence to the Dispatcher's approved plan
+* adherence to the Dispatcher's approved plan (judge **logical completeness**, not step count or naming — the plan is conceptual, not a rigid script)
 * code quality and maintainability
 * **`CLAUDE.md` convention compliance** (naming, patterns, field usage, LINQ style, etc.)
 * **service implementation coding style** (see checklist below)
@@ -241,6 +246,13 @@ All reviewers must use this shared rubric when assigning severity:
 | **medium** | Incorrect behavior, spec deviation, or degraded performance that affects users | Wrong business logic output, N+1 queries on hot paths, missing auth check on non-critical endpoint |
 | **low** | Minor issues, style violations, edge cases unlikely to occur in practice | Missing `AsNoTracking()` on low-traffic read, naming convention mismatch, `CLAUDE.md` style violation, missing docs on simple getter |
 
+**NOT a finding (do not flag):**
+- Plan says 7 steps but implementation has 9 — step count mismatches are irrelevant if logic is complete
+- Default `CancellationToken` parameter values — idiomatic C#
+- Minor naming differences between plan and implementation
+- Reordering of steps that doesn't affect behavior
+- Implementation using a different (but correct) approach than the plan described
+
 ---
 
 # Workflow Loop
@@ -254,7 +266,8 @@ For each task in the scope:
 4. Implementer **implements**
    * If Implementer hits a blocker → flags to Dispatcher → Dispatcher re-scopes → back to step 1
 5. Code Reviewer A and B **independently review** (simultaneously, isolated) — Dispatcher provides both the **implementation and the approved plan**
-6. Dispatcher **waits for both reports**, then merges findings
+   * **Single-reviewer shortcut:** For low-blast-radius tasks (test-only, docs-only, config-only), the Dispatcher may assign only **one reviewer** instead of two. This saves a full review cycle with minimal risk.
+6. Dispatcher **waits for both reports** (or single report if shortcut used), then merges findings
 7. Dispatcher passes **merged review report** to Implementer
 
 **Merged verdict logic:**

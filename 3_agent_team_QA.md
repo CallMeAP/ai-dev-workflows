@@ -195,6 +195,11 @@ Focus: **Full `CLAUDE.md` compliance and service implementation coding style** �
 | 9 | **Repository queries** | `QueryAllAsNoTracking()` for reads, `QueryAll()` for writes. Mixed up = finding. |
 | 10 | **Validate before mutate** | All validation and early-return checks must come before any persistent state changes. Never modify entity state before confirming the operation should proceed. |
 | 11 | **EF tracking verification** | Every entity that is mutated or saved must be loaded via a tracked query (`QueryAll()`), not `QueryAllAsNoTracking()`. This is a common source of silent data corruption. |
+| 12 | **PII masking in logs** | Email, phone, or other PII logged in plaintext. Must be masked/redacted. GDPR violation if debug logs reach centralized logging. |
+| 13 | **Reuse existing utilities** | Duplicate static/helper methods across services when an identical one already exists. |
+| 14 | **Fetch before clear** | Collections cleared (`.Clear()`) before replacement data is fetched from external API. API failure leaves empty state. |
+| 15 | **Defensive collection operations** | `.ToDictionary()` without duplicate key handling. Must use `.GroupBy().ToDictionary()` or similar. |
+| 16 | **Cross-service consistency** | Same concern (e.g. email uniqueness, dedup) handled differently in sibling services without documented reason. |
 
 > **How to review:** For `CLAUDE.md` checks, compare each in-scope file against the relevant convention section. For service style, read the corresponding reference file(s) from bpp-file, then compare structure and style. Report **concrete line numbers** and a **short suggested fix** for each violation. If a file has zero violations, report it as **CLEAN** — do not skip it.
 
@@ -236,6 +241,13 @@ All reviewers must use this shared rubric when assigning severity:
 | **high** | Data loss, security breach, crash, or core spec requirement completely missing/broken | SQL injection, unhandled null causing 500, entire feature not implemented |
 | **medium** | Incorrect behavior, spec deviation, or degraded performance that affects users | Wrong business logic output, N+1 queries on hot paths, missing auth check on non-critical endpoint |
 | **low** | Minor issues, style violations, edge cases unlikely to occur in practice | Missing `AsNoTracking()` on low-traffic read, off-by-one on pagination edge case, CLAUDE.md convention violation |
+
+**NOT a finding (do not flag):**
+- Plan says 7 steps but implementation has 9 — step count mismatches are irrelevant if logic is complete
+- Default `CancellationToken` parameter values — idiomatic C#
+- Minor naming differences between plan and implementation
+- Reordering of steps that doesn't affect behavior
+- Implementation using a different (but correct) approach than the plan described
 
 ---
 

@@ -74,6 +74,11 @@ Use a **3-agent system** with strict role separation.
 | 9 | **Repository queries** | `QueryAllAsNoTracking()` for reads, `QueryAll()` for writes. Mixed up = finding. |
 | 10 | **Validate before mutate** | All validation and early-return checks must come before any persistent state changes. Never modify entity state before confirming the operation should proceed. |
 | 11 | **EF tracking verification** | Every entity that is mutated or saved must be loaded via a tracked query (`QueryAll()`), not `QueryAllAsNoTracking()`. This is a common source of silent data corruption. |
+| 12 | **PII masking in logs** | Email, phone, or other PII logged in plaintext. Must be masked/redacted. |
+| 13 | **Reuse existing utilities** | Duplicate static/helper methods across services when an identical one already exists. |
+| 14 | **Fetch before clear** | Collections cleared before replacement data is fetched from external API. |
+| 15 | **Defensive collection operations** | `.ToDictionary()` without duplicate key handling. Must use `.GroupBy().ToDictionary()` or similar. |
+| 16 | **Cross-service consistency** | Same concern handled differently in sibling services without documented reason. |
 
 **Report format (per file):**
 
