@@ -77,14 +77,14 @@ The team should consist of **five agents with clearly defined roles**.
    * Nullable reference type warnings — fix with proper null checks or explicit nullability
    * Any other compiler/analyzer warnings — resolve, do not suppress
 8. **Run tests** — run `dotnet test` (if tests exist) and fix any failures before proceeding
-9. **Create/update feature documentation** at `docs/{Feature}.md` (one file per feature/module/service):
+9. **Create/update feature documentation** at `/home/alex/Entwicklung/ai-dev-workflows/memory/2_docs/{Feature}.md` (one file per feature/module/service):
    * **Overview** — what the feature does and why it exists
    * **Architecture** — high-level flow, involved services/components and how they interact
    * **API Contracts** — endpoints, request/response shapes, status codes
    * **Usage Examples** — typical request/response examples, key scenarios
    * **Business Rules** — domain logic, validation rules, edge cases
    * **Dependencies** — external services, other modules, config requirements
-   * If a `docs/{Feature}.md` already exists, **update** it — don't create a duplicate
+   * If a `/home/alex/Entwicklung/ai-dev-workflows/memory/2_docs/{Feature}.md` already exists, **update** it — don't create a duplicate
 10. Provide **change summary**:
    * files modified
    * key decisions
@@ -148,7 +148,7 @@ Checks:
 * Correct exception types (`BrokernetServiceNotFoundException`, `BrokernetServiceException`, `BrokerException`)
 * `QueryAllAsNoTracking()` for reads, `QueryAll()` for writes
 
-**Documentation Checklist (`docs/{Feature}.md`):**
+**Documentation Checklist (`/home/alex/Entwicklung/ai-dev-workflows/memory/2_docs/{Feature}.md`):**
 
 * File exists for the implemented feature/module/service
 * Contains: overview, architecture, API contracts, usage examples, business rules, dependencies
@@ -198,7 +198,7 @@ Runs **once after all tasks are completed** — not per task. Reviews the entire
 * **Review consistency** — did A and B frequently disagree? Were severity ratings calibrated?
 * **Scope accuracy** — were tasks well-scoped or did blockers/re-scopes happen frequently?
 * **Communication clarity** — were handoffs clear? Did the Implementer have enough context?
-* **Documentation quality** — were `docs/` files useful or boilerplate?
+* **Documentation quality** — were `/home/alex/Entwicklung/ai-dev-workflows/memory/2_docs/` files useful or boilerplate?
 
 **Output Format:**
 
@@ -268,14 +268,18 @@ For each task in the scope:
 
 **Max revision rounds: 3.** If still not approved after 3 rounds, the Reviewers and Dispatcher must jointly decide whether to accept with known issues or escalate. All **accepted known issues** must be logged in a `## Known Issues` section at the bottom of the spec with: issue description, severity, reason for acceptance, and associated task.
 
-## End-of-Run Retrospective
+## End-of-Run Reports
 
 After **all tasks** in the scope are completed:
 
+**Implementation Report:**
+1. Dispatcher writes a summary of all completed tasks, review rounds, and key decisions to `/home/alex/Entwicklung/ai-dev-workflows/memory/2_impl-report/impl-report-phase-{N}-{YYYY-MM-DD}.md` where `{N}` is the current phase/run number (check existing files in `/home/alex/Entwicklung/ai-dev-workflows/memory/2_impl-report/` to determine the next number). If the file already exists, append an increment: `-2`, `-3`, etc. Never overwrite existing files.
+
+**Process Retrospective:**
 1. Dispatcher collects all reports, plans, verdicts, and revision histories from the full run
 2. Dispatcher spawns the **Process Reviewer** with this complete history
 3. Process Reviewer produces a retrospective report
-4. Dispatcher writes the retrospective to `retrospectives/process-retrospective-phase-{N}-{YYYY-MM-DD}.md` where `{N}` is the current phase/run number (check existing files in `retrospectives/` to determine the next number). If the file already exists, append an increment: `-2`, `-3`, etc. Never overwrite existing retrospectives.
+4. Dispatcher writes the retrospective to `/home/alex/Entwicklung/ai-dev-workflows/memory/2_impl-retros/impl-retro-phase-{N}-{YYYY-MM-DD}.md` (same naming rules as above).
 
 ---
 

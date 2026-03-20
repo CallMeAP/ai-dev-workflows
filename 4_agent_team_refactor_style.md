@@ -129,7 +129,7 @@ Use a **3-agent system** with strict role separation.
 4. Dispatcher reviews report, assigns files one-by-one to **Refactorer**
 5. Refactorer fixes violations, reports back
 6. Dispatcher marks file as done, assigns next file
-7. After all files done, Dispatcher prints the final summary to the terminal (do NOT write to a file).
+7. After all files done, Dispatcher prints the final summary to the terminal AND writes it to `/home/alex/Entwicklung/ai-dev-workflows/memory/4_refactor-report/refactor-report-phase-{N}-{YYYY-MM-DD}.md` where `{N}` is the current phase/run number (check existing files in `/home/alex/Entwicklung/ai-dev-workflows/memory/4_refactor-report/` to determine the next number). If the file already exists, append an increment: `-2`, `-3`, etc. Never overwrite existing files.
 
 **Final summary format:**
 

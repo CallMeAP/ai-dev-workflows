@@ -58,7 +58,7 @@ Use an **8-agent system** with strict role separation.
   * **Max respawns per task: 2.** If the second respawn also stalls, the Dispatcher must skip the reviewer and log the gap in the final report.
 * **Completion gate:** The Dispatcher must verify that **all reviewer reports have been submitted** before initiating the Cross-Review Phase. If any report is missing, the Dispatcher blocks progression and flags the incomplete reviewer.
 * **Arbitration:** During the Cross-Review Phase, if reviewers cannot reach consensus on a disputed finding, the Dispatcher makes the **final call** on severity and confirmation status with written reasoning.
-* **Report generation:** Once the Cross-Review Phase is complete and the final joint report is assembled, the Dispatcher must write **all reports** as a single Markdown file into `QA/`. The filename format is `QA-{task-name}-phase-{N}-{YYYY-MM-DD}.md` (task name lowercased, spaces/special chars replaced with `-`, `{N}` is the current phase/run number — check existing files in `QA/` to determine the next number). If the file already exists, append an increment: `-2`, `-3`, etc. Never overwrite existing reports. The file must contain:
+* **Report generation:** Once the Cross-Review Phase is complete and the final joint report is assembled, the Dispatcher must write **all reports** as a single Markdown file into `/home/alex/Entwicklung/ai-dev-workflows/memory/3_qa/`. The filename format is `qa-{task-name}-phase-{N}-{YYYY-MM-DD}.md` (task name lowercased, spaces/special chars replaced with `-`, `{N}` is the current phase/run number — check existing files in `/home/alex/Entwicklung/ai-dev-workflows/memory/3_qa/` to determine the next number). If the file already exists, append an increment: `-2`, `-3`, etc. Never overwrite existing files. The file must contain:
   1. **Joint Audit Report** (the final consolidated table with confirmed/unconfirmed/rejected issues, fix order, and summary)
   2. **Individual Reviewer Reports** — each reviewer's original independent report, in full, under a clearly labeled `## {Reviewer Name} — Individual Report` heading
 
@@ -209,16 +209,16 @@ Produces an **independent coding style & convention review report**.
 
 Focus: **Feature documentation accuracy and completeness**
 
-Checks `docs/{Feature}.md` files for the implemented feature:
+Checks `/home/alex/Entwicklung/ai-dev-workflows/memory/2_docs/{Feature}.md` files for the implemented feature:
 
-* **Existence** — a `docs/{Feature}.md` file exists for the feature/module/service
+* **Existence** — a `/home/alex/Entwicklung/ai-dev-workflows/memory/2_docs/{Feature}.md` file exists for the feature/module/service
 * **Completeness** — contains: overview, architecture, API contracts, usage examples, business rules, dependencies
 * **Accuracy** — documentation matches actual code behavior (no stale/copy-paste content, no phantom endpoints or parameters)
 * **Consistency** — German used for business domain terms, consistent with codebase style
 * **Clarity** — describes **what** and **why**, not **how**
 * **Up-to-date** — if the file pre-existed, it was updated to reflect changes (not left stale)
 
-> **How to review:** Read each `docs/{Feature}.md`, then read the corresponding implementation code. Cross-check every documented endpoint, parameter, business rule, and flow against the actual code. Flag any discrepancy.
+> **How to review:** Read each `/home/alex/Entwicklung/ai-dev-workflows/memory/2_docs/{Feature}.md`, then read the corresponding implementation code. Cross-check every documented endpoint, parameter, business rule, and flow against the actual code. Flag any discrepancy.
 
 Produces an **independent documentation review report**.
 

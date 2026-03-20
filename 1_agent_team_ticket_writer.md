@@ -186,7 +186,7 @@ If the Ticket Writer proceeds despite ambiguities, each assumption must be expli
    * Dependency ordering — no forward references
    * Actionability — each ticket can be picked up independently (given its deps are done)
    * Code references — every ticket has concrete file/snippet references
-8. Dispatcher writes final output to `tickets/{feature-name}-phase-{N}-{YYYY-MM-DD}.md` where `{N}` is the current phase/run number (check existing files in `tickets/` to determine the next number). If the file already exists, append an increment: `-2`, `-3`, etc. Never overwrite existing tickets.
+8. Dispatcher writes final output to `/home/alex/Entwicklung/ai-dev-workflows/memory/1_tickets/ticket-{feature-name}-phase-{N}-{YYYY-MM-DD}.md` where `{N}` is the current phase/run number (check existing files in `/home/alex/Entwicklung/ai-dev-workflows/memory/1_tickets/` to determine the next number). If the file already exists, append an increment: `-2`, `-3`, etc. Never overwrite existing files.
 
 ---
 
