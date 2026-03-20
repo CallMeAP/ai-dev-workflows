@@ -1,5 +1,6 @@
 Source Spec: **@SPEC_MD**
 Task: `@SPEC_MD_TASK`
+Report Directory: `@REPORT_DIR`
 
 Audit the implementation of **`@SPEC_MD_TASK`** defined in **`@SPEC_MD`** to detect:
 
@@ -9,9 +10,9 @@ Audit the implementation of **`@SPEC_MD_TASK`** defined in **`@SPEC_MD`** to det
 * deadlocks
 * deviations from the specification
 
-Use a **7-agent system** with strict role separation.
+Use an **8-agent system** with strict role separation.
 
-> **Important:** You (the root agent receiving this prompt) **are** the Dispatcher. Do NOT spawn a separate agent for the Dispatcher role. You coordinate directly and only spawn sub-agents for the six reviewer roles.
+> **Important:** You (the root agent receiving this prompt) **are** the Dispatcher. Do NOT spawn a separate agent for the Dispatcher role. You coordinate directly and only spawn sub-agents for the seven reviewer roles.
 
 ---
 
@@ -20,12 +21,14 @@ Use a **7-agent system** with strict role separation.
 * Has **read-only access** to the repository and `@SPEC_MD`.
 * Responsible for **identifying the relevant implementation** of `@SPEC_MD_TASK`.
 
-**Before handing off to reviewers, the Dispatcher must produce:**
+**Before handing off to reviewers, the Dispatcher must:**
 
-1. **File Manifest** — a list of all relevant files, modules, and entry points with a short description of each file's role.
-2. **Scope Boundary** — a clear definition of what is **in-scope** (files, modules, features to review) and what is **out-of-scope** (unrelated code, infrastructure, etc.).
-
-The Dispatcher then distributes the manifest and scope to all reviewers.
+1. **Run `dotnet build`** — verify the code compiles. If it fails, stop and report build errors instead of proceeding with review.
+2. **Run `dotnet test`** (if tests exist) — report any test failures as pre-review findings.
+3. Produce the following and distribute to all reviewers:
+   1. **File Manifest** — a list of all relevant files, modules, and entry points with a short description of each file's role.
+   2. **Scope Boundary** — a clear definition of what is **in-scope** (files, modules, features to review) and what is **out-of-scope** (unrelated code, infrastructure, etc.).
+   3. **Change Summary** — what was changed (e.g. `git diff` against the base branch, commit list), so reviewers know exactly what's new vs. pre-existing code.
 
 **All reviewers must consult the project's `CLAUDE.md` for general coding guidelines and conventions.** Findings that violate `CLAUDE.md` rules (naming, patterns, field usage, LINQ style, etc.) should be reported under the most fitting category.
 
@@ -35,7 +38,7 @@ The Dispatcher then distributes the manifest and scope to all reviewers.
 * Only coordinates and manages the review process.
 * **Completion gate:** The Dispatcher must verify that **all reviewer reports have been submitted** before initiating the Cross-Review Phase. If any report is missing, the Dispatcher blocks progression and flags the incomplete reviewer.
 * **Arbitration:** During the Cross-Review Phase, if reviewers cannot reach consensus on a disputed finding, the Dispatcher makes the **final call** on severity and confirmation status with written reasoning.
-* **Report generation:** Once the Cross-Review Phase is complete and the final joint report is assembled, the Dispatcher must write **all reports** as a single Markdown file into the **App root folder** (`BPP.Backend.NET/BPP.Backend.NET.App/ImplPlans/`). The filename must be derived from `@SPEC_MD_TASK` (lowercased, spaces/special chars replaced with `-`, prefixed with the current date: `{task-name}-{YYYY-MM-DD}.md`). The file must contain:
+* **Report generation:** Once the Cross-Review Phase is complete and the final joint report is assembled, the Dispatcher must write **all reports** as a single Markdown file into **`@REPORT_DIR`**. The filename must be derived from `@SPEC_MD_TASK` (lowercased, spaces/special chars replaced with `-`, prefixed with the current date: `{task-name}-{YYYY-MM-DD}.md`). The file must contain:
   1. **Joint Audit Report** (the final consolidated table with confirmed/unconfirmed/rejected issues, fix order, and summary)
   2. **Individual Reviewer Reports** — each reviewer's original independent report, in full, under a clearly labeled `## {Reviewer Name} — Individual Report` heading
 
@@ -53,6 +56,8 @@ Checks the implementation of `@SPEC_MD_TASK` for:
 * secret exposure
 * unsafe dependencies
 * privilege escalation risks
+
+> **How to review:** Trace every external input (HTTP parameters, request bodies, query strings) through the code to its final use. Check authorization on every endpoint. Review data handling for exposure risks.
 
 Produces an **independent security review report**.
 
@@ -79,22 +84,7 @@ Produces an **independent spec compliance report**.
 
 ## 4. Spec Compliance Reviewer B
 
-Focus: **Specification compliance (independent second opinion)**
-
-Performs the **same review as Spec Compliance Reviewer A** (agent 3), but **independently and without seeing Agent 3's report**.
-
-Cross-checks the implementation against **`@SPEC_MD`**.
-
-Checks for:
-
-* missing functionality from the spec
-* incorrect implementation of specified behavior
-* logical deviations from the spec
-* incomplete features
-* behavior mismatches
-* unimplemented edge cases
-
-Produces an **independent spec compliance report**.
+Follows the **exact same checks and output format as Spec Compliance Reviewer A** (section 3). Performs its review **independently and without seeing Agent A's report**.
 
 > **Why two spec reviewers?** Spec compliance is the highest-value category — having two independent reviewers increases coverage and reduces blind spots. Their reports are compared during the Cross-Review Phase.
 
@@ -117,6 +107,8 @@ Analyzes the implementation of `@SPEC_MD_TASK` for:
 * missing caching opportunities for repeated lookups
 * deadlock-prone patterns (e.g. `.Result` / `.Wait()` on async code)
 
+> **How to review:** Identify hot paths (endpoints called frequently or processing large datasets). For each, trace the database queries executed and check for N+1, missing indices, over-fetching. Check async call chains for blocking.
+
 Produces an **independent performance review report**.
 
 ---
@@ -135,40 +127,78 @@ Analyzes the implementation of `@SPEC_MD_TASK` for:
 * incorrect state transitions
 * error handling that swallows or misroutes exceptions
 
+> **How to review:** Trace execution paths for each public method — happy path, error path, and edge cases (null inputs, empty collections, boundary values). Check state transitions are valid and complete. Verify exception handling doesn't swallow errors or return incorrect responses.
+
 Produces an **independent bug / logic review report**.
 
 ---
 
-## 7. Coding Style Reviewer Agent
+## 7. Coding Style & Convention Reviewer Agent
 
-Focus: **Service implementation coding style** — compared against a known clean reference codebase.
+Focus: **Full `CLAUDE.md` compliance and service implementation coding style** — covers all file types (DTOs, controllers, services, mappings), not just services.
+
+**Step 1 — Read `CLAUDE.md`** and check all in-scope files against its conventions:
+
+* DTO rules (`sealed record`, naming, validation attributes, nullable types)
+* Controller rules (inheritance, `#region fields`, routing, response types, `[AuditReason]`)
+* AutoMapper rules (`MemberList.Destination` / `MemberList.Source`, explicit mappings, `#region`)
+* Naming conventions (entity/DTO/service/controller naming patterns, file prefixes)
+* C# rules (`var` usage, XML docs, async suffix, nullable reference types)
+* Field usage rules (BaseService vs non-BaseService vs controllers)
+
+**Step 2 — Read reference codebase** and check service-layer style:
 
 **Reference codebase:** `/home/alex/Entwicklung/bpp/bpp-file/BPP.File.NET/BPP.File.NET.API`
 
-This agent reads the reference implementation files (especially services) and then compares the reviewed code against them. The focus is on **service-layer style**, not DTOs, controllers, or mapping profiles.
+**Key reference files:**
 
-**Key reference files to read first:**
-
-* `Services/Upload/BrokernetFileUploadService.cs` — orchestration service with numbered steps, guard clauses, private helpers below public methods
+* `Services/Upload/BrokernetFileUploadService.cs` — orchestration with numbered steps, guard clauses, private helpers below public methods
 * `Services/BrokernetFile/BrokernetFileService.cs` — minimal service, clean repository access
 * `Services/Upload/BrokernetFileValidationService.cs` — validation logic with steps and early returns
 * `Services/BrokernetFile/BrokernetFileAutoSignService.cs` — business rules with guard clauses
 
-**Checklist — report violations of:**
+**Service style checklist — flag violations of:**
 
-* **Guard clauses & early returns** — methods must use early `throw` / `return` instead of deep `if`/`else` nesting. Max 2 levels of nesting allowed before flagging.
-* **Numbered step comments** — public orchestration methods must have `// (1) ...`, `// (2) ...` comments (German) describing each logical step. Missing step comments = finding.
-* **Private helpers below their public method** — private methods that serve a specific public method must sit directly below it, not at the bottom of the file.
-* **BaseService field usage** — services inheriting `BaseService` must use `_repositoryWrapper`, `_mapper`, `_logger`, `_auditContextService` (protected fields), never the constructor params directly.
-* **LINQ style** — method syntax only, full descriptive lambda names (`.Where(entity => ...)` not `.Where(e => ...)`), explicit variable types for queries (no `var` for entity queries).
-* **Async discipline** — all I/O methods `async Task`, suffixed `Async`, no `.Result` / `.Wait()`.
-* **Logging** — uses `CommonLoggerUtil.LogDebug` / `LogDebugAsJson`, not `Debug.WriteLine` or raw `_logger.Debug`.
-* **Error handling** — correct exception types (`BrokernetServiceNotFoundException` for 404, `BrokernetServiceException` for business errors, `BrokerException` for user-facing).
-* **Repository query pattern** — `QueryAllAsNoTracking()` for reads, `QueryAll()` for writes.
+| # | Rule | What to look for |
+|---|------|-----------------|
+| 1 | **Max 2 levels of nesting** | Any nesting deeper than 2 levels (loops and conditionals count equally). Must use guard clauses (`continue` / `throw` / `return`) to flatten, or extract inner logic into a private helper. |
+| 2 | **Numbered step comments** | Public orchestration methods missing `// (1) ...`, `// (2) ...` comments (German) on each logical step. |
+| 3 | **Private helper placement** | Private methods serving a public method must sit directly below it, not at file bottom. |
+| 4 | **BaseService field usage** | Services inheriting `BaseService` using constructor params instead of protected fields (`_repositoryWrapper`, `_mapper`, `_logger`, `_auditContextService`). |
+| 5 | **LINQ style** | Query syntax instead of method syntax. Abbreviated lambda names (`.Where(e => ...)` instead of `.Where(entity => ...)`). `var` for entity query variables. |
+| 6 | **Async discipline** | I/O methods not `async Task`, missing `Async` suffix, `.Result` / `.Wait()` calls. |
+| 7 | **Logging** | `Debug.WriteLine`, raw `_logger.Debug()` instead of `CommonLoggerUtil.LogDebug` / `LogDebugAsJson`. |
+| 8 | **Error handling** | Wrong exception type — must use `BrokernetServiceNotFoundException` (404), `BrokernetServiceException` (business), `BrokerException` (user-facing). |
+| 9 | **Repository queries** | `QueryAllAsNoTracking()` for reads, `QueryAll()` for writes. Mixed up = finding. |
 
-> **How to review:** For each service file in scope, read the corresponding reference file(s) from bpp-file, then compare structure and style. Report deviations as findings with concrete line references.
+> **How to review:** For `CLAUDE.md` checks, compare each in-scope file against the relevant convention section. For service style, read the corresponding reference file(s) from bpp-file, then compare structure and style. Report **concrete line numbers** and a **short suggested fix** for each violation. If a file has zero violations, report it as **CLEAN** — do not skip it.
 
-Produces an **independent coding style review report**.
+**Report format (per file):**
+
+| # | Line(s) | Rule Violated | Current Code | Suggested Fix |
+|---|---------|--------------|--------------|---------------|
+| 1 | 42-48 | Max 2 levels of nesting | nested if/else 3 levels deep | Invert condition, early throw |
+
+Produces an **independent coding style & convention review report**.
+
+---
+
+## 8. Documentation Reviewer Agent
+
+Focus: **Feature documentation accuracy and completeness**
+
+Checks `docs/{Feature}.md` files for the implemented feature:
+
+* **Existence** — a `docs/{Feature}.md` file exists for the feature/module/service
+* **Completeness** — contains: overview, architecture, API contracts, usage examples, business rules, dependencies
+* **Accuracy** — documentation matches actual code behavior (no stale/copy-paste content, no phantom endpoints or parameters)
+* **Consistency** — German used for business domain terms, consistent with codebase style
+* **Clarity** — describes **what** and **why**, not **how**
+* **Up-to-date** — if the file pre-existed, it was updated to reflect changes (not left stale)
+
+> **How to review:** Read each `docs/{Feature}.md`, then read the corresponding implementation code. Cross-check every documented endpoint, parameter, business rule, and flow against the actual code. Flag any discrepancy.
+
+Produces an **independent documentation review report**.
 
 ---
 
@@ -188,10 +218,12 @@ All reviewers must use this shared rubric when assigning severity:
 
 After all reviewers finish their **independent reports**:
 
+**Scope:** Cross-review focuses on **medium and high severity findings only**. Low severity findings are included in the final report as-is without cross-review (to avoid noise).
+
 Each reviewer must:
 
-1. **Read all other reviewers' reports**
-2. **Respond to every finding** from other reviewers with: **agree**, **disagree** (with reasoning), or **comment** (add context)
+1. **Read all other reviewers' medium/high findings**
+2. **Respond to each finding** with: **agree**, **disagree** (with reasoning), or **comment** (add context)
 3. **Challenge weak claims** and attempt to disprove them
 4. **Flag new issues** discovered while reading other reports
 
@@ -209,7 +241,7 @@ Reviewers produce a **joint audit report** returned to the **Dispatcher Agent**.
 |---|-------|----------|----------|--------------|----------|
 | 1 | Description of the issue | low / medium / high | Agent name | Agreeing agent(s) | security / spec / performance / bug |
 
-**Categories:** `security`, `spec-compliance`, `performance`, `bug-logic`, `coding-style`
+**Categories:** `security`, `spec-compliance`, `performance`, `bug-logic`, `coding-style`, `documentation`
 
 **Sections:**
 
