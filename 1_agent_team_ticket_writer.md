@@ -1,6 +1,13 @@
-Source Spec: **@SPEC_MD**
+# Input
 
-Analyze **`@SPEC_MD`** and produce detailed, implementation-ready tickets that a developer (or an Implementer agent) can pick up without needing to re-read the spec.
+The user provides:
+- A **spec file** describing the feature/task to implement
+
+Provided via conversation context (opened file, message, or attached file).
+
+---
+
+Analyze the spec and produce detailed, implementation-ready tickets that a developer (or an Implementer agent) can pick up without needing to re-read the spec.
 
 Use a **3-agent system** with strict role separation.
 
@@ -13,7 +20,7 @@ Use a **3-agent system** with strict role separation.
 **Access:** Read-only
 **Responsibilities**
 
-* Read `@SPEC_MD` and identify all features / tasks / requirements to be ticketed.
+* Read the spec and identify all features / tasks / requirements to be ticketed.
 * Read **`CLAUDE.md`** for project conventions and architecture context.
 * Assign the Codebase Analyst to explore relevant areas of the codebase.
 * Pass the analyst's findings + spec to the Ticket Writer.
@@ -24,6 +31,8 @@ Use a **3-agent system** with strict role separation.
 
 * No code changes.
 * Only coordinates, validates, and delegates.
+* **Heartbeat:** While waiting for a sub-agent, print a short status message (e.g. `"⏳ Waiting for Codebase Analyst..."`) every ~15 seconds to keep the conversation alive. Never go silent while waiting.
+* **Stale agent recovery:** If a sub-agent has not reported back within ~60 seconds, check if it has made any file changes (e.g. via `git status`). If it has made changes, continue waiting. If no changes, terminate it and spawn a fresh agent with the same task.
 
 ---
 
@@ -155,7 +164,7 @@ If the Ticket Writer proceeds despite ambiguities, each assumption must be expli
 
 # Workflow
 
-1. Dispatcher reads `@SPEC_MD` and `CLAUDE.md`, identifies features/tasks to ticket
+1. Dispatcher reads the spec and `CLAUDE.md`, identifies features/tasks to ticket
 2. Dispatcher assigns **Codebase Analyst** to explore relevant codebase areas
 3. Analyst produces findings (files, patterns, entities, snippets, dependencies)
 4. Dispatcher passes spec + analyst findings to **Ticket Writer**

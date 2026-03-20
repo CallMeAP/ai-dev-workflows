@@ -1,6 +1,13 @@
-Source files: `@FILES`
+# Input
 
-Refactor the service implementations in **`@FILES`** to match the coding style of the **bpp-file reference codebase**.
+The user provides:
+- **Source files** to refactor (file paths or glob patterns)
+
+Provided via conversation context (opened file, message, or attached file).
+
+---
+
+Refactor the service implementations in the provided files to match the coding style of the **bpp-file reference codebase**.
 
 Use a **3-agent system** with strict role separation.
 
@@ -14,7 +21,7 @@ Use a **3-agent system** with strict role separation.
 **Responsibilities**
 
 * Read **`/home/alex/Entwicklung/bpp/bpp-backend/CLAUDE.md`** for project conventions.
-* Identify all service files in `@FILES`.
+* Identify all service files in the provided source files.
 * Assign files to the Analyzer, then orchestrate the refactoring loop.
 * Track progress per file as a done checklist.
 
@@ -22,6 +29,8 @@ Use a **3-agent system** with strict role separation.
 
 * No code changes.
 * Only coordinates and delegates.
+* **Heartbeat:** While waiting for a sub-agent, print a short status message (e.g. `"⏳ Waiting for Refactorer..."`) every ~15 seconds to keep the conversation alive. Never go silent while waiting.
+* **Stale agent recovery:** If a sub-agent has not reported back within ~60 seconds, check if it has made any file changes (e.g. via `git status`). If it has made changes, continue waiting. If no changes, terminate it and spawn a fresh agent with the same task.
 
 ---
 
@@ -37,7 +46,7 @@ Use a **3-agent system** with strict role separation.
    * `Upload/BrokernetFileValidationService.cs` — validation with early returns
    * `BrokernetFile/BrokernetFileAutoSignService.cs` — business rules with guard clauses
 2. Read `/home/alex/Entwicklung/bpp/bpp-backend/CLAUDE.md` for project conventions.
-3. For each service file in `@FILES`, produce a **style deviation report**.
+3. For each service file in scope, produce a **style deviation report**.
 
 **Style Checklist — flag violations of:**
 
@@ -91,14 +100,19 @@ Use a **3-agent system** with strict role separation.
 1. Read the style deviation report for the file.
 2. Read the relevant reference file(s) from bpp-file to understand the target style.
 3. Apply fixes for all reported violations.
-4. Self-check: re-read the refactored file against the checklist — fix anything missed.
-5. Report back to Dispatcher.
+4. **Run `dotnet build`** — fix any compilation errors **and warnings** introduced by the refactor:
+   * Unused parameters, variables, or `using` statements — remove them
+   * Too complex methods (high cyclomatic complexity) — extract logic into private helpers
+   * Nullable reference type warnings — fix with proper null checks or explicit nullability
+   * Any other compiler/analyzer warnings — resolve, do not suppress
+5. Self-check: re-read the refactored file against the checklist — fix anything missed.
+6. Report back to Dispatcher.
 
 ---
 
 # Workflow
 
-1. Dispatcher identifies all service files in `@FILES`
+1. Dispatcher identifies all service files in the provided source files
 2. Dispatcher assigns all files to **Style Analyzer**
 3. Style Analyzer reads reference files + `/home/alex/Entwicklung/bpp/bpp-backend/CLAUDE.md`, produces deviation report per file
 4. Dispatcher reviews report, assigns files one-by-one to **Refactorer**

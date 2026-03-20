@@ -1,7 +1,14 @@
-Source Spec: **@SPEC_MD**
-Task: `@SPEC_MD_TASK`
+# Input
 
-Create a team of agents to implement **`@SPEC_MD_TASK`** defined in **`@SPEC_MD`**.
+The user provides:
+- A **spec file** describing the feature/task to implement
+- The **task scope** (which part of the spec to work on, or all of it)
+
+Provided via conversation context (opened file, message, or attached file).
+
+---
+
+Create a team of agents to implement the task defined in the spec.
 
 The team should consist of **five agents with clearly defined roles**.
 
@@ -9,10 +16,10 @@ The team should consist of **five agents with clearly defined roles**.
 
 ## 1. Dispatcher Agent (Coordinator) — YOU, the root agent
 
-**Access:** Read-only (write access only to `@SPEC_MD` for marking tasks as completed)
+**Access:** Read-only (write access only to the spec file for marking tasks as completed)
 **Responsibilities**
 
-* Analyze `@SPEC_MD` and break `@SPEC_MD_TASK` into small implementation tasks with dependencies and order.
+* Analyze the spec and break the task into small implementation tasks with dependencies and order.
 * Before assigning any work, produce:
   1. **File Manifest** — list of all relevant files, modules, and entry points with a short description of each file's role.
   2. **Scope Boundary** — clear definition of what is in-scope and out-of-scope.
@@ -25,8 +32,10 @@ The team should consist of **five agents with clearly defined roles**.
 
 **Rules**
 
-* No code changes (except marking tasks as completed in `@SPEC_MD`).
+* No code changes (except marking tasks as completed in the spec file).
 * Only coordinates, validates plans, and delegates work.
+* **Heartbeat:** While waiting for a sub-agent, print a short status message (e.g. `"⏳ Waiting for Implementer..."`) every ~15 seconds to keep the conversation alive. Never go silent while waiting.
+* **Stale agent recovery:** If a sub-agent has not reported back within ~60 seconds, check if it has made any file changes (e.g. via `git status`). If it has made changes, continue waiting. If no changes, terminate it and spawn a fresh agent with the same task.
 
 ---
 
@@ -53,7 +62,11 @@ The team should consist of **five agents with clearly defined roles**.
 4. Submit plan to **Dispatcher for approval**
 5. **Wait for Dispatcher approval** (if plan is rejected, revise and resubmit — see Workflow Loop)
 6. Implement changes
-7. **Verify build** — run `dotnet build` and fix any compilation errors before proceeding
+7. **Verify build** — run `dotnet build` and fix any compilation errors **and warnings** before proceeding. Treat warnings as errors:
+   * Unused parameters, variables, or `using` statements — remove them
+   * Too complex methods (high cyclomatic complexity) — extract logic into private helpers
+   * Nullable reference type warnings — fix with proper null checks or explicit nullability
+   * Any other compiler/analyzer warnings — resolve, do not suppress
 8. **Run tests** — run `dotnet test` (if tests exist) and fix any failures before proceeding
 9. **Create/update feature documentation** at `docs/{Feature}.md` (one file per feature/module/service):
    * **Overview** — what the feature does and why it exists
@@ -102,7 +115,7 @@ Performs an **independent QA review** of the implementation.
 Checks:
 
 * correctness and logical soundness
-* completeness against `@SPEC_MD`
+* completeness against the spec
 * adherence to the Dispatcher's approved plan
 * code quality and maintainability
 * **`CLAUDE.md` convention compliance** (naming, patterns, field usage, LINQ style, etc.)
@@ -218,7 +231,7 @@ All reviewers must use this shared rubric when assigning severity:
 
 # Workflow Loop
 
-For each task in `@SPEC_MD_TASK`:
+For each task in the scope:
 
 1. Dispatcher assigns task
 2. Implementer consults `CLAUDE.md`, writes **implementation plan**
@@ -235,16 +248,16 @@ For each task in `@SPEC_MD_TASK`:
 * Either REVISIONS REQUIRED → **REVISIONS REQUIRED** (union of all medium/high findings)
 * Conflicting severity on same issue → Dispatcher decides final severity
 
-**If APPROVED → Dispatcher marks task as completed in `@SPEC_MD` → next task**
+**If APPROVED → Dispatcher marks task as completed in the spec → next task**
 **If REVISIONS REQUIRED → Implementer receives merged report, fixes issues → review repeats from step 5**
 
 **Re-review scope (rounds 2+):** Reviewers focus on the **flagged issues** and check for **regressions** in surrounding code. No need to re-review the full implementation from scratch.
 
-**Max revision rounds: 3.** If still not approved after 3 rounds, the Reviewers and Dispatcher must jointly decide whether to accept with known issues or escalate. All **accepted known issues** must be logged in a `## Known Issues` section at the bottom of `@SPEC_MD` with: issue description, severity, reason for acceptance, and associated task.
+**Max revision rounds: 3.** If still not approved after 3 rounds, the Reviewers and Dispatcher must jointly decide whether to accept with known issues or escalate. All **accepted known issues** must be logged in a `## Known Issues` section at the bottom of the spec with: issue description, severity, reason for acceptance, and associated task.
 
 ## End-of-Run Retrospective
 
-After **all tasks** in `@SPEC_MD_TASK` are completed:
+After **all tasks** in the scope are completed:
 
 1. Dispatcher collects all reports, plans, verdicts, and revision histories from the full run
 2. Dispatcher spawns the **Process Reviewer** with this complete history
@@ -255,11 +268,7 @@ After **all tasks** in `@SPEC_MD_TASK` are completed:
 
 # Objective
 
-Complete:
-```
-[ ] `@SPEC_MD_TASK`
-```
-from `@SPEC_MD` with:
+Complete all tasks from the spec with:
 
 * strict adherence to the plan
 * small safe iterations

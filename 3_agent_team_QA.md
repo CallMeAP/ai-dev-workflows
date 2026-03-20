@@ -1,8 +1,15 @@
-Source Spec: **@SPEC_MD**
-Task: `@SPEC_MD_TASK`
-Report Directory: `@REPORT_DIR`
+# Input
 
-Audit the implementation of **`@SPEC_MD_TASK`** defined in **`@SPEC_MD`** to detect:
+The user provides:
+- A **spec file** describing the feature/task to audit
+- The **task scope** (which part of the spec to audit, or all of it)
+- A **report directory** where the final report should be written
+
+Provided via conversation context (opened file, message, or attached file).
+
+---
+
+Audit the implementation of the task defined in the spec to detect:
 
 * bugs
 * security issues
@@ -18,12 +25,16 @@ Use an **8-agent system** with strict role separation.
 
 ## 1. Dispatcher Agent (Read-Only) — YOU, the root agent
 
-* Has **read-only access** to the repository and `@SPEC_MD`.
-* Responsible for **identifying the relevant implementation** of `@SPEC_MD_TASK`.
+* Has **read-only access** to the repository and the spec.
+* Responsible for **identifying the relevant implementation** of the task.
 
 **Before handing off to reviewers, the Dispatcher must:**
 
-1. **Run `dotnet build`** — verify the code compiles. If it fails, stop and report build errors instead of proceeding with review.
+1. **Run `dotnet build`** — verify the code compiles. If it fails, stop and report build errors instead of proceeding with review. Also check for **warnings** and report them as pre-review findings:
+   * Unused parameters, variables, or `using` statements
+   * Too complex methods (high cyclomatic complexity)
+   * Nullable reference type warnings
+   * Any other compiler/analyzer warnings
 2. **Run `dotnet test`** (if tests exist) — report any test failures as pre-review findings.
 3. Produce the following and distribute to all reviewers:
    1. **File Manifest** — a list of all relevant files, modules, and entry points with a short description of each file's role.
@@ -36,9 +47,11 @@ Use an **8-agent system** with strict role separation.
 
 * Performs **no code changes**.
 * Only coordinates and manages the review process.
+* **Heartbeat:** While waiting for sub-agents, print a short status message (e.g. `"⏳ Waiting for Security Reviewer..."`) every ~15 seconds to keep the conversation alive. Never go silent while waiting.
+* **Stale agent recovery:** If a sub-agent has not reported back within ~60 seconds, check if it has made any file changes (e.g. via `git status`). If it has made changes, continue waiting. If no changes, terminate it and spawn a fresh agent with the same task.
 * **Completion gate:** The Dispatcher must verify that **all reviewer reports have been submitted** before initiating the Cross-Review Phase. If any report is missing, the Dispatcher blocks progression and flags the incomplete reviewer.
 * **Arbitration:** During the Cross-Review Phase, if reviewers cannot reach consensus on a disputed finding, the Dispatcher makes the **final call** on severity and confirmation status with written reasoning.
-* **Report generation:** Once the Cross-Review Phase is complete and the final joint report is assembled, the Dispatcher must write **all reports** as a single Markdown file into **`@REPORT_DIR`**. The filename must be derived from `@SPEC_MD_TASK` (lowercased, spaces/special chars replaced with `-`, prefixed with the current date: `{task-name}-{YYYY-MM-DD}.md`). The file must contain:
+* **Report generation:** Once the Cross-Review Phase is complete and the final joint report is assembled, the Dispatcher must write **all reports** as a single Markdown file into the provided report directory. The filename must be derived from the task name (lowercased, spaces/special chars replaced with `-`, prefixed with the current date: `{task-name}-{YYYY-MM-DD}.md`). The file must contain:
   1. **Joint Audit Report** (the final consolidated table with confirmed/unconfirmed/rejected issues, fix order, and summary)
   2. **Individual Reviewer Reports** — each reviewer's original independent report, in full, under a clearly labeled `## {Reviewer Name} — Individual Report` heading
 
@@ -48,7 +61,7 @@ Use an **8-agent system** with strict role separation.
 
 Focus: **Security implications**
 
-Checks the implementation of `@SPEC_MD_TASK` for:
+Checks the implementation for:
 
 * authentication / authorization flaws
 * injection vulnerabilities
@@ -67,7 +80,7 @@ Produces an **independent security review report**.
 
 Focus: **Specification compliance**
 
-Cross-checks the implementation against **`@SPEC_MD`**.
+Cross-checks the implementation against the spec.
 
 Checks for:
 
@@ -96,7 +109,7 @@ Follows the **exact same checks and output format as Spec Compliance Reviewer A*
 
 Focus: **Performance issues**
 
-Analyzes the implementation of `@SPEC_MD_TASK` for:
+Analyzes the implementation for:
 
 * N+1 query problems and inefficient database access patterns
 * missing or incorrect use of `AsNoTracking()` for read operations
@@ -117,7 +130,7 @@ Produces an **independent performance review report**.
 
 Focus: **Logic correctness and edge cases**
 
-Analyzes the implementation of `@SPEC_MD_TASK` for:
+Analyzes the implementation for:
 
 * logic bugs and incorrect branching
 * race conditions and concurrency issues
