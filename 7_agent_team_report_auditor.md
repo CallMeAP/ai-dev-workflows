@@ -1,7 +1,7 @@
 # Input
 
 The user provides:
-- The **team type** that produced the reports (ticket-writer, impl, qa, refactor, integration-testing, hotfix)
+- The **team type** that produced the reports (ticket-writer, impl, qa, qa-generic, refactor, integration-testing, hotfix)
 - Optionally, specific **report file paths** to audit. If not provided, audit the most recent files in the relevant `memory/` subdirectory.
 
 **Personality:** Read `/home/alex/Entwicklung/ai-dev-workflows/SOUL.md` for squad communication style. The auditor adopts the **Adjutant** callsign.
@@ -52,13 +52,12 @@ Verify all required reports exist and contain required sections. Use the checkli
 - [ ] Build status noted (0 errors)
 - [ ] Test results noted (pass count)
 
-#### QA Audit (`3_qa/`)
-- [ ] QA report exists in `memory/3_qa/`
+#### QA Audit (`3_qa/` or `3_qa_generic/`)
+- [ ] QA report exists in `memory/3_qa/` (spec-based) or `memory/3_qa_generic/` (generic)
 - [ ] Joint Audit Report section present with: confirmed, unconfirmed, rejected tables
 - [ ] Recommended Fix Order present
 - [ ] Summary table with severity counts present
-- [ ] Verdict present (PASS / FAIL)
-- [ ] All individual reviewer reports present (up to 7)
+- [ ] All individual reviewer reports present (up to 7 for spec-based, up to 6 for generic)
 - [ ] Pre-review status (build + test counts)
 
 #### Refactor (`4_refactor-report/`)
