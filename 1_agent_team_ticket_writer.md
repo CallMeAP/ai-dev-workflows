@@ -33,17 +33,7 @@ Use a **3-agent system** with strict role separation.
 
 * No code changes.
 * Only coordinates, validates, and delegates.
-* **Heartbeat:** While waiting for a sub-agent, print a short status message (e.g. `"⏳ Waiting for Codebase Analyst..."`) every ~15 seconds to keep the conversation alive. Never go silent while waiting.
-* **Sub-agent heartbeat:** All sub-agents must print a short progress message (e.g. `"Working on: analyzing entity relationships..."`) every ~30 seconds during long-running tasks. This lets the Dispatcher detect stalls without pinging.
-* **Stale agent recovery:** The Dispatcher must never manually ping a sub-agent and wait passively. Instead, follow this escalation ladder automatically:
-  1. **After ~45 seconds of silence** — check `git diff` for file changes by the sub-agent.
-     * If changes detected → continue waiting, reset timer.
-     * If no changes → proceed to step 2.
-  2. **Send one message** to the sub-agent: `"Status?"` — wait ~20 seconds for a response.
-     * If it responds → continue waiting, reset timer.
-     * If no response → proceed to step 3.
-  3. **Terminate and respawn** — kill the stale agent and spawn a fresh one with the same task. Do NOT ping again or wait further.
-  * **Max respawns per task: 2.** If the second respawn also stalls, the Dispatcher must apply the fix directly (for write agents) or skip and log the issue (for read-only agents).
+* **Dispatcher rules (heartbeat, stale recovery):** See [_shared_dispatcher_rules.md](./_shared_dispatcher_rules.md)
 
 ---
 
@@ -188,7 +178,8 @@ If the Ticket Writer proceeds despite ambiguities, each assumption must be expli
    * Dependency ordering — no forward references
    * Actionability — each ticket can be picked up independently (given its deps are done)
    * Code references — every ticket has concrete file/snippet references
-8. Dispatcher writes final output to `/home/alex/Entwicklung/ai-dev-workflows/memory/1_tickets/ticket-{feature-name}-phase-{N}-{YYYY-MM-DD}.md` where `{N}` is the current phase/run number (check existing files in `/home/alex/Entwicklung/ai-dev-workflows/memory/1_tickets/` to determine the next number). If the file already exists, append an increment: `-2`, `-3`, etc. Never overwrite existing files.
+8. Dispatcher writes final output to `/home/alex/Entwicklung/ai-dev-workflows/memory/1_tickets/ticket-{feature-name}-run-{N}-{YYYY-MM-DD}.md` where `{N}` is the current run number (check existing files in `/home/alex/Entwicklung/ai-dev-workflows/memory/1_tickets/` to determine the next number). If the file already exists, append an increment: `-2`, `-3`, etc. Never overwrite existing files.
+9. Dispatcher spawns the **Report Auditor (Adjutant)** per `7_agent_team_report_auditor.md` with team type `ticket-writer`.
 
 ---
 

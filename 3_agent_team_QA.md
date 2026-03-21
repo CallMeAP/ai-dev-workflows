@@ -48,22 +48,13 @@ Use an **8-agent system** with strict role separation.
 
 * Performs **no code changes**.
 * Only coordinates and manages the review process.
-* **Heartbeat:** While waiting for sub-agents, print a short status message (e.g. `"⏳ Waiting for Security Reviewer..."`) every ~15 seconds to keep the conversation alive. Never go silent while waiting.
-* **Sub-agent heartbeat:** All sub-agents must print a short progress message (e.g. `"Working on: reviewing security of endpoint X..."`) every ~30 seconds during long-running tasks. This lets the Dispatcher detect stalls without pinging.
-* **Stale agent recovery:** The Dispatcher must never manually ping a sub-agent and wait passively. Instead, follow this escalation ladder automatically:
-  1. **After ~45 seconds of silence** — check `git diff` for file changes by the sub-agent.
-     * If changes detected → continue waiting, reset timer.
-     * If no changes → proceed to step 2.
-  2. **Send one message** to the sub-agent: `"Status?"` — wait ~20 seconds for a response.
-     * If it responds → continue waiting, reset timer.
-     * If no response → proceed to step 3.
-  3. **Terminate and respawn** — kill the stale agent and spawn a fresh one with the same task. Do NOT ping again or wait further.
-  * **Max respawns per task: 2.** If the second respawn also stalls, the Dispatcher must skip the reviewer and log the gap in the final report.
+* **Dispatcher rules (heartbeat, stale recovery):** See [_shared_dispatcher_rules.md](./_shared_dispatcher_rules.md)
 * **Completion gate:** The Dispatcher must verify that **all reviewer reports have been submitted** before initiating the Cross-Review Phase. If any report is missing, the Dispatcher blocks progression and flags the incomplete reviewer.
 * **Arbitration:** During the Cross-Review Phase, if reviewers cannot reach consensus on a disputed finding, the Dispatcher makes the **final call** on severity and confirmation status with written reasoning.
-* **Report generation:** Once the Cross-Review Phase is complete and the final joint report is assembled, the Dispatcher must write **all reports** as a single Markdown file into `/home/alex/Entwicklung/ai-dev-workflows/memory/3_qa/`. The filename format is `qa-{task-name}-phase-{N}-{YYYY-MM-DD}.md` (task name lowercased, spaces/special chars replaced with `-`, `{N}` is the current phase/run number — check existing files in `/home/alex/Entwicklung/ai-dev-workflows/memory/3_qa/` to determine the next number). If the file already exists, append an increment: `-2`, `-3`, etc. Never overwrite existing files. The file must contain:
+* **Report generation:** Once the Cross-Review Phase is complete and the final joint report is assembled, the Dispatcher must write **all reports** as a single Markdown file into `/home/alex/Entwicklung/ai-dev-workflows/memory/3_qa/`. The filename format is `qa-{task-name}-run-{N}-{YYYY-MM-DD}.md` (task name lowercased, spaces/special chars replaced with `-`, `{N}` is the current run number — check existing files in `/home/alex/Entwicklung/ai-dev-workflows/memory/3_qa/` to determine the next number). If the file already exists, append an increment: `-2`, `-3`, etc. Never overwrite existing files. The file must contain:
   1. **Joint Audit Report** (the final consolidated table with confirmed/unconfirmed/rejected issues, fix order, and summary)
   2. **Individual Reviewer Reports** — each reviewer's original independent report, in full, under a clearly labeled `## {Reviewer Name} — Individual Report` heading
+* **Report audit:** After writing the report, the Dispatcher spawns the **Report Auditor (Adjutant)** per `7_agent_team_report_auditor.md` with team type `qa`.
 
 ---
 
@@ -170,39 +161,7 @@ Focus: **Full `CLAUDE.md` compliance and service implementation coding style** �
 * C# rules (`var` usage, XML docs, async suffix, nullable reference types)
 * Field usage rules (BaseService vs non-BaseService vs controllers)
 
-**Step 2 — Read reference codebase** and check service-layer style:
-
-**Reference codebase:** `/home/alex/Entwicklung/bpp/bpp-file/BPP.File.NET/BPP.File.NET.API`
-
-**Key reference files:**
-
-* `Services/Upload/BrokernetFileUploadService.cs` — orchestration with numbered steps, guard clauses, private helpers below public methods
-* `Services/BrokernetFile/BrokernetFileService.cs` — minimal service, clean repository access
-* `Services/Upload/BrokernetFileValidationService.cs` — validation logic with steps and early returns
-* `Services/BrokernetFile/BrokernetFileAutoSignService.cs` — business rules with guard clauses
-
-**Service style checklist — flag violations of:**
-
-| # | Rule | What to look for |
-|---|------|-----------------|
-| 1 | **Max 2 levels of nesting** | Any nesting deeper than 2 levels (loops and conditionals count equally). Must use guard clauses (`continue` / `throw` / `return`) to flatten, or extract inner logic into a private helper. |
-| 2 | **Numbered step comments** | Public orchestration methods missing `// (1) ...`, `// (2) ...` comments (German) on each logical step. |
-| 3 | **Private helper placement** | Private methods serving a public method must sit directly below it, not at file bottom. |
-| 4 | **BaseService field usage** | Services inheriting `BaseService` using constructor params instead of protected fields (`_repositoryWrapper`, `_mapper`, `_logger`, `_auditContextService`). |
-| 5 | **LINQ style** | Query syntax instead of method syntax. Abbreviated lambda names (`.Where(e => ...)` instead of `.Where(entity => ...)`). `var` for entity query variables. |
-| 6 | **Async discipline** | I/O methods not `async Task`, missing `Async` suffix, `.Result` / `.Wait()` calls. |
-| 7 | **Logging** | `Debug.WriteLine`, raw `_logger.Debug()` instead of `CommonLoggerUtil.LogDebug` / `LogDebugAsJson`. |
-| 8 | **Error handling** | Wrong exception type — must use `BrokernetServiceNotFoundException` (404), `BrokernetServiceException` (business), `BrokerException` (user-facing). |
-| 9 | **Repository queries** | `QueryAllAsNoTracking()` for reads, `QueryAll()` for writes. Mixed up = finding. |
-| 10 | **Validate before mutate / expensive I/O** | All validation and early-return checks must come before any persistent state changes AND before expensive operations (API calls, file downloads). |
-| 11 | **EF tracking verification** | Every entity that is mutated or saved must be loaded via a tracked query (`QueryAll()`), not `QueryAllAsNoTracking()`. This is a common source of silent data corruption. |
-| 12 | **PII masking in logs** | Email, phone, or other PII logged in plaintext. Must be masked/redacted. GDPR violation if debug logs reach centralized logging. |
-| 13 | **Reuse existing utilities** | Duplicate static/helper methods across services when an identical one already exists. |
-| 14 | **Fetch before clear** | Collections cleared (`.Clear()`) before replacement data is fetched from external API. API failure leaves empty state. |
-| 15 | **Defensive collection operations** | `.ToDictionary()` without duplicate key handling. Must use `.GroupBy().ToDictionary()` or similar. |
-| 16 | **Cross-service consistency** | Same concern (e.g. email uniqueness, dedup) handled differently in sibling services without documented reason. |
-| 17 | **Test value capture** | Tests asserting on entity properties post-operation via object reference instead of captured primitive values. Service mutations propagate through references and break assertions silently. |
-| 18 | **Safe serialization** | Serializing exceptions or complex objects directly (`JsonSerializer.Serialize(exception)`). Exceptions have non-serializable members that crash at runtime. Must extract to plain DTO first. |
+**Step 2 — Read reference codebase** and check service-layer style per [_shared_service_style_rules.md](./_shared_service_style_rules.md). Flag violations of all 18 rules.
 
 > **How to review:** For `CLAUDE.md` checks, compare each in-scope file against the relevant convention section. For service style, read the corresponding reference file(s) from bpp-file, then compare structure and style. Report **concrete line numbers** and a **short suggested fix** for each violation. If a file has zero violations, report it as **CLEAN** — do not skip it.
 
@@ -237,20 +196,7 @@ Produces an **independent documentation review report**.
 
 # Severity Rubric
 
-All reviewers must use this shared rubric when assigning severity:
-
-| Severity | Definition | Examples |
-|----------|-----------|----------|
-| **high** | Data loss, security breach, crash, or core spec requirement completely missing/broken | SQL injection, unhandled null causing 500, entire feature not implemented |
-| **medium** | Incorrect behavior, spec deviation, or degraded performance that affects users | Wrong business logic output, N+1 queries on hot paths, missing auth check on non-critical endpoint |
-| **low** | Minor issues, style violations, edge cases unlikely to occur in practice | Missing `AsNoTracking()` on low-traffic read, off-by-one on pagination edge case, CLAUDE.md convention violation |
-
-**NOT a finding (do not flag):**
-- Plan says 7 steps but implementation has 9 — step count mismatches are irrelevant if logic is complete
-- Default `CancellationToken` parameter values — idiomatic C#
-- Minor naming differences between plan and implementation
-- Reordering of steps that doesn't affect behavior
-- Implementation using a different (but correct) approach than the plan described
+See [_shared_severity_rubric.md](./_shared_severity_rubric.md) for the full rubric.
 
 ---
 

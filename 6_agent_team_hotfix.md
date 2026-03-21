@@ -46,16 +46,7 @@ The team should consist of **three agents with clearly defined roles**.
 * No code changes (except trivial one-liners if Reviewer flags them).
 * Only coordinates and delegates.
 * **Parallel hotfixes:** For independent hotfixes (no shared files, no overlapping blast radius), the Dispatcher may run 2 Implementer agents in parallel on different bugs. Each gets its own Reviewer. Dependent hotfixes must be sequential.
-* **Heartbeat:** While waiting for a sub-agent, print a short status message every ~15 seconds to keep the conversation alive. Never go silent while waiting.
-* **Sub-agent heartbeat:** All sub-agents must print a short progress message every ~30 seconds during long-running tasks.
-* **Stale agent recovery:** Follow the escalation ladder:
-  1. **After ~45 seconds of silence** — check `git diff` for file changes.
-     * Changes detected → continue waiting.
-     * No changes → proceed to step 2.
-  2. **Send one message:** `"Status?"` — wait ~20 seconds.
-     * Responds → continue waiting.
-     * No response → proceed to step 3.
-  3. **Terminate and respawn** with same task. Max 2 respawns. After that, apply fix directly.
+* **Dispatcher rules (heartbeat, stale recovery):** See [_shared_dispatcher_rules.md](./_shared_dispatcher_rules.md)
 
 ---
 
@@ -153,7 +144,7 @@ Single reviewer — hotfixes are scoped and low blast radius.
 
 **No tickets. No architect. No dual review. No feature docs.**
 
-**Report:** Dispatcher writes fix report to `/home/alex/Entwicklung/ai-dev-workflows/memory/6_hotfix/hotfix-{description}-phase-{N}-{YYYY-MM-DD}.md` where `{N}` is the current phase/run number (check existing files to determine next number). If file exists, append increment. Never overwrite.
+**Report:** Dispatcher writes fix report to `/home/alex/Entwicklung/ai-dev-workflows/memory/6_hotfix/hotfix-{description}-run-{N}-{YYYY-MM-DD}.md` where `{N}` is the current run number (check existing files to determine next number). If file exists, append increment. Never overwrite.
 
 **Report template:**
 
@@ -182,6 +173,8 @@ None / [list]
 ### Source
 Which report/test flagged this bug.
 ```
+
+**Report Audit:** After writing the report, Dispatcher spawns the **Report Auditor (Adjutant)** per `7_agent_team_report_auditor.md` with team type `hotfix`.
 
 ---
 

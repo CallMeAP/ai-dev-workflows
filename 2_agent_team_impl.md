@@ -36,17 +36,7 @@ The team should consist of **five agents with clearly defined roles**.
 
 * No code changes (except marking tasks as completed in the spec file).
 * Only coordinates, validates plans, and delegates work.
-* **Heartbeat:** While waiting for a sub-agent, print a short status message (e.g. `"⏳ Waiting for Implementer..."`) every ~15 seconds to keep the conversation alive. Never go silent while waiting.
-* **Sub-agent heartbeat:** All sub-agents must print a short progress message (e.g. `"Working on: implementing service method..."`) every ~30 seconds during long-running tasks. This lets the Dispatcher detect stalls without pinging.
-* **Stale agent recovery:** The Dispatcher must never manually ping a sub-agent and wait passively. Instead, follow this escalation ladder automatically:
-  1. **After ~45 seconds of silence** — check `git diff` for file changes by the sub-agent.
-     * If changes detected → continue waiting, reset timer.
-     * If no changes → proceed to step 2.
-  2. **Send one message** to the sub-agent: `"Status?"` — wait ~20 seconds for a response.
-     * If it responds → continue waiting, reset timer.
-     * If no response → proceed to step 3.
-  3. **Terminate and respawn** — kill the stale agent and spawn a fresh one with the same task. Do NOT ping again or wait further.
-  * **Max respawns per task: 2.** If the second respawn also stalls, the Dispatcher must apply the fix directly (for write agents) or skip and log the issue (for read-only agents).
+* **Dispatcher rules (heartbeat, stale recovery):** See [_shared_dispatcher_rules.md](./_shared_dispatcher_rules.md)
 
 ---
 
@@ -96,37 +86,7 @@ The team should consist of **five agents with clearly defined roles**.
 
 **Blocker escalation:** If during implementation the Implementer discovers that the task breakdown is wrong (missing dependency, scope too large, conflicting requirements), the Implementer must **stop and flag a blocker** to the Dispatcher instead of working around it. The Dispatcher re-splits or re-scopes the task before work continues.
 
-**Service Implementation Style Rules (mandatory):**
-
-The Implementer must read the reference codebase at `/home/alex/Entwicklung/bpp/bpp-file/BPP.File.NET/BPP.File.NET.API/Services/` before writing service code. Key reference files:
-
-* `Upload/BrokernetFileUploadService.cs` — orchestration with numbered steps, guard clauses
-* `BrokernetFile/BrokernetFileService.cs` — minimal clean service
-* `Upload/BrokernetFileValidationService.cs` — validation with early returns
-* `BrokernetFile/BrokernetFileAutoSignService.cs` — business rules with guard clauses
-
-**Enforce these rules in all service implementations:**
-
-| # | Rule | What to look for |
-|---|------|-----------------|
-| 1 | **Max 2 levels of nesting** | Any nesting deeper than 2 levels (loops and conditionals count equally). Must use guard clauses (`continue` / `throw` / `return`) to flatten, or extract inner logic into a private helper. |
-| 2 | **Numbered step comments** | Public orchestration methods missing `// (1) ...`, `// (2) ...` comments (German) on each logical step. |
-| 3 | **Private helper placement** | Private methods serving a public method must sit directly below it, not at file bottom. |
-| 4 | **BaseService field usage** | Services inheriting `BaseService` using constructor params instead of protected fields (`_repositoryWrapper`, `_mapper`, `_logger`, `_auditContextService`). |
-| 5 | **LINQ style** | Query syntax instead of method syntax. Abbreviated lambda names (`.Where(e => ...)` instead of `.Where(entity => ...)`). `var` for entity query variables. |
-| 6 | **Async discipline** | I/O methods not `async Task`, missing `Async` suffix, `.Result` / `.Wait()` calls. |
-| 7 | **Logging** | `Debug.WriteLine`, raw `_logger.Debug()` instead of `CommonLoggerUtil.LogDebug` / `LogDebugAsJson`. |
-| 8 | **Error handling** | Wrong exception type — must use `BrokernetServiceNotFoundException` (404), `BrokernetServiceException` (business), `BrokerException` (user-facing). |
-| 9 | **Repository queries** | `QueryAllAsNoTracking()` for reads, `QueryAll()` for writes. Mixed up = violation. |
-| 10 | **Validate before mutate / expensive I/O** | All validation and early-return checks must come before any persistent state changes AND before expensive operations (API calls, file downloads, etc.). Never modify entity state before confirming the operation should proceed. Never download/fetch before validating inputs. |
-| 11 | **EF tracking verification** | Before submitting, verify every entity that is mutated or saved was loaded via a tracked query (`QueryAll()`), not `QueryAllAsNoTracking()`. This is a common source of silent data corruption. |
-| 12 | **PII masking in logs** | Never log email addresses, phone numbers, or other PII in plaintext. Use masked/redacted values in log messages (e.g. `a***@example.com`). GDPR violation if debug logs reach centralized logging. |
-| 13 | **Reuse existing utilities** | Before writing a new helper/utility method, check if an identical or similar one already exists in the codebase or sibling services. Duplicate static methods across services = violation. |
-| 14 | **Fetch before clear** | When replacing collections (addresses, contacts, etc.), fetch the new data from the external API FIRST, then clear+replace only after the fetch succeeds. Never clear local state before confirming the replacement data is available. |
-| 15 | **Defensive collection operations** | `.ToDictionary()` crashes on duplicate keys. Use `.GroupBy().ToDictionary(g => g.Key, g => g.First())` or check for duplicates first. Same applies to other collection methods that throw on duplicates. |
-| 16 | **Cross-service consistency** | When implementing logic that also exists in a sibling service (e.g. email uniqueness, dedup, fallback chains), check how the sibling handles it and align behavior. Inconsistent handling of the same concern across services = finding. |
-| 17 | **Test value capture** | In tests, capture primitive values (strings, numbers) before the service call, then assert on the captured value — not on entity properties post-operation. Services may mutate entity properties after the operation (e.g. nulling fields), causing assertions via object reference to fail silently. |
-| 18 | **Safe serialization** | Never serialize exceptions or complex objects directly (e.g. `JsonSerializer.Serialize(exception)`). Exceptions contain non-serializable members (`TargetSite`, inner exceptions) that crash at runtime. Extract relevant fields (message, stack trace) into a plain DTO before serializing. |
+**Service Implementation Style Rules (mandatory):** See [_shared_service_style_rules.md](./_shared_service_style_rules.md). The Implementer must read the reference codebase and enforce all 18 rules.
 
 ---
 
@@ -141,32 +101,11 @@ Checks:
 * adherence to the Dispatcher's approved plan (judge **logical completeness**, not step count or naming — the plan is conceptual, not a rigid script)
 * code quality and maintainability
 * **`CLAUDE.md` convention compliance** (naming, patterns, field usage, LINQ style, etc.)
-* **service implementation coding style** (see checklist below)
-* **documentation quality** (see documentation checklist below)
 * security and reliability
 * architectural issues
 * edge cases and risks
 
-**Service Style Checklist (compare against reference at `/home/alex/Entwicklung/bpp/bpp-file/BPP.File.NET/BPP.File.NET.API/Services/`):**
-
-* Guard clauses & early returns — no deep `if`/`else` nesting (max 2 levels)
-* Numbered step comments `// (1) ...`, `// (2) ...` (German) on public orchestration methods
-* Private helpers placed directly below their public method
-* BaseService protected fields used (`_repositoryWrapper`, `_mapper`, etc.), not constructor params
-* LINQ: method syntax, full lambda names (`.Where(entity => ...)`), explicit query variable types
-* Async: all I/O `async Task` + `Async` suffix, no `.Result` / `.Wait()`
-* Logging via `CommonLoggerUtil.LogDebug` / `LogDebugAsJson`, not `Debug.WriteLine`
-* Correct exception types (`BrokernetServiceNotFoundException`, `BrokernetServiceException`, `BrokerException`)
-* `QueryAllAsNoTracking()` for reads, `QueryAll()` for writes
-
-**Documentation Checklist (`/home/alex/Entwicklung/ai-dev-workflows/memory/2_docs/{Feature}.md`):**
-
-* File exists for the implemented feature/module/service
-* Contains: overview, architecture, API contracts, usage examples, business rules, dependencies
-* Accurate — matches what the code actually does (no stale/copy-paste content)
-* Updated (not duplicated) if the file already existed
-* Describes **what** and **why**, not **how**
-* German used for business domain terms, consistent with codebase style
+> **Note:** Deep service style and documentation review is handled by the QA team (`3_agent_team_QA.md`). Impl reviewers focus on correctness, spec compliance, and obvious `CLAUDE.md` violations.
 
 **Review Output Format:**
 
@@ -241,20 +180,7 @@ Runs **once after all tasks are completed** — not per task. Reviews the entire
 
 # Severity Rubric
 
-All reviewers must use this shared rubric when assigning severity:
-
-| Severity | Definition | Examples |
-|----------|-----------|----------|
-| **high** | Data loss, security breach, crash, or core spec requirement completely missing/broken | SQL injection, unhandled null causing 500, entire feature not implemented |
-| **medium** | Incorrect behavior, spec deviation, or degraded performance that affects users | Wrong business logic output, N+1 queries on hot paths, missing auth check on non-critical endpoint |
-| **low** | Minor issues, style violations, edge cases unlikely to occur in practice | Missing `AsNoTracking()` on low-traffic read, naming convention mismatch, `CLAUDE.md` style violation, missing docs on simple getter |
-
-**NOT a finding (do not flag):**
-- Plan says 7 steps but implementation has 9 — step count mismatches are irrelevant if logic is complete
-- Default `CancellationToken` parameter values — idiomatic C#
-- Minor naming differences between plan and implementation
-- Reordering of steps that doesn't affect behavior
-- Implementation using a different (but correct) approach than the plan described
+See [_shared_severity_rubric.md](./_shared_severity_rubric.md) for the full rubric.
 
 ---
 
@@ -293,13 +219,16 @@ For each task in the scope:
 After **all tasks** in the scope are completed:
 
 **Implementation Report:**
-1. Dispatcher writes a summary of all completed tasks, review rounds, and key decisions to `/home/alex/Entwicklung/ai-dev-workflows/memory/2_impl-report/impl-report-phase-{N}-{YYYY-MM-DD}.md` where `{N}` is the current phase/run number (check existing files in `/home/alex/Entwicklung/ai-dev-workflows/memory/2_impl-report/` to determine the next number). If the file already exists, append an increment: `-2`, `-3`, etc. Never overwrite existing files.
+1. Dispatcher writes a summary of all completed tasks, review rounds, and key decisions to `/home/alex/Entwicklung/ai-dev-workflows/memory/2_impl-report/impl-report-run-{N}-{YYYY-MM-DD}.md` where `{N}` is the current run number (check existing files in `/home/alex/Entwicklung/ai-dev-workflows/memory/2_impl-report/` to determine the next number). If the file already exists, append an increment: `-2`, `-3`, etc. Never overwrite existing files.
 
 **Process Retrospective:**
 1. Dispatcher collects all reports, plans, verdicts, and revision histories from the full run
 2. Dispatcher spawns the **Process Reviewer** with this complete history
 3. Process Reviewer produces a retrospective report
-4. Dispatcher writes the retrospective to `/home/alex/Entwicklung/ai-dev-workflows/memory/2_impl-retros/impl-retro-phase-{N}-{YYYY-MM-DD}.md` (same naming rules as above).
+4. Dispatcher writes the retrospective to `/home/alex/Entwicklung/ai-dev-workflows/memory/2_impl-retros/impl-retro-run-{N}-{YYYY-MM-DD}.md` (same naming rules as above).
+
+**Report Audit:**
+1. Dispatcher spawns the **Report Auditor (Adjutant)** per `7_agent_team_report_auditor.md` with team type `impl`.
 
 ---
 

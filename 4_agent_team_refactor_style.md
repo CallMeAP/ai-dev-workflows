@@ -11,9 +11,11 @@ Provided via conversation context (opened file, message, or attached file).
 
 Refactor the service implementations in the provided files to match the coding style of the **bpp-file reference codebase**.
 
-Use a **3-agent system** with strict role separation.
+This team **consumes QA findings** — the Style & Convention Reviewer in the QA team (`3_agent_team_QA.md`) has already analyzed the code. This team applies the fixes.
 
-> **Important:** You (the root agent receiving this prompt) **are** the Dispatcher. Do NOT spawn a separate agent for the Dispatcher role. You coordinate directly and only spawn sub-agents for the Analyzer and Refactorer.
+Use a **2-agent system** with strict role separation.
+
+> **Important:** You (the root agent receiving this prompt) **are** the Dispatcher. Do NOT spawn a separate agent for the Dispatcher role. You coordinate directly and only spawn a sub-agent for the Refactorer.
 
 ---
 
@@ -23,90 +25,27 @@ Use a **3-agent system** with strict role separation.
 **Responsibilities**
 
 * Read **`/home/alex/Entwicklung/bpp/bpp-backend/CLAUDE.md`** for project conventions.
-* Identify all service files in the provided source files.
-* Assign files to the Analyzer, then orchestrate the refactoring loop.
+* **Read QA style findings** from the most recent report in `/home/alex/Entwicklung/ai-dev-workflows/memory/3_qa/`. Look for the **Coding Style & Convention Reviewer** section — this contains per-file style deviation reports with line numbers and suggested fixes.
+* If no QA report exists or the style section is empty, fall back to running an independent style analysis using the rules in [_shared_service_style_rules.md](./_shared_service_style_rules.md).
+* Identify all files with violations from the QA findings.
+* Assign files one-by-one to the Refactorer.
 * Track progress per file as a done checklist.
 
 **Rules**
 
 * No code changes.
 * Only coordinates and delegates.
-* **Heartbeat:** While waiting for a sub-agent, print a short status message (e.g. `"⏳ Waiting for Refactorer..."`) every ~15 seconds to keep the conversation alive. Never go silent while waiting.
-* **Sub-agent heartbeat:** All sub-agents must print a short progress message (e.g. `"Working on: refactoring guard clauses..."`) every ~30 seconds during long-running tasks. This lets the Dispatcher detect stalls without pinging.
-* **Stale agent recovery:** The Dispatcher must never manually ping a sub-agent and wait passively. Instead, follow this escalation ladder automatically:
-  1. **After ~45 seconds of silence** — check `git diff` for file changes by the sub-agent.
-     * If changes detected → continue waiting, reset timer.
-     * If no changes → proceed to step 2.
-  2. **Send one message** to the sub-agent: `"Status?"` — wait ~20 seconds for a response.
-     * If it responds → continue waiting, reset timer.
-     * If no response → proceed to step 3.
-  3. **Terminate and respawn** — kill the stale agent and spawn a fresh one with the same task. Do NOT ping again or wait further.
-  * **Max respawns per task: 2.** If the second respawn also stalls, the Dispatcher must apply the fix directly.
+* **Dispatcher rules (heartbeat, stale recovery):** See [_shared_dispatcher_rules.md](./_shared_dispatcher_rules.md)
 
 ---
 
-## 2. Style Analyzer Agent (Read-Only)
-
-**Access:** Read-only
-
-**Responsibilities**
-
-1. Read the **reference service implementations** at `/home/alex/Entwicklung/bpp/bpp-file/BPP.File.NET/BPP.File.NET.API/Services/`:
-   * `Upload/BrokernetFileUploadService.cs` — orchestration with numbered steps, guard clauses
-   * `BrokernetFile/BrokernetFileService.cs` — minimal clean service
-   * `Upload/BrokernetFileValidationService.cs` — validation with early returns
-   * `BrokernetFile/BrokernetFileAutoSignService.cs` — business rules with guard clauses
-2. Read `/home/alex/Entwicklung/bpp/bpp-backend/CLAUDE.md` for project conventions.
-3. For each service file in scope, produce a **style deviation report**.
-
-**Style Checklist — flag violations of:**
-
-| # | Rule | What to look for |
-|---|------|-----------------|
-| 1 | **Max 2 levels of nesting** | Any nesting deeper than 2 levels (loops and conditionals count equally). Use guard clauses (`continue` / `throw` / `return`) to flatten, or extract inner logic into a private helper method. |
-| 2 | **Numbered step comments** | Public orchestration methods missing `// (1) ...`, `// (2) ...` comments (German) on each logical step. |
-| 3 | **Private helper placement** | Private methods serving a public method must sit directly below it, not at file bottom. |
-| 4 | **BaseService field usage** | Services inheriting `BaseService` using constructor params instead of protected fields (`_repositoryWrapper`, `_mapper`, `_logger`, `_auditContextService`). |
-| 5 | **LINQ style** | Query syntax instead of method syntax. Abbreviated lambda names (`.Where(e => ...)` instead of `.Where(entity => ...)`). `var` for entity query variables. |
-| 6 | **Async discipline** | I/O methods not `async Task`, missing `Async` suffix, `.Result` / `.Wait()` calls. |
-| 7 | **Logging** | `Debug.WriteLine`, raw `_logger.Debug()` instead of `CommonLoggerUtil.LogDebug` / `LogDebugAsJson`. |
-| 8 | **Error handling** | Wrong exception type — must use `BrokernetServiceNotFoundException` (404), `BrokernetServiceException` (business), `BrokerException` (user-facing). |
-| 9 | **Repository queries** | `QueryAllAsNoTracking()` for reads, `QueryAll()` for writes. Mixed up = finding. |
-| 10 | **Validate before mutate / expensive I/O** | All validation and early-return checks must come before any persistent state changes AND before expensive operations (API calls, file downloads). |
-| 11 | **EF tracking verification** | Every entity that is mutated or saved must be loaded via a tracked query (`QueryAll()`), not `QueryAllAsNoTracking()`. This is a common source of silent data corruption. |
-| 12 | **PII masking in logs** | Email, phone, or other PII logged in plaintext. Must be masked/redacted. |
-| 13 | **Reuse existing utilities** | Duplicate static/helper methods across services when an identical one already exists. |
-| 14 | **Fetch before clear** | Collections cleared before replacement data is fetched from external API. |
-| 15 | **Defensive collection operations** | `.ToDictionary()` without duplicate key handling. Must use `.GroupBy().ToDictionary()` or similar. |
-| 16 | **Cross-service consistency** | Same concern handled differently in sibling services without documented reason. |
-| 17 | **Test value capture** | Tests asserting on entity properties post-operation via object reference instead of captured primitive values. |
-| 18 | **Safe serialization** | Serializing exceptions or complex objects directly. Must extract to plain DTO first. |
-
-**Report format (per file):**
-
-```
-### {FileName}
-
-| # | Line(s) | Rule Violated | Current Code | Suggested Refactor |
-|---|---------|--------------|--------------|-------------------|
-| 1 | 42-48   | Guard clauses | nested if/else 3 levels deep | Invert condition, early throw |
-```
-
-**Rules**
-
-* No code changes.
-* Report must include concrete line numbers and a short suggested fix for each violation.
-* If a file has zero violations, report it as **CLEAN** — do not skip it.
-
----
-
-## 3. Refactorer Agent (Developer)
+## 2. Refactorer Agent (Developer)
 
 **Access:** Full write access
 
 **Responsibilities**
 
-* Receive the style deviation report from the Analyzer (via Dispatcher).
+* Receive the style deviation findings (from QA report via Dispatcher).
 * Refactor each flagged file to resolve all reported violations.
 
 **Rules**
@@ -114,10 +53,11 @@ Use a **3-agent system** with strict role separation.
 * **Style-only changes** — do NOT alter business logic, method signatures, return values, or observable behavior.
 * **One file at a time** — complete and report before moving to the next.
 * After each file, provide a brief change summary (violations fixed, lines changed).
+* **Reference:** See [_shared_service_style_rules.md](./_shared_service_style_rules.md) for the full style checklist and reference codebase files.
 
 **Refactoring workflow per file:**
 
-1. Read the style deviation report for the file.
+1. Read the QA style findings for the file.
 2. Read the relevant reference file(s) from bpp-file to understand the target style.
 3. Apply fixes for all reported violations.
 4. **Run `dotnet build`** — fix any compilation errors **and warnings** introduced by the refactor:
@@ -132,13 +72,13 @@ Use a **3-agent system** with strict role separation.
 
 # Workflow
 
-1. Dispatcher identifies all service files in the provided source files
-2. Dispatcher assigns all files to **Style Analyzer**
-3. Style Analyzer reads reference files + `/home/alex/Entwicklung/bpp/bpp-backend/CLAUDE.md`, produces deviation report per file
-4. Dispatcher reviews report, assigns files one-by-one to **Refactorer**
-5. Refactorer fixes violations, reports back
-6. Dispatcher marks file as done, assigns next file
-7. After all files done, Dispatcher prints the final summary to the terminal AND writes it to `/home/alex/Entwicklung/ai-dev-workflows/memory/4_refactor-report/refactor-report-phase-{N}-{YYYY-MM-DD}.md` where `{N}` is the current phase/run number (check existing files in `/home/alex/Entwicklung/ai-dev-workflows/memory/4_refactor-report/` to determine the next number). If the file already exists, append an increment: `-2`, `-3`, etc. Never overwrite existing files.
+1. Dispatcher reads QA style findings from `memory/3_qa/` (or runs independent analysis via [_shared_service_style_rules.md](./_shared_service_style_rules.md) if no QA report)
+2. Dispatcher identifies all files with violations
+3. Dispatcher assigns files one-by-one to **Refactorer**
+4. Refactorer fixes violations, reports back
+5. Dispatcher marks file as done, assigns next file
+6. After all files done, Dispatcher prints the final summary to the terminal AND writes it to `/home/alex/Entwicklung/ai-dev-workflows/memory/4_refactor-report/refactor-report-run-{N}-{YYYY-MM-DD}.md` where `{N}` is the current run number (check existing files in `/home/alex/Entwicklung/ai-dev-workflows/memory/4_refactor-report/` to determine the next number). If the file already exists, append an increment: `-2`, `-3`, etc. Never overwrite existing files.
+7. Dispatcher spawns the **Report Auditor (Adjutant)** per `7_agent_team_report_auditor.md` with team type `refactor`.
 
 **Final summary format:**
 

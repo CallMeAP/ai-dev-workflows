@@ -48,17 +48,7 @@ The team should consist of **four agents with clearly defined roles**.
 * No code changes.
 * Only coordinates, validates designs, and delegates work.
 * **Catastrophic failure gate:** If >50% of tests fail on first run, stop the run and flag to the user — this likely indicates an infrastructure or configuration issue (API down, auth broken, wrong environment), not individual bugs. Do not escalate each failure individually.
-* **Heartbeat:** While waiting for a sub-agent, print a short status message every ~15 seconds to keep the conversation alive. Never go silent while waiting.
-* **Sub-agent heartbeat:** All sub-agents must print a short progress message (e.g. `"Working on: setting up HTTP client for VERA API..."`) every ~30 seconds during long-running tasks. This lets the Dispatcher detect stalls without pinging.
-* **Stale agent recovery:** The Dispatcher must never manually ping a sub-agent and wait passively. Instead, follow this escalation ladder automatically:
-  1. **After ~45 seconds of silence** — check `git diff` for file changes by the sub-agent.
-     * If changes detected → continue waiting, reset timer.
-     * If no changes → proceed to step 2.
-  2. **Send one message** to the sub-agent: `"Status?"` — wait ~20 seconds for a response.
-     * If it responds → continue waiting, reset timer.
-     * If no response → proceed to step 3.
-  3. **Terminate and respawn** — kill the stale agent and spawn a fresh one with the same task. Do NOT ping again or wait further.
-  * **Max respawns per task: 2.** If the second respawn also stalls, the Dispatcher must apply the fix directly (for write agents) or skip and log the issue (for read-only agents).
+* **Dispatcher rules (heartbeat, stale recovery):** See [_shared_dispatcher_rules.md](./_shared_dispatcher_rules.md)
 
 ---
 
@@ -266,12 +256,12 @@ If `/home/alex/Entwicklung/ai-dev-workflows/memory/6_hotfix/` contains reports f
 
 ---
 
-**Report:** Dispatcher writes test report to `/home/alex/Entwicklung/ai-dev-workflows/memory/5_integration_tests/integration-tests-phase-{N}-{YYYY-MM-DD}.md` where `{N}` is the current phase/run number (check existing files to determine next number). If file exists, append increment. Never overwrite.
+**Report:** Dispatcher writes test report to `/home/alex/Entwicklung/ai-dev-workflows/memory/5_integration_tests/integration-tests-run-{N}-{YYYY-MM-DD}.md` where `{N}` is the current run number (check existing files to determine next number). If file exists, append increment. Never overwrite.
 
 **Report template:**
 
 ```markdown
-## Integration Test Report — Phase {N}
+## Integration Test Report — Run {N}
 
 ### Summary
 - Tests executed: X
@@ -309,6 +299,8 @@ If `/home/alex/Entwicklung/ai-dev-workflows/memory/6_hotfix/` contains reports f
 ```
 
 **If any bugs were escalated (too large for inline fix),** the report must include a `## Pending Hotfixes` section listing each bug with: file, description, severity, and the `[Ignore]` test that covers it. This signals the user to run the **Hotfix team** (`6_agent_team_hotfix.md`) separately after this run completes.
+
+**Report Audit:** After writing the report, Dispatcher spawns the **Report Auditor (Adjutant)** per `7_agent_team_report_auditor.md` with team type `integration-testing`.
 
 ---
 
