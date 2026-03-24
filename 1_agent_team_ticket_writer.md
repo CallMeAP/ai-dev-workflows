@@ -113,7 +113,8 @@ Key snippets from the codebase to follow or extend:
 
 **Ticket rules:**
 
-* **One logical unit per ticket** — a ticket should touch max ~3-5 files and represent a single deliverable (e.g. one service, one endpoint, one DTO set)
+* **One logical unit per ticket** — a ticket should touch **max 5 files (hard cap)** and represent a single deliverable (e.g. one service, one endpoint, one DTO set). If a ticket exceeds 5 files, split into sub-tickets before finalization.
+* **Scope fences for shared files** — when adjacent tickets touch the same file, each ticket must declare which methods/regions it owns and `DO NOT TOUCH` areas owned by other tickets
 * **Dependency order** — tickets must be ordered so that dependencies come first. If T-3 depends on T-1, T-1 must come first.
 * **Acceptance criteria must be testable** — each criterion should be verifiable (e.g. "returns 404 when entity not found", not "handles errors properly")
 * **No vague language** — avoid "should handle appropriately", "needs to be robust", etc. Be specific.

@@ -16,4 +16,5 @@ The Dispatcher must never manually ping a sub-agent and wait passively. Follow t
    * If it responds → continue waiting, reset timer.
    * If no response → proceed to step 3.
 3. **Terminate and respawn** — kill the stale agent and spawn a fresh one with the same task. Do NOT ping again or wait further.
-   * **Max respawns per task: 2.** If the second respawn also stalls, the Dispatcher must apply the fix directly (for write agents) or skip and log the issue (for read-only agents).
+   * **Max respawns per task: 1.** If the respawn also stalls (no progress after 2 heartbeats), **do not respawn again** — split the task into smaller sub-tasks and assign separately.
+   * If the task cannot be split further, the Dispatcher must apply the fix directly (for write agents) or skip and log the issue (for read-only agents).

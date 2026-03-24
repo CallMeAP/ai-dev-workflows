@@ -25,9 +25,11 @@ The team should consist of **five agents with clearly defined roles**.
 * Before assigning any work, produce:
   1. **File Manifest** — list of all relevant files, modules, and entry points with a short description of each file's role.
   2. **Scope Boundary** — clear definition of what is in-scope and out-of-scope.
-  3. **Task Breakdown** — ordered list of tasks with dependencies, tracked as a done checklist. Each task should be **~1 logical unit** (e.g. one service, one controller, one mapping profile) and touch **max ~3-5 files**. If a task is larger, split it.
+  3. **Task Breakdown** — ordered list of tasks with dependencies, tracked as a done checklist. Each task should be **~1 logical unit** (e.g. one service, one controller, one mapping profile) and touch **max 5 files (hard cap)**. If a task exceeds 5 files, **auto-split before assignment**.
+  4. **Scope Fences** — when multiple tasks touch the same file, each task must declare boundaries (e.g. `DO NOT TOUCH: methods X, Y, Z — owned by T-{n}`).
 * Assign tasks one-by-one to the Implementer.
-* **Approve the Implementer's plan** against the spec before greenlighting implementation.
+* **Assign task mode**: `direct-implement` (default) for unambiguous S/M tasks, `plan-approve` for design decisions or L/XL complexity.
+* **Approve the Implementer's plan** (plan-approve mode only) against the spec before greenlighting implementation.
 * **Pass the approved plan to both Reviewers** alongside the implementation, so they can verify adherence.
 * Wait for review results before assigning the next task.
 * Track progress on the done checklist.
@@ -56,13 +58,15 @@ The team should consist of **five agents with clearly defined roles**.
 
 1. **Consult `CLAUDE.md`** for coding guidelines and conventions relevant to the task
 2. Analyze task
-3. Create **implementation plan**:
+3. **Check task mode** (set by Dispatcher):
+   * **Direct-implement** (default): skip to step 6.
+   * **Plan-approve**: continue to step 4.
+4. Create **implementation plan** _(plan-approve only)_:
    * files to modify
    * components/services to create
    * dependencies
    * **state trace** (if the task involves modifying entity state, flag resets, or ordering of mutations): include a step-by-step before/after trace showing the state at each step — this surfaces sequencing bugs early
-4. Submit plan to **Dispatcher for approval**
-5. **Wait for Dispatcher approval** (if plan is rejected, revise and resubmit — see Workflow Loop)
+5. Submit plan to **Dispatcher for approval** — wait for approval (if rejected, revise and resubmit — see Workflow Loop)
 6. Implement changes
 7. **Verify build** — run `dotnet build` and fix any compilation errors **and warnings** before proceeding. Treat warnings as errors:
    * Unused parameters, variables, or `using` statements — remove them
@@ -104,6 +108,7 @@ Checks:
 * security and reliability
 * architectural issues
 * edge cases and risks
+* **test coverage for new public behavior** — if the task adds new public methods/endpoints, at least 1 test must exist. Flag missing coverage as medium severity.
 
 > **Note:** Deep service style and documentation review is handled by the QA team (`3_agent_team_QA.md`). Impl reviewers focus on correctness, spec compliance, and obvious `CLAUDE.md` violations.
 
@@ -188,9 +193,11 @@ See [_shared_severity_rubric.md](./_shared_severity_rubric.md) for the full rubr
 
 For each task in the scope:
 
-1. Dispatcher assigns task
-2. Implementer consults `CLAUDE.md`, writes **implementation plan**
-3. Dispatcher **validates plan** against spec + scope
+1. Dispatcher assigns task with mode: **direct-implement** (default) or **plan-approve**
+2. Implementer consults `CLAUDE.md`
+   * **Direct-implement:** skip to step 4
+   * **Plan-approve:** write **implementation plan**, continue to step 3
+3. _(Plan-approve only)_ Dispatcher **validates plan** against spec + scope
    * **If plan rejected** → Dispatcher provides reasoning → Implementer revises plan → back to step 3 (max 3 plan revision rounds)
 4. Implementer **implements**
    * If Implementer hits a blocker → flags to Dispatcher → Dispatcher re-scopes → back to step 1
