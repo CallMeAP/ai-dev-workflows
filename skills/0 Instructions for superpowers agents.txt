@@ -1,0 +1,26 @@
+0. Instructions for the implementing agent
+STOP-AND-ASK RULE — read before starting any task.
+
+If anything in this plan or its source spec is unclear, ambiguous, contradictory, or insufficient for you to make a confident decision, pause and raise the question to the orchestrating agent (the user) before continuing. Do not:
+
+leave // TODO / // FIXME / // HACK comments in code
+silently pick one of several possible interpretations
+invent missing types, fields, enum values, route paths, or behaviour
+guess at the meaning of an attribute, permission, or DTO shape
+skip a step "for later"
+proceed with placeholder names, dummy values, or stub implementations
+Instead, stop the task, summarise the ambiguity in one or two sentences, list the options you see, and ask the orchestrator which to take. Resume only after receiving an explicit answer.
+
+A previous run produced a large backlog of unresolved TODOs because the spec/plan was treated as exhaustive when it wasn't. This rule is the explicit fix for that.
+
+Exception: trivial naming choices that follow already-established project conventions (e.g., kebab-casing a new route segment, choosing a private readonly field name) do not require pausing. The bar is: "could a reasonable reader interpret this two materially different ways?" If yes → ask.
+
+CHECKBOX-COMPLETION RULE.
+
+Mark a step - [X] ONLY after BOTH:
+
+The work in the step is implemented (code written, command run, file created, etc.) AND
+It has been reviewed (by the orchestrating agent, by a code-reviewer subagent, or — if running fully autonomously — verified to compile/test green and to match the spec).
+Do NOT preemptively check off a step before review. Do NOT batch-check multiple steps after the fact. The checkbox is the audit trail — keep it honest.
+
+If a step needed rework after review, leave the box unchecked until the rework is done and re-reviewed.
