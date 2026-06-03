@@ -24,7 +24,7 @@ Single-command bulk update of the `<BppSharedVersion>` property in every BPP .NE
 | Push remote | `origin` |
 | Channel | latest version with `-development+*` suffix |
 | Repo glob | `~/Entwicklung/bpp/bpp-*` (excluding `bpp-shared`, worktrees) |
-| Props path | first `BPP.*.NET/Directory.Build.props` under each repo containing `<BppSharedVersion>` |
+| Props path | first `BPP.*/Directory.Build.props` under each repo containing `<BppSharedVersion>` (matches non-`.NET` project folders too, e.g. `BPP.DocumentAnalysis`) |
 
 ## Skip rules
 
@@ -54,7 +54,7 @@ echo "Latest bpp-shared (development): $LATEST"
 
 ```bash
 mapfile -t PROPS < <(find ~/Entwicklung/bpp -maxdepth 3 -type f -name 'Directory.Build.props' \
-  -path '*BPP.*.NET/*' \
+  -path '*BPP.*/*' \
   -not -path '*bpp-shared/*' \
   -not -path '*.worktrees/*' \
   2>/dev/null \
@@ -146,6 +146,7 @@ If `Skipped` is non-empty, end the message with one line per skipped repo so the
 - **Auto-stashing dirty changes** → never. Skip + notify; the user owns their working tree.
 - **Auto-checkout to `development`** → never. Skip + notify if on another branch.
 - **Mass-rewriting other props files** → only touch files that already contain `<BppSharedVersion>`. The `xargs grep -l` filter is non-negotiable.
+- **Narrowing the discovery glob to `*BPP.*.NET/*`** → don't. Some repos use a non-`.NET` project folder (e.g. bpp-document-analysis → `BPP.DocumentAnalysis/`) and were silently skipped. The glob is `*BPP.*/*`; the `xargs grep -l '<BppSharedVersion>'` filter + `-maxdepth 3` keep the broader match safe.
 - **Using `--force` on push** → never. Plain `git push origin development` only.
 - **Including `bpp-shared` itself** → it's the source, not a consumer. Path filter excludes it.
 - **Running multiple repos in parallel** → keep sequential. Per-repo output must be readable; any conflict needs a clear single-repo error.
