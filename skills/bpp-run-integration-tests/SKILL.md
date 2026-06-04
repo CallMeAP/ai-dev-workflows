@@ -1,6 +1,6 @@
 ---
 name: bpp-run-integration-tests
-description: Use when user wants to run end-to-end / integration tests in a BPP .NET repo and auto-heal failures — phrases like "run integration tests", "run e2e tests", "are integration tests green", "fix failing integration tests", "check integration tests". Discovers test projects, starts the local stack via bpp-start-local-stack, runs `dotnet test --filter Category=Integration|LocalIntegration`, and on failure investigates recent commits in cwd + bpp-shared before stopping for user input.
+description: Use when user wants to run end-to-end / integration tests in a BPP .NET repo and auto-heal failures — phrases like "run integration tests", "run e2e tests", "are integration tests green", "fix failing integration tests", "check integration tests". Discovers test projects, starts the local stack via bpp-start-local-stack, runs `dotnet test --filter Category=Integration`, and on failure investigates recent commits in cwd + bpp-shared before stopping for user input.
 ---
 
 # bpp-run-integration-tests
@@ -21,7 +21,7 @@ Both `bpp-backend` and `bpp-vera-connector` follow the same pattern:
 - NUnit 4.x + `Microsoft.AspNetCore.Mvc.Testing`
 - Base class marked `[Category("Integration")]` → all subclasses inherit
 - `[SetUpFixture] GlobalTestSetup` performs health-probe + JWT login + DB guard
-- `bpp-backend` adds a stricter `Category("LocalIntegration")` for tests requiring the full local stack
+- `bpp-backend` e2e suites are stage-aware — same `[Category("Integration")]`, env-driven via `ASPNETCORE_ENVIRONMENT` (`local-integration` locally, `{branch}-integration` in CI)
 - `[Explicit]` tests (e.g. JsReport) are intentionally opt-in — leave alone
 
 Other BPP .NET repos likely follow the same pattern. Run discovery to confirm.
@@ -54,7 +54,7 @@ Invoke `bpp-start-local-stack` skill (it verifies via status afterward). If any 
 For each discovered project:
 
 ```bash
-dotnet test <project>.csproj --filter "Category=Integration|Category=LocalIntegration" --logger "console;verbosity=normal" --nologo
+dotnet test <project>.csproj --filter "Category=Integration" --logger "console;verbosity=normal" --nologo
 ```
 
 Capture: pass/fail counts, names of failed tests, full stack traces.
@@ -94,7 +94,7 @@ Leave any test edits unstaged for the user to review.
 |---|---|
 | Discover | `grep -rln 'Category("Integration")' --include="*.cs"` |
 | Start stack | invoke `bpp-start-local-stack` skill |
-| Run | `dotnet test X.csproj --filter "Category=Integration\|Category=LocalIntegration"` |
+| Run | `dotnet test X.csproj --filter "Category=Integration"` |
 | Recent commits (cwd) | `git log --since="48 hours ago" --oneline --name-only` |
 | Recent commits (shared) | `git -C ~/Entwicklung/bpp/bpp-shared log --since="48 hours ago" --oneline --name-only` |
 

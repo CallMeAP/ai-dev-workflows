@@ -9,7 +9,7 @@ description: Use when adding end-to-end / self-seeding integration tests to a BP
 
 In-process `WebApplicationFactory<Program>` boots the module's API; a `[SetUpFixture] GlobalTestSetup`
 seeds its own data idempotently (raw Npgsql) and logs in, then exposes shared `HttpClient`s. Tests
-drive live HTTP calls against the real endpoints. Everything is tagged `[Category("LocalIntegration")]`.
+drive live HTTP calls against the real endpoints. Everything is tagged `[Category("Integration")]`.
 
 **Self-seeding is the point:** the suite never depends on the bpp-shared `DbSeeder` having been run.
 Every run "ensures its data exists, else inserts it" and force-resets any field a test mutates.
@@ -42,9 +42,9 @@ Read one of these first; copy its structure.
    all fixtures, but NOT the unit-test namespace — so unit-only runs don't touch the DB): pre-flight
    probe → localhost DB guard → self-seed (raw Npgsql, `PasswordHasherUtil.Create` for any login
    user) → login → build authenticated client. Expose `internal static` clients/ids.
-7. **Fixtures per controller**, each `[Category("LocalIntegration")]`.
-8. **Run**: `dotnet test <proj> --filter "Category=LocalIntegration"`. CI excludes via
-   `--filter "Category!=LocalIntegration"`. Run twice to prove idempotency.
+7. **Fixtures per controller**, each `[Category("Integration")]`.
+8. **Run**: `dotnet test <proj> --filter "Category=Integration"`. CI excludes via
+   `--filter "Category!=Integration"`. Run twice to prove idempotency.
 
 ## Self-seeding rules
 
