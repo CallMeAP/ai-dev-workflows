@@ -16,11 +16,19 @@ Bulk-create dev→staging MRs across all BPP repos in the `brokernet/` GitLab gr
 
 ## Repo filter
 
-Only these repos in `brokernet/` group:
+Filtered repos in `brokernet/` group:
 - `^bpp-.*` (e.g. `bpp-backend`, `bpp-auth`, `bpp-stella`)
 - `^brokernet-.*-ui$` (e.g. `brokernet-cockpit-ui`, `brokernet-onboarding-ui`)
 
 Exclude everything else (ops scripts, infra, archived).
+
+### Always-include extras (do NOT match the filter / live in a subgroup)
+
+These are explicitly added on every run regardless of the filter:
+- `brokernet-document-cms` — in `brokernet/` group but has no `-ui$` suffix → filter misses it.
+- `callidus-bvs-ui` — in the `brokernet/callidus/` **subgroup**, so the group listing never returns it; needs the encoded path `brokernet%2Fcallidus%2Fcallidus-bvs-ui`.
+
+Because one extra lives in a subgroup, the encoded project path can't be derived as `brokernet%2F${repo}` for every repo. The workflow therefore builds a per-repo `ENC[repo]` → encoded-path map and uses `${ENC[$repo]}` everywhere instead of hardcoding `brokernet%2F${repo}`.
 
 ## MR defaults (non-negotiable)
 
@@ -38,9 +46,22 @@ Exclude everything else (ops scripts, infra, archived).
 
 ### 1. Discover repos
 
+Build a `name → encoded-project-path` map. Filtered repos get `brokernet%2F${repo}`; the always-include extras are added explicitly (one of them with a subgroup-encoded path). Every later step keys off `${ENC[$repo]}`.
+
 ```bash
-REPOS=($(glab api "/groups/brokernet/projects?per_page=100&simple=true" \
-  | jq -r '.[] | select(.path | test("^(bpp-|brokernet-.*-ui$)")) | .path'))
+declare -A ENC
+
+# Filtered repos from the brokernet/ group
+while read -r repo; do
+  ENC[$repo]="brokernet%2F${repo}"
+done < <(glab api "/groups/brokernet/projects?per_page=100&simple=true" \
+  | jq -r '.[] | select(.path | test("^(bpp-|brokernet-.*-ui$)")) | .path')
+
+# Always-include extras (filter misses them / subgroup)
+ENC[brokernet-document-cms]="brokernet%2Fbrokernet-document-cms"
+ENC[callidus-bvs-ui]="brokernet%2Fcallidus%2Fcallidus-bvs-ui"
+
+REPOS=("${!ENC[@]}")
 ```
 
 ### 2. Check diffs and validate branches (FAIL LOUDLY)
@@ -51,7 +72,7 @@ For each repo, compare `staging` ← `development`. Detect missing branches by c
 declare -A AHEAD
 declare -a MISSING
 for repo in "${REPOS[@]}"; do
-  enc="brokernet%2F${repo}"
+  enc="${ENC[$repo]}"
   resp=$(glab api "/projects/${enc}/repository/compare?from=staging&to=development" 2>/dev/null)
   count=$(echo "$resp" | jq -r '.commits | length' 2>/dev/null)
   if [ -z "$count" ] || [ "$count" = "null" ]; then
@@ -78,7 +99,7 @@ declare -A EXISTING_MR
 for repo in "${REPOS[@]}"; do
   c=${AHEAD[$repo]:-0}
   [ "$c" -eq 0 ] && continue
-  enc="brokernet%2F${repo}"
+  enc="${ENC[$repo]}"
   iid=$(glab api "/projects/${enc}/merge_requests?state=opened&source_branch=development&target_branch=staging" 2>/dev/null \
     | jq -r '.[0].iid // empty')
   [ -n "$iid" ] && EXISTING_MR[$repo]=$iid
@@ -114,7 +135,7 @@ Only for repos with `AHEAD[$repo] > 0` AND no existing open MR:
 for repo in "${REPOS[@]}"; do
   [ "${AHEAD[$repo]}" -eq 0 ] && continue
   [ -n "${EXISTING_MR[$repo]}" ] && continue
-  enc="brokernet%2F${repo}"
+  enc="${ENC[$repo]}"
   result=$(glab api --method POST "/projects/${enc}/merge_requests" \
     -f source_branch=development \
     -f target_branch=staging \
@@ -147,4 +168,4 @@ Final summary: created MRs (with URLs) and skipped repos.
 
 - About to call POST `/merge_requests` before showing preview → STOP, show preview first.
 - Got a 404 on `/repository/compare` → do NOT silently skip; abort with error.
-- Considering creating an MR for a repo not matching the filter → STOP, exclude it.
+- Considering creating an MR for a repo not matching the filter AND not in the always-include extras list → STOP, exclude it.
