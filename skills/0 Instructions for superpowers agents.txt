@@ -24,3 +24,12 @@ It has been reviewed (by the orchestrating agent, by a code-reviewer subagent, o
 Do NOT preemptively check off a step before review. Do NOT batch-check multiple steps after the fact. The checkbox is the audit trail — keep it honest.
 
 If a step needed rework after review, leave the box unchecked until the rework is done and re-reviewed.
+
+REPO-MIRROR RULE.
+
+This repo is the canonical source and is published to a GitLab mirror. After editing tracked .md files (top-level *.md + skills/**/*.md), mirror the change to the published copy, then commit AND push BOTH repos before finishing:
+
+- Source (GitHub): /home/alex/Entwicklung/ai-dev-workflows -> origin github.com/CallMeAP/ai-dev-workflows
+- Mirror (GitLab): /home/alex/Entwicklung/lipso/agentic-coding-knowledge/personal-workflows/apittrich -> origin gitlab.com/lipso/internal/agentic-coding-knowledge
+
+Scope: tracked .md only. Exclude memory/ (gitignored) and non-.md files. This .txt is itself out of scope, so it lives in the source repo only and is NOT mirrored to GitLab. Nothing auto-syncs — edit the source, then mirror by hand. SYNC.md at the source root is the canonical statement of this rule.
