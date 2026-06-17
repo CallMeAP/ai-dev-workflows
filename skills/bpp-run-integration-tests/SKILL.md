@@ -61,6 +61,15 @@ Capture: pass/fail counts, names of failed tests, full stack traces.
 
 `[Explicit]` tests stay skipped — that's intentional. Don't add `--filter Explicit` or similar.
 
+**When a repo has many e2e suites, run one project at a time and space them ≥60s apart — never run them all at once.** Each module's `[SetUpFixture] GlobalTestSetup` logs in several personas at boot; running suites concurrently (`dotnet test <sln> --filter Category=Integration`) or back-to-back bursts those logins past **bpp-auth's** rate limit. bpp-auth login has **no retry**, so a whole suite dies in `OneTimeSetUp` with `bpp-auth login fehlgeschlagen (429)` and reports e.g. `Failed: 345, Passed: 0` in ~4s — looks like a mass regression but is pure throttling. Drive it with a spaced loop, e.g.:
+
+```bash
+for proj in <projects-with-integration-tests>; do
+  dotnet test "$proj" --filter "Category=Integration" --nologo
+  sleep 60   # let bpp-auth's login rate-limit window reset before the next suite
+done
+```
+
 ### 5. On failure — investigate, do NOT auto-fix blindly
 
 For each failed test:
@@ -75,7 +84,7 @@ For each failed test:
 4. Classify failure:
    - **Likely production regression** (recent commit in cwd or bpp-shared touches relevant files) → **STOP**, report commit SHAs + message + which test(s) they likely broke. Ask user how to proceed. Do NOT modify test logic to "make it green".
    - **Likely test drift** (no relevant recent commits; assertion mismatch looks like contract update) → propose a minimal test-side fix and ask user before applying.
-   - **Environment / flake** (timeout, connection refused, port-in-use) → re-run once. If still failing, STOP and report.
+   - **Environment / flake** (timeout, connection refused, port-in-use; or a whole suite failing in `OneTimeSetUp` with `bpp-auth login fehlgeschlagen (429)` — that's the login-throttle from running suites un-spaced, see Step 4) → re-run that suite in isolation, ≥60s after the previous one. If still failing, STOP and report.
    - **Unknown** → STOP, report full output, ask user.
 
 ### 6. Re-run loop — hard cap
@@ -111,3 +120,4 @@ Leave any test edits unstaged for the user to review.
 - **Forcing `[Explicit]` tests to run** — they are opt-in for a reason.
 - **Looping indefinitely** — respect the 3-run cap.
 - **Committing fixes silently** — never. Leave changes for user review.
+- **Running every e2e suite at once / back-to-back** (`dotnet test <sln>`) → bursts bpp-auth logins → mass `OneTimeSetUp` 429s that look like a regression but aren't. Space suites ≥60s (see Step 4).
