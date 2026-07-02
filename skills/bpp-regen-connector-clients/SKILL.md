@@ -38,7 +38,7 @@ Ports are pinned by the local stack; cross-check against `*Connector.BaseUrl` in
 
 Invoke the `bpp-pull-all-dev` skill. Source repos must be on fresh `development` — otherwise you regen against a stale API.
 
-**Source-repo state rule:** if a source repo is dirty or not on `development` (pull-all-dev skips it), its running service reflects WIP/off-branch code — **skip that connector**, report `skipped (dirty/off-branch source)`. Never stash or touch the source repo's working tree.
+**Source-repo state rule:** if a source repo's running service reflects WIP/off-branch **code**, skip that connector (`skipped (dirty/off-branch source)`). Judge by what is actually dirty/behind, not by the skip flag alone: local-config-only dirt (`appsettings.local.json`, `application-local.yml`) and behind-commits that can't change the API (e.g. `Directory.Build.props` NuGet pin bumps — locally the bpp-shared project-ref wins anyway) → proceed, note it in the summary. Dirty controller/service/DTO code or behind API-relevant commits → skip. Never stash or touch the source repo's working tree.
 
 ### 2. Discover in-scope connectors
 
