@@ -35,6 +35,7 @@ The qodana CI component analyzes **without restoring the private BPP.Shared.NET 
 | `RedundantNameQualifier` | qualifier "redundant" only because shared ns invisible | Removal can **break compilation** (qualifier disambiguates same-named local vs shared enums — cheggnet had 11 such) |
 | `NUnit1003` (blocker!) | `[TestCase]` args containing shared **enum members** → analyzer miscounts arity ("got 0") | "Fixing" breaks passing tests (vera had 265, file 30 — ALL false) |
 | `InheritdocInvalidUsage` | inheritdoc → shared interface | Pointless rewrites |
+| `RedundantCast` (subset) | numeric casts on shared DTO properties flagged "redundant" (e.g. `(float)` on `double?`/`decimal?` sources) because the property type was unresolved | Removal **breaks compile** — backend had 177 such; verify the source type locally before removing any cast involving shared types |
 | nullability-contract checks (`ConditionalAccessQualifier…`, `NullCoalescing…AccordingToAPIContract`) | contracts of shared APIs unknown to scanner | Behavioral edits on wrong premises |
 
 **Verification rule before touching ANY of these:** confirm the referenced symbol genuinely fails (typo/renamed/moved) — if it's a correct reference to a bpp-shared/cross-assembly type, skip as "scan artifact" and count it. For NUnit1003: actual-arg-count vs method-param-count; matching arity + shared-typed args = artifact.
