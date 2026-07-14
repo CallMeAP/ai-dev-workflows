@@ -1,6 +1,6 @@
 ---
 name: bpp-run-integration-tests
-description: Use when user wants to run end-to-end / integration tests in a BPP .NET repo and auto-heal failures — phrases like "run integration tests", "run e2e tests", "are integration tests green", "fix failing integration tests", "check integration tests". Discovers test projects, starts the local stack via bpp-start-local-stack, runs `dotnet test --filter Category=Integration`, and on failure investigates recent commits in cwd + bpp-shared before stopping for user input.
+description: Use when user wants to run end-to-end / integration tests in a BPP .NET repo and auto-heal failures — phrases like "run integration tests", "run e2e tests", "are integration tests green", "fix failing integration tests", "check integration tests". Discovers test projects, starts the local stack via bpp-start-local-stack, runs `dotnet test --filter Category=Integration`, and on failure investigates recent commits in cwd + bpp-shared before stopping for user input. Always skips bpp-document-analysis (aka bpp-doci) and bpp-agent entirely (no unit, no e2e).
 ---
 
 # bpp-run-integration-tests
@@ -14,6 +14,10 @@ Auto-discovers integration tests in a BPP .NET repo (NUnit + WebApplicationFacto
 - "run integration tests", "run e2e tests", "run integration suite"
 - "are integration tests green", "check integration tests"
 - "integration tests are failing — fix them"
+
+## Excluded repos (standing user directive, non-negotiable)
+
+**ALWAYS skip `bpp-document-analysis` (aka "bpp-doci") and `bpp-agent` — no unit tests, no integration/e2e tests**, whether cwd is that repo or a fleet-wide sweep includes it. Resolve repo names/paths via the `bpp-project-index` skill. If cwd IS one of these repos, report the standing exclusion and stop instead of running anything. In fleet summaries, list them as `SKIPPED (excluded by user directive)` — never as green or missing.
 
 ## Conventions Discovered
 
@@ -35,10 +39,10 @@ Other BPP .NET repos likely follow the same pattern. Run discovery to confirm.
 find . -name "*.csproj" \( -path "*Tests*" -o -path "*IntegrationTests*" \) -not -path "*/bin/*" -not -path "*/obj/*"
 
 # Confirm which contain integration tests
-grep -rln 'Category("Integration")' --include="*.cs" <test-project-dir>
+grep -rlnE 'Category\("(Local)?Integration"|Category\(IntegrationTestCategories\.' --include="*.cs" <test-project-dir>
 ```
 
-Build the working set: csproj files whose source contains `[Category("Integration")]`.
+Build the working set: csproj files whose source contains an integration category. CAUTION: bpp-backend module suites tag via the CONSTANT `[Category(IntegrationTestCategories.Integration)]` — a grep for the literal `Category("Integration")` misses all 8 of them (Backoffice/Contract/Customer/GoUser/News/Products/Rahmenvereinbarung/Tenant; proven blind spot 2026-07-13). The `--filter "Category=Integration"` at run time works either way (it matches the resolved value).
 
 ### 2. Repo-specific prereq checks
 
@@ -101,7 +105,7 @@ Leave any test edits unstaged for the user to review.
 
 | Step | Command |
 |---|---|
-| Discover | `grep -rln 'Category("Integration")' --include="*.cs"` |
+| Discover | `grep -rlnE 'Category\("(Local)?Integration"|Category\(IntegrationTestCategories\.' --include="*.cs"` |
 | Start stack | invoke `bpp-start-local-stack` skill |
 | Run | `dotnet test X.csproj --filter "Category=Integration"` |
 | Recent commits (cwd) | `git log --since="48 hours ago" --oneline --name-only` |
@@ -116,8 +120,10 @@ Leave any test edits unstaged for the user to review.
 
 ## Common Mistakes
 
+- **Running anything in bpp-document-analysis (bpp-doci) or bpp-agent** → standing user exclusion, unit AND e2e. Skip + report, never run.
 - **Auto-fixing tests to make them green** when production regressed → masks the real bug. Always classify the failure first.
 - **Forcing `[Explicit]` tests to run** — they are opt-in for a reason.
 - **Looping indefinitely** — respect the 3-run cap.
 - **Committing fixes silently** — never. Leave changes for user review.
+- **Grepping only the literal `Category("Integration")`** → misses suites tagged via the `IntegrationTestCategories` constant (all 8 bpp-backend module e2e suites) — they silently get classified unit-only and never run.
 - **Running every e2e suite at once / back-to-back** (`dotnet test <sln>`) → bursts bpp-auth logins → mass `OneTimeSetUp` 429s that look like a regression but aren't. Space suites ≥60s (see Step 4).
