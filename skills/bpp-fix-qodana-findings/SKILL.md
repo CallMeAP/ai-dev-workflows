@@ -38,7 +38,7 @@ To force a qodana run against current development, per repo:
 2. Append ONE trivial line to `README.md`/`PROJECT.md`: `<!-- qodana refresh probe <date> -->`. The qodana ci-component has **no `rules:changes` gating** (verified 2026-07-16), so a docs-only touch triggers the scan in every repo.
 3. Open a **Draft** MR targeting development; set the reviewer with a separate `glab mr update <iid> --reviewer apittrich` (creation-time `reviewer_ids` are silently dropped).
 4. Poll the pipeline with a **bounded bash sleep-loop inside a single Bash call** — never "wait" across turns (waiting agents go idle instead of polling).
-5. The probe MR **becomes the fix MR**: push the classified fixes onto the same branch and un-draft it — or **close** it if the fresh report is clean.
+5. The probe MR **becomes the fix MR**: push the classified fixes onto the same branch, **remove the probe marker line first** (README/PROJECT.md must end byte-identical to development), then un-draft it — or **close** it if the fresh report is clean.
 
 No-report repos (probe is pointless — record + skip): `bpp-shared-template` (no `QODANA_TOKEN`), `bpp-agent` (scaffold, no MR pipelines).
 
@@ -66,23 +66,25 @@ The qodana CI component analyzes **without restoring the private BPP.Shared.NET 
 - `UnusedAutoPropertyAccessor.Global` / `Unused*` on DTOs/entities — consumed by other repos, JSON/EF serialization, reflection. In bpp-shared these are false positives BY DESIGN (consumers live in other repos). Suppress via qodana.yaml instead.
 - `EntityFramework.ModelValidation.UnlimitedStringLength` — real, but = MaxLength decisions + DB migrations → separate ticket, never a smell-sweep edit.
 - Generated code (`*.g.cs`, EF `Migrations/*.Designer.cs`, model snapshots) — exclude via config, never edit.
-- Intent-preserving "redundancies": documented no-op `default:` switch sections, explicit switch arms that document a mapping table.
+- Intent-preserving "redundancies": documented no-op `default:` switch sections, explicit switch arms that document a mapping table. Includes `PatternIsRedundant` on `X or Y or _ =>` mapper arms — the explicit enum values ARE the documented mapping table; never "simplify" a production mapper (vera ×5).
 
 ## Safe-mechanical tier (fix these)
 
-`RedundantDefaultMemberInitializer`, `RedundantCast` (verify overload/numeric semantics per site), `RedundantExtendsListEntry`, `RedundantAnonymousTypePropertyName`, `RedundantArgumentDefaultValue` (skip when the explicit arg is the semantic subject of a test), `RedundantAssignment`, `RedundantExplicitArrayCreation`, `NUnit1033` (`TestContext.WriteLine` → `TestContext.Out.WriteLine`), `UsingStatementResourceInitialization` (split prop-init out of `using var`), genuinely-broken XML docs (orphaned `<param>`, `typeparam "T?"`, doc comment orphaned by mis-nested `#region`), `RedundantNameQualifier` ONLY for BCL/local namespaces after verifying: matching `using` exists AND bare name is unambiguous repo-wide.
+`RedundantDefaultMemberInitializer`, `RedundantCast` (verify overload/numeric semantics per site), `RedundantExtendsListEntry`, `RedundantAnonymousTypePropertyName`, `RedundantArgumentDefaultValue` (skip when the explicit arg IS the test subject — e.g. an explicit `claimStatus`/`role` param the test exists to exercise), `RedundantAssignment`, `RedundantExplicitArrayCreation`, `NUnit1033` (`TestContext.WriteLine` → `TestContext.Out.WriteLine`), `UsingStatementResourceInitialization` (split prop-init out of `using var`), genuinely-broken XML docs (orphaned `<param>`, `typeparam "T?"`, doc comment orphaned by mis-nested `#region`), `RedundantNameQualifier` ONLY for BCL/local namespaces after verifying: matching `using` exists AND bare name is unambiguous repo-wide.
+
+`NonReadonlyMemberInGetHashCode` in test-data records — fix by making the props **init-only** (and refactoring any post-construction mutations onto the constructor/initializer), NOT by suppressing the inspection.
 
 Compile-required `RedundantCast` / `RedundantExtendsListEntry` sites — these are NOT redundant, skip them:
 - Vendored MockQueryable `TestAsyncQueryProvider` boilerplate — both the `RedundantExtendsListEntry` and the `(TResult)Invoke()` `RedundantCast` are required to compile.
 - `(Guid?)null` (and sibling nullable-value) ternary branches — the cast sets the branch type; removing it breaks the ternary.
 
-Caveat on `RedundantSuppressNullableWarningExpression`: `!` is compile-time-only and the fleet has no TreatWarningsAsErrors, so it is usually safe — **but skip any `!` that follows a FluentAssertions `.NotBeNull()`**: ReSharper models that narrowing and Roslyn does not, so removing the `!` reintroduces a REAL CS8602. Elsewhere verify per site (adjacent unsuppressed usage = safe).
+Caveat on `RedundantSuppressNullableWarningExpression`: `!` is compile-time-only and the fleet has no TreatWarningsAsErrors — but **verify EVERY instance and expect most to be false positives**; removing the `!` reintroduces a REAL CS8602 wherever ReSharper sees a narrowing Roslyn does not. Two proven trap shapes: (a) FluentAssertions runtime narrowing — `.NotBeNull()` / `.BeOfType()` (stella ×7, ALL false); (b) control-flow narrowing — else-branch / `isNewEntity`-style guards (backend `CustomerLegalSettingsService`). Only remove where an adjacent unsuppressed usage proves the value is non-null at that site.
 
 `PartialTypeWithSinglePart`: drop `partial` only after repo-wide grep **including generated code** confirms no second part.
 
 ## Config hygiene (qodana.yaml)
 
-- `exclude:` with `name: All` + `paths:` — **paths are prefix-based relative to the auto-detected solution dir (SRCROOT), NOT `**` globs.** `**/DbMigratorLegacy/**` silently matches nothing; use `BPP.Shared.NET.DbMigratorLegacy` style prefixes. Verify the effective SRCROOT in the CI SARIF before writing paths.
+- `exclude:` with `name: All` + `paths:` — **paths are prefix-based (NOT `**` globs) and relative to the PROJECT ROOT (repo root), NOT the solution dir (SRCROOT).** A path rooted at SRCROOT silently matches nothing — doci's migrations exclude leaked 762 generated CS8669 for months because of exactly this. `**/DbMigratorLegacy/**` also matches nothing; use `BPP.Shared.NET.DbMigratorLegacy` style repo-root-relative prefixes. **Verify an exclude actually works by confirming the class disappears from the NEXT report** — never assume a path took effect.
 - Wire the file via the CI component input `qodana_options: "--config=qodana.yaml"` (mirror bpp-shared/bpp-doci MRs).
 - Legit exclusions: legacy migrator trees, EF migration designer files, generated clients. Suppressing an inspection (e.g. UnusedAutoPropertyAccessor in shared) is legit when the false-positive cause is documented in the MR.
 
@@ -96,6 +98,7 @@ Caveat on `RedundantSuppressNullableWarningExpression`: `!` is compile-time-only
 - Java image builds: ci-components `build-java-image` default Dockerfile hardcodes JDK 17 (no input until the jdk_version input ships + a release tag is cut).
 - Java repos (bpp-mail, bpp-js-report): `VulnerableLibrariesLocal` → prefer ONE Spring Boot parent patch-bump (BOM covers most CVEs) + explicit overrides for stragglers; `JvmTaintAnalysis` on PDF/attachment endpoints = usually false positive (attachment disposition ≠ HTML render) — assess per endpoint in the MR description, don't rewrite code.
 - Verification mode is the user's call: local build+unit tests OR pipeline-only ("don't build locally") — in pipeline-only mode be MORE conservative (that's when the blind-mass-edit ban matters most; a 400-edit Redundant* bulk pass belongs to a cleanupcode+build task, not a no-build sweep).
+- Local-restore-blocked repos (e.g. doci — no local project-ref override + NuGet 401 on restore): ship **config-only** changes and **defer code batches explicitly as build-blocked**; never push code edits you could not build/verify locally.
 - glab traps: `glab mr create`/`view` broken → `glab api POST /projects/brokernet%2F<repo>/merge_requests`; reviewer via `glab mr update <iid> --reviewer apittrich -R brokernet/<repo>`; MR description from a /tmp file fails (sandbox + HTTP 415) → inline `-f description="$(cat file)"`.
 
 ## Deliverable shape (per MR description)
