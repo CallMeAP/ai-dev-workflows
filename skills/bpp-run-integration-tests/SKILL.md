@@ -53,6 +53,21 @@ Build the working set: csproj files whose source contains an integration categor
 
 Invoke `bpp-start-local-stack` skill (it verifies via status afterward). If any service is DOWN, **stop** — report and ask user.
 
+### Worktree runs — copy gitignored test config first
+
+If you are running the suite from a **git worktree** (not the main checkout), copy the repo's gitignored local test-config from the main checkout into the worktree **before** running. A worktree materializes **tracked files only**, so gitignored local config never travels — missing it fails the whole suite in `OneTimeSetUp` and looks exactly like a regression while the same suite is green in the main checkout.
+
+| Repo | Gitignored file to copy from the main checkout | Missing-file failure signature (ENV, not regression) |
+|---|---|---|
+| bpp-stella | `BPP.Stella.NET/BPP.Stella.NET.API.Tests/**/CustomerPersonE2E/firebase-e2e.local.json` (Firebase e2e creds) | all firebase e2e (117) fail with `FileNotFoundException` in `OneTimeSetUp` |
+| bpp-file | `BPP.File.NET/BPP.File.NET.API/appsettings.local.json` — gitignored in bpp-file ONLY (it is TRACKED in most BPP repos; carries the local MinIO password) | `OneTimeSetUp` `MinIO-Passwort fehlt` + mass file-download 500s (e.g. 10 passed / 65 failed — reads like a regression, is env) |
+
+Other repos may have their own gitignored test-config. **Discovery hint:** if `OneTimeSetUp` fails on a missing file/credential that DOES exist in the main checkout, it's this trap.
+
+- Copy ONLY the needed test-config file(s) — never bulk-copy gitignored files wholesale, and never copy credentials into any tracked/committed path.
+- The copies stay gitignored → never staged, never committed; removing the worktree cleans them up.
+- Do NOT "solve" this by abandoning the worktree to run in the main checkout — the main checkout stays put (separate rule); copy the config into the worktree instead.
+
 ### 4. Run tests
 
 For each discovered project:
@@ -88,7 +103,7 @@ For each failed test:
 4. Classify failure:
    - **Likely production regression** (recent commit in cwd or bpp-shared touches relevant files) → **STOP**, report commit SHAs + message + which test(s) they likely broke. Ask user how to proceed. Do NOT modify test logic to "make it green".
    - **Likely test drift** (no relevant recent commits; assertion mismatch looks like contract update) → propose a minimal test-side fix and ask user before applying.
-   - **Environment / flake** (timeout, connection refused, port-in-use; or a whole suite failing in `OneTimeSetUp` with `bpp-auth login fehlgeschlagen (429)` — that's the login-throttle from running suites un-spaced, see Step 4) → re-run that suite in isolation, ≥60s after the previous one. If still failing, STOP and report.
+   - **Environment / flake** (timeout, connection refused, port-in-use; or a whole suite failing in `OneTimeSetUp` with `bpp-auth login fehlgeschlagen (429)` — that's the login-throttle from running suites un-spaced, see Step 4; or a worktree suite failing `OneTimeSetUp` on missing gitignored config — `FileNotFoundException` / `MinIO-Passwort fehlt` — see Worktree runs) → re-run that suite in isolation, ≥60s after the previous one; for the worktree trap, copy the missing config from the main checkout first. If still failing, STOP and report.
    - **Unknown** → STOP, report full output, ask user.
 
 ### 6. Re-run loop — hard cap
@@ -127,3 +142,4 @@ Leave any test edits unstaged for the user to review.
 - **Committing fixes silently** — never. Leave changes for user review.
 - **Grepping only the literal `Category("Integration")`** → misses suites tagged via the `IntegrationTestCategories` constant (all 8 bpp-backend module e2e suites) — they silently get classified unit-only and never run.
 - **Running every e2e suite at once / back-to-back** (`dotnet test <sln>`) → bursts bpp-auth logins → mass `OneTimeSetUp` 429s that look like a regression but aren't. Space suites ≥60s (see Step 4).
+- **Treating a worktree suite's missing-gitignored-config `OneTimeSetUp` failures as a regression** → gitignored local test-config does not travel into a worktree (tracked files only); copy it from the main checkout first (see Worktree runs). Signatures: stella `FileNotFoundException` (firebase-e2e.local.json), file `MinIO-Passwort fehlt` (appsettings.local.json).
