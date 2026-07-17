@@ -1,6 +1,6 @@
 ---
 name: bpp-fix-qodana-findings
-description: Use when fetching or fixing Qodana code-smell findings in BPP repos — phrases like "fix qodana findings", "qodana code smells", "fetch qodana results", "qodana cleanup MR". Fetches gl-code-quality-report.json from MR pipelines, classifies findings into fix/skip tiers (incl. the known false-positive classes from the unresolved bpp-shared NuGet), and produces per-repo fix MRs with an honest skipped-findings table.
+description: Use when fetching or fixing Qodana code-smell findings in BPP repos — phrases like "fix qodana findings", "qodana code smells", "fetch qodana results", "qodana cleanup MR", "refresh qodana report", "qodana probe MR", "stale qodana report". Fetches gl-code-quality-report.json from MR pipelines, classifies findings into fix/skip tiers (incl. the known false-positive classes from the unresolved bpp-shared NuGet), and produces per-repo fix MRs with an honest skipped-findings table.
 ---
 
 # bpp-fix-qodana-findings
@@ -24,9 +24,27 @@ jq -r 'group_by(.check_name)|map({c:.[0].check_name,n:length})|sort_by(-.n)[]|"\
 
 Prerequisites per repo: qodana component include in `.gitlab-ci.yml` (mirror push/vera: `component: …/ci-components/qodana@~latest`, inputs `stage: "tests"`, `qodana_image: "jetbrains/qodana-dotnet:2025.3"`) **and a project-level `QODANA_TOKEN` CI variable** — without it the job dies with "License request: failed to get proper response from Qodana Cloud" (per-project tokens; do NOT reuse another repo's token, results would land in the wrong Qodana Cloud project).
 
+## The stale-report trap — never fix from a fetched report directly
+
+Qodana runs **only on `merge_request_event` pipelines**. Development branches have **no qodana job**, so a fetched report reflects the state of *that MR branch*, not development. Once fix MRs merge, their reports go **stale** and keep re-listing findings you already fixed (2026-07-16 run: three repos' entire "safe tier" was already fixed on dev).
+
+**Rule: a fetched report is never "recent enough" — it is pinned to its MR branch. Re-verify EVERY candidate against `origin/development` by file+content (not line number) before touching it, for every repo regardless of size.** A finding that no longer matches dev content is counted "already-fixed", never re-fixed. No exception for "the report looks recent", "small repo", or "obviously still applies".
+
+### Fresh-report probe MR
+
+To force a qodana run against current development, per repo:
+
+1. Branch `chore/qodana-refresh-<date>` off development **via the GitLab API** (create-branch endpoint) — never switch a shared local checkout's branch, and never rely on a local-checkout branch to trigger the scan.
+2. Append ONE trivial line to `README.md`/`PROJECT.md`: `<!-- qodana refresh probe <date> -->`. The qodana ci-component has **no `rules:changes` gating** (verified 2026-07-16), so a docs-only touch triggers the scan in every repo.
+3. Open a **Draft** MR targeting development; set the reviewer with a separate `glab mr update <iid> --reviewer apittrich` (creation-time `reviewer_ids` are silently dropped).
+4. Poll the pipeline with a **bounded bash sleep-loop inside a single Bash call** — never "wait" across turns (waiting agents go idle instead of polling).
+5. The probe MR **becomes the fix MR**: push the classified fixes onto the same branch and un-draft it — or **close** it if the fresh report is clean.
+
+No-report repos (probe is pointless — record + skip): `bpp-shared-template` (no `QODANA_TOKEN`), `bpp-agent` (scaffold, no MR pipelines).
+
 ## THE dominant false-positive class: unresolved bpp-shared
 
-The qodana CI component analyzes **without restoring the private BPP.Shared.NET NuGet** (no GitLab-registry auth in the scan context). Every finding whose symbol lives in bpp-shared mis-resolves. Confirmed contaminated classes (verified independently in auth, cheggnet, file, vera):
+The qodana CI component analyzes **without restoring the private BPP.Shared.NET NuGet** (no GitLab-registry auth in the scan context — the job log shows `SEVERE - NuGetCredentialProvider`, the credential provider failing to auth to the registry). Every finding whose symbol lives in bpp-shared mis-resolves. Confirmed contaminated classes (verified independently in auth, cheggnet, file, vera):
 
 | Check | Symptom | Danger if "fixed" |
 |---|---|---|
@@ -40,11 +58,11 @@ The qodana CI component analyzes **without restoring the private BPP.Shared.NET 
 
 **Verification rule before touching ANY of these:** confirm the referenced symbol genuinely fails (typo/renamed/moved) — if it's a correct reference to a bpp-shared/cross-assembly type, skip as "scan artifact" and count it. For NUnit1003: actual-arg-count vs method-param-count; matching arity + shared-typed args = artifact.
 
-**Root fix (preferred over per-repo skips):** teach the ci-components qodana template a restore bootstrap (`dotnet restore` with `CI_JOB_TOKEN` against the GitLab NuGet registry) — then re-scan; the artifact classes disappear honestly. Remember: ci-components changes only propagate via **release tags** (`@~latest` = latest tag, NOT development HEAD).
+**Root fix (preferred over per-repo skips):** teach the ci-components qodana template a restore bootstrap (`dotnet restore` with `CI_JOB_TOKEN` against the GitLab NuGet registry) — then re-scan; the artifact classes disappear honestly. Remember: ci-components changes only propagate via **release tags** (`@~latest` = latest tag, NOT development HEAD). **Until that bootstrap lands, this whole resolver-driven family (CS1574, NUnit1003, `…AccordingToAPIContract`, `RedundantNameQualifier`) is skip-by-default** — treat the `NuGetCredentialProvider` job-log line as proof the class is a scan artifact, not code debt.
 
 ## Never fix
 
-- `RedundantUsingDirective` — known Qodana false positives ([QD-13872](https://youtrack.jetbrains.com/issue/QD-13872)); user directive: never touch using directives based on Qodana.
+- `RedundantUsingDirective` — hard-skip class. Still **NOT fixed in Qodana 2025.3** (build QDNET-253.31810, image `jetbrains/qodana-dotnet:2025.3`); [QD-13872](https://youtrack.jetbrains.com/issue/QD-13872) was closed **"Incomplete"** with no fix version. Every sampled flagged `using` was actually required (extension methods / attributes / shared namespaces). User directive: never touch using directives based on Qodana.
 - `UnusedAutoPropertyAccessor.Global` / `Unused*` on DTOs/entities — consumed by other repos, JSON/EF serialization, reflection. In bpp-shared these are false positives BY DESIGN (consumers live in other repos). Suppress via qodana.yaml instead.
 - `EntityFramework.ModelValidation.UnlimitedStringLength` — real, but = MaxLength decisions + DB migrations → separate ticket, never a smell-sweep edit.
 - Generated code (`*.g.cs`, EF `Migrations/*.Designer.cs`, model snapshots) — exclude via config, never edit.
@@ -54,7 +72,11 @@ The qodana CI component analyzes **without restoring the private BPP.Shared.NET 
 
 `RedundantDefaultMemberInitializer`, `RedundantCast` (verify overload/numeric semantics per site), `RedundantExtendsListEntry`, `RedundantAnonymousTypePropertyName`, `RedundantArgumentDefaultValue` (skip when the explicit arg is the semantic subject of a test), `RedundantAssignment`, `RedundantExplicitArrayCreation`, `NUnit1033` (`TestContext.WriteLine` → `TestContext.Out.WriteLine`), `UsingStatementResourceInitialization` (split prop-init out of `using var`), genuinely-broken XML docs (orphaned `<param>`, `typeparam "T?"`, doc comment orphaned by mis-nested `#region`), `RedundantNameQualifier` ONLY for BCL/local namespaces after verifying: matching `using` exists AND bare name is unambiguous repo-wide.
 
-Caveat on `RedundantSuppressNullableWarningExpression`: usually safe (`!` is compile-time-only, fleet has no TreatWarningsAsErrors) — but removal can reintroduce a REAL Roslyn CS8602 where ReSharper models FluentAssertions `.NotBeNull()` narrowing and Roslyn doesn't. Verify per site (adjacent unsuppressed usage = safe).
+Compile-required `RedundantCast` / `RedundantExtendsListEntry` sites — these are NOT redundant, skip them:
+- Vendored MockQueryable `TestAsyncQueryProvider` boilerplate — both the `RedundantExtendsListEntry` and the `(TResult)Invoke()` `RedundantCast` are required to compile.
+- `(Guid?)null` (and sibling nullable-value) ternary branches — the cast sets the branch type; removing it breaks the ternary.
+
+Caveat on `RedundantSuppressNullableWarningExpression`: `!` is compile-time-only and the fleet has no TreatWarningsAsErrors, so it is usually safe — **but skip any `!` that follows a FluentAssertions `.NotBeNull()`**: ReSharper models that narrowing and Roslyn does not, so removing the `!` reintroduces a REAL CS8602. Elsewhere verify per site (adjacent unsuppressed usage = safe).
 
 `PartialTypeWithSinglePart`: drop `partial` only after repo-wide grep **including generated code** confirms no second part.
 
@@ -66,7 +88,7 @@ Caveat on `RedundantSuppressNullableWarningExpression`: usually safe (`!` is com
 
 ## Process rules
 
-- Temp worktree per repo (`git worktree add … -b chore/qodana-fixes origin/development`); never switch main checkouts.
+- Temp worktree per repo (`git worktree add … -b chore/qodana-fixes origin/development`); never switch main checkouts. When using the probe flow, add the worktree on the already-pushed remote `chore/qodana-refresh-<date>` branch instead — the fixes land there and un-draft that MR (do not open a second branch).
 - If AutoMapper-removal/other big refactor MRs are open in the repo: **stack** the fix MR on that chain (backend: base+target the top branch, note auto-retarget) or defer (stella) — findings were scanned on development, so locate by file+content, not line numbers, and count "drift-skipped".
 - One commit per check-type. MR reviewer `apittrich`, target `development`.
 - Java repos, wrong analyzer trap: a Java repo whose CI passes `qodana_image: jetbrains/qodana-dotnet:*` reports **0 findings = fake-clean** (nothing analyzed). Use `jetbrains/qodana-jvm:*`. Verify the image matches the language before trusting a clean report.
