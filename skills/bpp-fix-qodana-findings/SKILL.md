@@ -107,3 +107,52 @@ Caveat on `RedundantSuppressNullableWarningExpression`: `!` is compile-time-only
 2. Skipped table: check_name → count → reason (QD-13872 / scan artifact "Cannot resolve symbol" / serialization false positive / judgment tier / drift).
 3. Config changes with per-exclusion finding counts + justification.
 4. Follow-up list (EF MaxLength ticket, bulk Redundant* cleanupcode pass, ci-components restore fix).
+
+## 2026-07-19 fleet run — approaches & gotchas
+
+### The fix scope is FOUR buckets, not "only safe-mechanical"
+Reducing a report to "3 safe fixes, close the rest" under-delivers. Every report classifies into **four fix/act buckets + two pure-skip buckets**:
+- **Fix now** — safe-mechanical tier (verified).
+- **Verified judgment tier** — fixed *after per-site verification*, never blind (e.g. unused private methods/dead injected fields, `ConditionalTernaryEqualBranch`, `PossibleMultipleEnumeration` → materialize, `NonReadonlyMemberInGetHashCode` → init-only, verified `RedundantSuppressNullableWarningExpression` removals). Several are real; don't dismiss the tier.
+- **Config-suppress (qodana.yaml)** — a real deliverable, not a skip: document-and-suppress serialization FPs (`Unused*.Global/.Local` on DTOs/test-helpers, `NotAccessedPositionalProperty.Global`) and exclude generated/migration trees.
+- **Follow-up ticket** — `EntityFramework UnlimitedStringLength` (MaxLength + migration), `CheckNamespace` on a **public** shared type (renaming breaks consumers), possible latent bugs surfaced by an "unused" finding (e.g. a seeded-but-dropped result).
+- Pure-skip only: **Never-fix** (`RedundantUsingDirective`, `Unused*` consumed cross-repo) and the **bpp-shared-resolver artifacts** (`CS1574`/`NUnit1003`/`*AccordingToAPIContract`/shared-typed `RedundantCast`/`RedundantNameQualifier`).
+
+Real yield example: bpp-shared's 115 findings = ~10 real code fixes + ~24 verified-judgment + ~46 config-suppress + 2 follow-ups + 12 hard-skip — NOT "nothing".
+
+### Central QD-13872 suppression — ci-components, NOT Qodana Cloud
+`RedundantUsingDirective` (QD-13872) is a permanent skip. To silence it fleet-wide **centrally**, patch the shared `brokernet/ci-components/qodana` component (every repo includes it) — its `before_script` injects `exclude: - name: RedundantUsingDirective` into `qodana.yaml` at scan time (idempotent; creates the file if absent, inserts under an existing `exclude:` otherwise, no-ops if present → preserves doci/shared excludes; uses only grep/sed/printf). Reference: ci-components **!4**.
+- **Qodana Cloud is NOT the lever** — it's a results dashboard + license server with no org-wide "disable inspection X" toggle; it only offers per-project *baselines* (accept-all-current-findings), which is the wrong tool. The CLI has **no** `--disable-inspection` flag either (verified) — disabling is strictly `qodana.yaml exclude: - name:`.
+- **Propagation:** consumers pin `@~latest` = latest **release tag**, not dev HEAD. The component change only takes effect after a ci-components tag is cut.
+
+### The pipeline-watch VERIFY LOOP (close the loop, don't fire-and-forget)
+Qodana only runs on `merge_request_event` pipelines, so a pushed fix is unverified until the MR re-scans. After pushing a batch: **bounded-poll the MR's new qodana job to completion in a single Bash call** (sleep-loop, ~12 min cap — never "wait" across turns), re-fetch `gl-code-quality-report.json`, and confirm the fixed findings are **gone** AND **no new findings** appeared. Loop `fix → push → re-scan → re-verify` until the fresh report holds only known-skip classes. Hard cap ~3 push-rounds, then report residual. This catches both "my fix didn't register" and "my fix introduced a new finding".
+
+### Rebasing stale open qodana MRs
+Rebase open qodana MRs onto latest `development` **server-side** via the GitLab rebase API — `glab api --method PUT /projects/<enc>/merge_requests/<iid>/rebase`, then poll `?include_rebase_in_progress=true` for `rebase_in_progress:false` + `has_conflicts:false`. No local checkout needed; works for repos you don't have cloned.
+
+### Fresh-probe + fleet-dispatch mechanics
+- Probe marker: append `<!-- qodana refresh probe <date> -->` to `README.md` (fallback `PROJECT.md`/`CLAUDE.md`). The component has no `rules:changes` gate, so a docs-only touch triggers the scan. Create the branch + Draft MR via **`glab api`** (`glab mr create` returns 404 in this env). Remove the marker (byte-identical to development) before un-drafting; **close** the probe if the fresh report is clean/all-skip.
+- Fleet-wide runs: dispatch **one guardrailed agent per open qodana MR** (parallel background), each loading this skill + running the verify-loop; order high-yield first (shared/backend/rebased-connectors before near-empty probes like chat/push/cca). Tell each agent to **bail early + report** when nothing is actionable after skips rather than inventing fixes.
+
+### ci-components 0.1.21 — restore-bootstrap RELEASED + VERIFIED (supersedes the resolver-artifact skip)
+The bpp-shared restore-bootstrap (ci-components **!5**: qodana job `variables:` `GITLAB_PACKAGE_REGISTRY_USERNAME=gitlab-ci-token` + `GITLAB_PACKAGE_REGISTRY_PASSWORD=${CI_JOB_TOKEN}`, consumed by each repo's `nuget.config` `%…%` env placeholders) + the **!4** RedundantUsing exclude shipped in **tag 0.1.21** (2026-07-19). **VERIFIED on bpp-backend: 1189 → 392.** The resolver-artifact family is now FIXED AT SOURCE, not skip-by-default:
+- Under ≥0.1.21 these classes **vanish**: `CS1574`-crefs 465→4, `RedundantUsingDirective` 236→0, shared-typed `RedundantCast` 180→6, `NUnit1003` 39→**0** (all error-level gone), `InheritdocInvalidUsage` 19→4. **No job-token-allowlist change needed** — `CI_JOB_TOKEN` already reaches bpp-shared (feed project `73257349`).
+- If they still appear, first confirm the scan actually ran under ≥0.1.21: the trace must have **NO** `NuGetCredentialProvider — Interaction required` line. If it's present, the restore didn't run (old tag / publish race — see below) → report is contaminated, don't fix.
+- **CORRECTION to the four-buckets pure-skip list above:** `*AccordingToAPIContract` / `ConditionIsAlways*NullableAPIContract` / `NullCoalescing*NotNull` are **NOT** resolver artifacts — post-restore they RESOLVE and **GROW** (`ConditionalAccessQualifier` 81→118) because ReSharper finally sees bpp-shared's nullable annotations. They're **genuine, verified-judgment tier** (real null-safety / dead null-handling): fix the clear ones, keep intentional defensive checks. Only `RedundantSuppressNullableWarningExpression` stays mostly-FP.
+
+### Re-scanning under a NEW ci-components tag — the publish RACE
+Cutting a ci-components tag (`POST /repository/tags`) kicks off ci-components' OWN catalog-release pipeline; the **CI/CD-Catalog release publishes ~8 min AFTER the tag**, and `@~latest` resolves the latest *published* release. A pipeline created before publish silently uses the OLD version (bpp-backend !174: pipeline @15:10 → 0.1.20 → identical 1189, restore never ran; release published @15:18).
+- To re-scan a repo under the new tag: wait for the release to publish, then create a **fresh `merge_request_event` pipeline** — `glab api -X POST "projects/<enc>/merge_requests/<iid>/pipelines"`.
+- **NOT** `POST /projects/:id/pipeline?ref=<branch>` (branch pipeline → no qodana job); **NOT** `retry` on the old pipeline (reuses the already-compiled old component config).
+
+### gl-code-quality-report.json == qodana.sarif.json — don't chase the zip
+Both artifacts hold the **identical** finding set (verified 1189==1189). Downloading the SARIF/zip surfaces nothing more. A much larger count in the **Qodana Cloud** dashboard is a *broader inspection profile* (Low style-prefs: `var`-style ~6k, init-only ~1.5k, trailing-comma ~1k) the CI `qodana.yaml` profile deliberately excludes — NOT hand-fix material; leave them to profile config, not a fix loop.
+
+### Driving a repo to 0 "new" findings (the honest ladder)
+"0 warnings" is achievable, but only by fixing genuine debt + suppressing intentional/FP residual — never blind-fixing (removing a correct `!` reintroduces real `CS8602`; deleting a defensive null-check adds latent bugs). Ladder, most-preferred first, **each entry justified in the MR**:
+1. **Fix** every genuine finding (safe-mechanical + verified-judgment + real `CS8604`/`CS8601` null-flow).
+2. **`qodana.yaml exclude: - name:`** for a whole-class FP (e.g. serialization-consumed `UnusedAutoPropertyAccessor`, all-FluentAssertions `RedundantSuppressNullableWarningExpression`).
+3. **Inline** `// ReSharper disable once <Inspection>` or `[SuppressMessage(…, Justification="…")]` for an individual intentional site.
+4. **qodana baseline** (commit current `qodana.sarif.json` as baseline) for the remaining known-intentional set so they stop counting as "new" — *verify the ci-component actually honors a baseline before relying on it*.
+Re-run the verify loop and confirm **0 new**; document the final split (fixed / excluded / inline-suppressed / baselined).
