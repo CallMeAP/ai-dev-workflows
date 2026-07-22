@@ -1,6 +1,6 @@
 ---
 name: bpp-bump-shared-version
-description: Use when bumping the BPP.Shared.NET package version across all BPP .NET repos — phrases like "bump bpp-shared", "update shared version", "sync bpp-shared across repos", "release shared package", "pull latest bpp-shared everywhere". Fetches the latest `*-development+*` package from the GitLab registry via `glab`, discovers ALL consumer repos GitLab-side (`bpp-*` repos whose `BPP.*/Directory.Build.props` contains `<BppSharedVersion>`), bumps locally cloned repos via pull→rewrite→commit→push and uncloned repos via a direct GitLab API commit. Skips dirty repos, repos not on `development`, and already-current repos.
+description: Use when bumping the BPP.Shared.NET package version across all BPP .NET repos — phrases like "bump bpp-shared", "update shared version", "sync bpp-shared across repos", "release shared package", "pull latest bpp-shared everywhere". Fetches the latest `*-development+*` package from the GitLab registry via `glab`, discovers ALL consumer repos GitLab-side (`bpp-*` repos whose `BPP.*/Directory.Build.props` contains `<BppSharedVersion>`), bumps locally cloned repos via pull→rewrite→commit→push and uncloned repos via a direct GitLab API commit. Unrelated local changes don't block a bump (detached-worktree fallback); skips repos whose props file itself is dirty, off-branch repos (bulk mode), and already-current repos.
 ---
 
 # BPP: Bump bpp-shared version across all .NET repos
@@ -38,15 +38,33 @@ Conservative on edge cases: skip + report rather than auto-fix.
 
 A repo is **skipped + reported** (never auto-fixed) when:
 
-1. Local clone working tree is dirty (`git status --porcelain` non-empty).
-2. Local clone branch is not `development`.
+1. Local clone working tree is dirty **on the props file itself** (`git status --porcelain` lists the repo's `Directory.Build.props`). Dirt on UNRELATED files (e.g. `appsettings.local.json` cred edits) does NOT block — use the detached-worktree fallback below.
+2. Local clone branch is not `development` (bulk flow; a targeted bump may use the worktree fallback instead — see below).
 3. `git pull --ff-only origin development` fails (e.g. diverged history).
 4. Local (or remote, for API-path repos) `<BppSharedVersion>` already equals fetched `LATEST` → reported as `up-to-date`.
 5. **Downgrade guard**: current version is *newer* than `LATEST` (semver-style compare on the `YYYY.M.D` portion before `-development`). Reported as `skipped (newer-local)` / `skipped (newer-remote)`.
-6. **A repo with a local clone is NEVER bumped via API** — if its local flow skips (dirty/branch/pull), it stays skipped. An API commit behind the user's back would make their checkout diverge.
+6. **A repo with a local clone is NEVER bumped via API** — if its local flow skips, it stays skipped (API commit behind the user's back would make their checkout diverge). The detached-worktree fallback is the sanctioned alternative: it commits via git on origin/development without touching the checkout.
 7. Discovery could not inspect a repo (tree/props fetch failed, e.g. missing `development` branch) → reported under **Unverified** — these are potential missed consumers; the run continues but the summary must call them out.
 
 Skipped repos do NOT abort the run. Continue to the next repo.
+
+## Detached-worktree fallback (unrelated-dirty / targeted bump)
+
+The bump commit only ever touches `Directory.Build.props` — an unrelated local change must not block it. When a local clone is dirty on unrelated files, or a **targeted bump** ("bump bpp-file") hits a checkout that is dirty and/or on another branch: never stash, never switch, never touch the working tree. Instead commit via a throwaway detached worktree based on origin/development:
+
+```bash
+repo_dir=~/Entwicklung/bpp/<repo>
+W=$(mktemp -d)/wt-bump
+git -C "$repo_dir" fetch -q origin development
+git -C "$repo_dir" worktree add "$W" --detach origin/development
+sed -i "s|<BppSharedVersion>[^<]*</BppSharedVersion>|<BppSharedVersion>${LATEST}</BppSharedVersion>|" "$W/<props-path>"
+git -C "$W" add <props-path>
+git -C "$W" commit -m "chore: bump bpp-shared to ${LATEST}"
+git -C "$W" push origin HEAD:development
+git -C "$repo_dir" worktree remove "$W"
+```
+
+Apply the same up-to-date + downgrade guards on the worktree's props content first. In the BULK flow, use this automatically for dirty-but-unrelated repos on `development`; off-branch repos stay skip+report in bulk (branch state may signal in-progress work) but MAY be bumped this way when the user asks for that repo explicitly. Note the checkout does not receive the commit — report `(checkout not updated — worktree push)` so the user knows their local clone is now 1 behind.
 
 ## Workflow
 
@@ -244,7 +262,8 @@ UNVERIFIED — could not inspect, possible missed consumers (N):
 ## Common mistakes
 
 - **Local-only `find` discovery** → misses consumers that aren't cloned on this machine (`bpp-agent` precedent). The GitLab group listing is the authoritative repo set; local `find` is not a substitute.
-- **API-bumping a repo that has a local clone** → never. Local clone present = local flow only; if it skips (dirty/branch/pull), it stays skipped. An API commit would silently diverge the user's checkout.
+- **API-bumping a repo that has a local clone** → never. Local clone present = local flow (or detached-worktree fallback) only; an API commit would silently diverge the user's checkout.
+- **Letting an unrelated dirty file block a bump** → the bump touches only `Directory.Build.props`; use the detached-worktree fallback instead of skipping (skip only when the props file itself is dirty).
 - **Silently dropping repos whose tree/props fetch failed** → report them under `UNVERIFIED` in the summary; they are exactly the "incomplete bump" risk this design exists to prevent.
 - **Pushing on top of stale state** → always `git pull --ff-only` first; if it fails, skip the repo.
 - **Auto-stashing dirty changes** → never. Skip + notify; the user owns their working tree.
