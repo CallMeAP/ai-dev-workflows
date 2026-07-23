@@ -23,6 +23,7 @@ Not for: bulk dev→staging promotion (`bpp-promote-dev-to-staging`), running e2
 |-------|-------|
 | Push remote | `origin` (the cwd repo — **never** `glab-base`) |
 | Target branch | `development` |
+| Assignee | `apittrich` |
 | Reviewer | `apittrich` |
 | Protected branches | `development`, `staging`, `main`, `master` |
 | New branch prefix | `feature/` + kebab slug from the diff |
@@ -149,9 +150,16 @@ else
   glab mr create -R "$PROJ" \
     --source-branch "$BRANCH" \
     --target-branch development \
+    --assignee apittrich \
     --reviewer apittrich \
     --fill --yes
+  IID=$(glab api "/projects/$(printf %s "$PROJ" | sed 's#/#%2F#')/merge_requests?state=opened&source_branch=${BRANCH}&target_branch=development" \
+    | jq -r '.[0].iid // empty')
 fi
+
+# Belt-and-braces: creation-time --reviewer/--assignee flags are silently dropped by glab,
+# so ALWAYS set both fields explicitly afterwards — on the freshly created MR AND the reused one.
+glab mr update "$IID" -R "$PROJ" --assignee apittrich --reviewer apittrich
 ```
 
 Capture the MR `!iid` + web URL for the final report.
@@ -194,7 +202,8 @@ If no `.sln`, run each `*.Tests.csproj` with the same `--filter`. Capture pass/f
 | Find a member's coverage | `git grep -n <route-or-method> -- '*Tests*'` |
 | Push | `git push -u origin <branch>` |
 | Existing MR? | `glab api .../merge_requests?state=opened&source_branch=<b>&target_branch=development` |
-| Create MR | `glab mr create -R brokernet/<repo> -b development --reviewer apittrich --fill --yes` |
+| Create MR | `glab mr create -R brokernet/<repo> -b development --assignee apittrich --reviewer apittrich --fill --yes` |
+| Set assignee+reviewer (always follow up) | `glab mr update <iid> -R brokernet/<repo> --assignee apittrich --reviewer apittrich` |
 | Unit tests | `dotnet test <sln> --filter "Category!=LocalIntegration&Category!=Integration"` |
 | Ping | `PushNotification(status="proactive", message="…")` |
 
@@ -206,6 +215,7 @@ If no `.sln`, run each `*.Tests.csproj` with the same `--filter`. Capture pass/f
 - **Letting `glab` pick `glab-base`** → MR lands in bpp-shared. Always pin `-R brokernet/<repo>` from `origin`.
 - **MR'ing from a protected branch** → `development→development` is empty / rejected. Auto-create a `feature/*` branch first.
 - **Including integration tests in the gate** → they need the local stack and trip bpp-auth's 429; this skill is unit-only (`Category!=LocalIntegration&Category!=Integration`).
+- **Relying on creation-time `--reviewer`/`--assignee` alone** → glab silently drops these on `glab mr create`, leaving the MR with no assignee/reviewer. Always follow up with `glab mr update <iid> --assignee apittrich --reviewer apittrich -R brokernet/<repo>` (on new and reused MRs).
 - **Duplicating an MR** → query open MRs for the source branch first; a push already updates an existing one.
 - **`--force` push** → never.
 - **Editing tests to go green** → out of scope; report red and stop.
