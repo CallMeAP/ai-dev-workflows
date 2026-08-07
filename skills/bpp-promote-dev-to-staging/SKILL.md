@@ -1,13 +1,25 @@
 ---
 name: bpp-promote-dev-to-staging
-description: Use when promoting development to staging across BPP GitLab repositories — phrases like "promote dev to staging", "create staging MRs", "dev→staging release", "staging deployment MRs". Bulk-creates one merge request per repo that has diffs, titled "Development -> Staging" with label "staging-deployment".
+description: Use when promoting a stage branch across BPP GitLab repositories — "promote dev to staging", "create staging MRs", "staging deployment MRs", and equally "promote staging to main", "main deployment MRs". Bulk-creates one merge request per repo that has content diffs, with the direction's fixed title/label and a short generated change summary as description.
 ---
 
-# BPP: Promote development → staging
+# BPP: Promote stage branches (development → staging, staging → main)
 
 ## Overview
 
-Bulk-create dev→staging MRs across all BPP repos in the `brokernet/` GitLab group via `glab`. Skips repos with no diffs and repos that already have an open dev→staging MR. Always shows a preview and waits for explicit user confirmation before creating any MR.
+Bulk-create promotion MRs across all BPP repos in the `brokernet/` GitLab group via `glab`. Two supported directions with fixed conventions (table below). Skips repos with no content diffs and repos that already have an open promotion MR for the direction. Always shows a preview and waits for explicit user confirmation before creating any MR.
+
+## Direction conventions (non-negotiable)
+
+| | dev→staging (default) | staging→main |
+|---|---|---|
+| Source branch | `development` | `staging` |
+| Target branch | `staging` | `main` |
+| Title | `Development -> Staging` | `Staging -> Main` |
+| Label | `staging-deployment` | `main-deployment` |
+| Bump commit msg | `raise version for staging` | `raise version for main` |
+
+Single arrow `->` with spaces, exact casing. The staging→main label is `main-deployment` — NOT `prod-deployment` (retired fleet-wide 2026-07-02) and never the other direction's label. Set `SRC`/`TGT`/`TITLE`/`LABEL` once from this table; every snippet below uses them.
 
 ## Prerequisites
 
@@ -35,17 +47,17 @@ Because one extra lives in a subgroup, the encoded project path can't be derived
 
 | Field | Value |
 |-------|-------|
-| Source branch | `development` |
-| Target branch | `staging` |
-| Title | `Development -> Staging` |
-| Label | `staging-deployment` |
+| Source branch | `$SRC` (per direction) |
+| Target branch | `$TGT` (per direction) |
+| Title | per direction table |
+| Label | per direction table |
 | Draft | no |
-| Description | empty |
+| Description | short generated change summary (see "MR change summary" below) |
 | Assignee / Reviewer | none |
 
 ## UI version bump (extra step for UI repos)
 
-**UI repos need a version bump on the source branch BEFORE the promotion MR is created.** Rule (user directive 2026-08-06): **raise the PATCH version when promoting dev→staging** — and the same extra step applies to staging→main promotions. Reference commit: brokernet-hotel-ui `83b8bc87` ("raise version for staging", `package.json` version line change; that instance happened to be a major bump — the standing rule is patch).
+**UI repos need a version bump on the source branch BEFORE the promotion MR is created.** Rule (user directive 2026-08-06): **raise the PATCH version when promoting** — applies to BOTH directions. Reference commit: brokernet-hotel-ui `83b8bc87` ("raise version for staging", `package.json` version line change; that instance happened to be a major bump — the standing rule is patch).
 
 Affected UI repos (exactly these five):
 
@@ -63,7 +75,7 @@ Mechanics, per UI repo that will get an MR:
 
 1. **Idempotency guard** — read `.version` from `package.json` on BOTH branches (`/repository/files/package.json/raw?ref=<branch>`). If source-branch version ≠ target-branch version, the bump already happened (e.g. re-run, or a manual bump) → skip the bump, create the MR only.
 2. Bump the patch component: `X.Y.Z[-SUFFIX]` → `X.Y.(Z+1)[-SUFFIX]` (keep any `-SNAPSHOT`-style suffix verbatim).
-3. Commit it on the **source branch** with message `raise version for staging` (or `raise version for main` for staging→main), via the GitLab commits API (update action on `package.json`) — or via a local clean checkout already on the source branch if one exists (then push plain; report so other checkouts get pulled). Never force-push.
+3. Commit it on the **source branch** with the direction's bump message, via the GitLab commits API (update action on `package.json`) — or via a local clean checkout already on the source branch if one exists (then push plain; report so other checkouts get pulled). Never force-push.
 4. Then create the promotion MR as usual — the bump commit rides in it.
 
 The preview (step 4) must mark which repos will receive a bump so the user confirms both actions with one "go".
@@ -72,7 +84,7 @@ The preview (step 4) must mark which repos will receive a bump so the user confi
 
 ### 1. Discover repos
 
-Build a `name → encoded-project-path` map. Filtered repos get `brokernet%2F${repo}`; the always-include extras are added explicitly (one of them with a subgroup-encoded path). Every later step keys off `${ENC[$repo]}`.
+Build a `name → encoded-project-path` map. Filtered repos get `brokernet%2F${repo}`; the always-include extras are added explicitly (two with subgroup-encoded paths). Every later step keys off `${ENC[$repo]}`.
 
 ```bash
 declare -A ENC
@@ -91,43 +103,51 @@ ENC[servo-ui]="brokernet%2Fservo%2Fservo-ui"
 REPOS=("${!ENC[@]}")
 ```
 
-### 2. Check diffs and validate branches (FAIL LOUDLY)
+### 2. Probe branches explicitly, then compare (FAIL LOUDLY, but separate "no branch" from "no diffs")
 
-For each repo, compare `staging` ← `development`. Detect missing branches by checking whether `.commits` is present in the JSON response — do NOT grep the body for "404"/"not found" (commit messages can contain those strings and produce false positives). If `.commits` is missing/null, the API returned an error (usually missing branch); record it and fail loudly at the end.
+**TRAP — `jq '.commits | length'` cannot detect a missing branch:** on an error body `.commits` is `null`, and in jq `null | length` evaluates to `0`, not null — so a repo whose stage branch doesn't exist silently reads as "no diffs". Probe both branches explicitly FIRST; only then compare.
+
+Repos legitimately have no stage branches (e.g. `bpp-shared` ships via NuGet; `bpp-agent`, `bpp-agent-ui`, `bpp-shared-template` have no `staging`; `bpp-partner-api-guide` has neither `development` nor `staging`). "No `$TGT`/`$SRC` branch" is an expected reported outcome, NOT an abort — but an API error on a repo whose branches BOTH exist IS an abort.
 
 ```bash
-declare -A AHEAD
-declare -a MISSING
+declare -A AHEAD NDIFFS
+declare -a NOBRANCH ERRORS
 for repo in "${REPOS[@]}"; do
   enc="${ENC[$repo]}"
-  resp=$(glab api "/projects/${enc}/repository/compare?from=staging&to=development" 2>/dev/null)
-  count=$(echo "$resp" | jq -r '.commits | length' 2>/dev/null)
-  if [ -z "$count" ] || [ "$count" = "null" ]; then
-    err=$(echo "$resp" | jq -r '.message // .error // "unknown"' 2>/dev/null)
-    MISSING+=("${repo} (${err})")
-    continue
+  skip=""
+  for br in "$SRC" "$TGT"; do
+    name=$(glab api "/projects/${enc}/repository/branches/${br}" 2>/dev/null | jq -r '.name // "MISSING"')
+    [ "$name" = "MISSING" ] && { NOBRANCH+=("${repo}: no ${br} branch"); skip=1; break; }
+  done
+  [ -n "$skip" ] && continue
+  resp=$(glab api "/projects/${enc}/repository/compare?from=${TGT}&to=${SRC}" 2>/dev/null)
+  commits=$(echo "$resp" | jq -r '.commits | length' 2>/dev/null)
+  diffs=$(echo "$resp" | jq -r '.diffs | length' 2>/dev/null)
+  if [ -z "$commits" ] || [ "$commits" = "null" ]; then
+    ERRORS+=("${repo}: compare failed despite both branches existing"); continue
   fi
-  AHEAD[$repo]=$count
+  AHEAD[$repo]=$commits
+  NDIFFS[$repo]=$diffs
 done
 
-if [ ${#MISSING[@]} -gt 0 ]; then
-  echo "FAIL — missing branches or API errors:" >&2
-  printf "  %s\n" "${MISSING[@]}" >&2
-  exit 1
+if [ ${#ERRORS[@]} -gt 0 ]; then
+  echo "FAIL — compare errors:" >&2; printf "  %s\n" "${ERRORS[@]}" >&2; exit 1
 fi
 ```
 
-### 3. Skip repos with an existing open dev→staging MR
+**Gate MR creation on `NDIFFS > 0`, not commit count.** Degenerate promotions exist: commits ahead but ZERO file diffs (merge-commit-only ancestry, content identical — real precedent: callidus-bvs-ui 2 merge commits, empty `.diffs`). Those are reported as "no content diffs", no MR.
 
-For repos with diffs, query open MRs (`source=development`, `target=staging`). If one already exists, skip — do not create a duplicate.
+### 3. Skip repos with an existing open promotion MR
+
+For repos with diffs, query open MRs (`source_branch=$SRC`, `target_branch=$TGT` — match on branches, NOT on title; older MRs may carry legacy titles like `Development --> Staging`). If one already exists, skip creation — do not create a duplicate. A push to the source branch updates the open MR automatically.
 
 ```bash
 declare -A EXISTING_MR
 for repo in "${REPOS[@]}"; do
-  c=${AHEAD[$repo]:-0}
+  c=${NDIFFS[$repo]:-0}
   [ "$c" -eq 0 ] && continue
   enc="${ENC[$repo]}"
-  iid=$(glab api "/projects/${enc}/merge_requests?state=opened&source_branch=development&target_branch=staging" 2>/dev/null \
+  iid=$(glab api "/projects/${enc}/merge_requests?state=opened&source_branch=${SRC}&target_branch=${TGT}" 2>/dev/null \
     | jq -r '.[0].iid // empty')
   [ -n "$iid" ] && EXISTING_MR[$repo]=$iid
 done
@@ -135,42 +155,70 @@ done
 
 ### 4. Preview — STOP and wait for "go"
 
-Print three groups: repos that WILL get an MR (diffs, no existing MR), repos SKIPPED for no diffs, and repos SKIPPED because an open dev→staging MR already exists (show the existing `!iid`). Then stop and ask the user to confirm. Do NOT create any MR before the user replies "go" (or equivalent).
+Print four groups: repos that WILL get an MR (diffs, no existing MR), repos SKIPPED for no content diffs (show commit count if > 0 — degenerate), repos SKIPPED because an open promotion MR already exists (show the existing `!iid`), and repos with NO stage branch (expected topology). Then stop and ask the user to confirm. Do NOT create any MR before the user replies "go" (or equivalent).
 
 ```
 Will create MR for:
-  bpp-backend             (3 commits)
-  bpp-auth                (1 commit)
-  brokernet-hotel-ui      (2 commits)  + patch-version bump 4.0.0 → 4.0.1
+  bpp-backend             (3 commits, 12 files)
+  bpp-auth                (1 commit, 2 files)
+  brokernet-hotel-ui      (2 commits, 5 files)  + patch-version bump 4.0.1 → 4.0.2
   ...
 
-Skipping (no diffs):
+Skipping (no content diffs):
   bpp-mail
+  callidus-bvs-ui         (2 commits but 0 file diffs — merge-commit-only)
   ...
 
 Skipping (open MR already exists):
   bpp-stella              !35
   ...
 
+No stage branch (expected):
+  bpp-shared              (no staging — ships via NuGet)
+  ...
+
 Reply "go" to create MRs.
 ```
 
-### 5. Create MRs
+### 5. MR change summary (description) — generate per repo
 
-Only for repos with `AHEAD[$repo] > 0` AND no existing open MR.
+Every promotion MR gets a SHORT generated description summarizing what the promotion ships. Build it from the compare response already fetched in step 2:
 
-**UI repos first get the patch-version bump** (see "UI version bump" section above — guard, bump, commit on `development`), then the MR:
+1. **Commits** → group by conventional prefix / ticket key (`BRO-xxxx`) → one bullet per feature/fix theme, not one per commit. Drop pure merge commits and version-bump noise from the bullets.
+2. **Files** (`diffs[]`) → categorize: added (`new_file`), removed (`deleted_file`), renamed (`renamed_file`), modified (the rest). Report counts + call out high-signal paths explicitly: **DB migrations** (`Migrations/`), **CI** (`.gitlab-ci.yml`), **config** (`appsettings.*`), **version bumps** (`package.json` / `Directory.Build.props`).
+3. **TRAP — the compare payload is TRUNCATED on big promotions**: per-file diff content can be missing hunks and the file list itself can be capped. Treat counts from a truncated payload as a lower bound ("N+ files") and NEVER claim "X was not changed/removed" from compare output — verify via `/repository/files/<path>/raw?ref=` on both branches when it matters.
+4. Keep it short — Markdown, ≤ ~15 lines:
+
+```markdown
+### Changes
+- Added: <feature theme(s)> (BRO-xxxx)
+- Updated: <theme(s)>
+- Fixed: <theme(s)>
+- Removed: <theme(s), if any>
+
+### Files
+N added / M modified / K removed — incl. 1 DB migration, CI change, package.json bump
+```
+
+Omit empty categories. Pass it via `-f description="$DESC"` on the POST. If the summary was drafted in a file, inline it with `DESC="$(cat file)"` — glab cannot read description-file args from sandboxed /tmp.
+
+### 6. Create MRs
+
+Only for repos with `NDIFFS[$repo] > 0` AND no existing open MR.
+
+**UI repos first get the patch-version bump** (see "UI version bump" section above — guard, bump, commit on `$SRC`), then the MR:
 
 ```bash
 for repo in "${REPOS[@]}"; do
-  [ "${AHEAD[$repo]}" -eq 0 ] && continue
-  [ -n "${EXISTING_MR[$repo]}" ] && continue
+  [ "${NDIFFS[$repo]:-0}" -eq 0 ] && continue
+  [ -n "${EXISTING_MR[$repo]:-}" ] && continue
   enc="${ENC[$repo]}"
   result=$(glab api --method POST "/projects/${enc}/merge_requests" \
-    -f source_branch=development \
-    -f target_branch=staging \
-    -f title="Development -> Staging" \
-    -f labels="staging-deployment" 2>&1)
+    -f source_branch="$SRC" \
+    -f target_branch="$TGT" \
+    -f title="$TITLE" \
+    -f labels="$LABEL" \
+    -f description="${DESC[$repo]}" 2>&1)
   iid=$(echo "$result" | jq -r '.iid // empty')
   url=$(echo "$result" | jq -r '.web_url // empty')
   if [ -n "$iid" ]; then
@@ -181,18 +229,23 @@ for repo in "${REPOS[@]}"; do
 done
 ```
 
-### 6. Report
+### 7. Report
 
-Final summary: created MRs (with URLs) and skipped repos.
+Final summary: created MRs (with URLs), reused open MRs, skipped repos (no diffs / degenerate / no branch). Note: `detailed_merge_status` stays `checking` for a while after bulk creation and `has_conflicts:false` is NOT authoritative while checking — report mergeability as un-computed rather than clean.
 
 ## Common mistakes
 
 - **Creating MRs without diff check** → GitLab returns "no commits between branches"; always compare first.
-- **Forgetting the `staging-deployment` label** → ops dashboards filter on this; non-negotiable.
-- **Silent skip on missing branch** → fail loudly, do NOT assume conventions.
+- **Gating on commit count instead of `.diffs | length`** → degenerate merge-commit-only promotions create empty MRs.
+- **Trusting `jq '.commits | length'` for missing-branch detection** → `null | length` is `0` in jq; a missing branch silently reads as "no diffs". Probe branches explicitly.
+- **Wrong label for the direction** → `staging-deployment` vs `main-deployment`; ops dashboards filter on these. staging→main is NOT `prod-deployment` (retired).
+- **Wrong title casing or arrow** → exactly `Development -> Staging` / `Staging -> Main` (space, single `->`, space).
+- **Matching existing MRs by title** → legacy MRs use `-->`; match on source/target branch only.
+- **Concluding "X isn't in this promotion" from compare output** → the compare diff is truncated; read the raw file on both branches.
+- **Silent skip on an API error** → "no stage branch" is an expected reported outcome; a compare error with both branches present is an abort.
 - **Skipping preview** → never bulk-write across 13+ repos without explicit user confirmation.
-- **Adding description / assignee / reviewer** → defaults only; only override if user explicitly asks.
-- **Wrong title casing or arrow** → must be exactly `Development -> Staging` (space, `->`, space).
+- **Omitting the change-summary description** → every created MR carries the short added/updated/fixed/removed summary; empty descriptions are no longer allowed.
+- **Adding assignee / reviewer** → defaults only; only override if user explicitly asks.
 - **Forgetting the UI patch-version bump** → the five UI repos (callidus-bvs / servo / cockpit / hotel / onboarding) need the `package.json` patch bump committed on the source branch BEFORE the MR; document-cms and backends don't.
 - **Double-bumping on re-run** → always apply the idempotency guard (source vs target version differ = already bumped).
 - **Missing servo-ui / callidus-bvs-ui** → both live in subgroups; the group listing without `include_subgroups` never returns them — they come from the always-include extras.
@@ -200,5 +253,6 @@ Final summary: created MRs (with URLs) and skipped repos.
 ## Red flags — STOP
 
 - About to call POST `/merge_requests` before showing preview → STOP, show preview first.
-- Got a 404 on `/repository/compare` → do NOT silently skip; abort with error.
+- Compare API errored on a repo whose branches both exist → do NOT silently skip; abort with error.
+- About to label a staging→main MR `staging-deployment` (or vice versa) → STOP, check the direction table.
 - Considering creating an MR for a repo not matching the filter AND not in the always-include extras list → STOP, exclude it.
