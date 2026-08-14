@@ -43,6 +43,31 @@ These are explicitly added on every run regardless of the filter:
 
 Because one extra lives in a subgroup, the encoded project path can't be derived as `brokernet%2F${repo}` for every repo. The workflow therefore builds a per-repo `ENC[repo]` → encoded-path map and uses `${ENC[$repo]}` everywhere instead of hardcoding `brokernet%2F${repo}`.
 
+### Authoritative cross-check: bpp/repos.md (MANDATORY)
+
+The central BPP repo list lives in the internal knowledge repo:
+`https://gitlab.com/lipso/internal/agentic-coding-knowledge/-/blob/main/bpp/repos.md`
+
+After building `ENC`, fetch it and cross-check so no repo gets missed (real precedent 2026-08-14: the filter+extras missed `brokernet-app`, `brokernet-fiab-connector`, `brokernet-file-scanner`, `brokernet-varias-sign`, `servo-hw-connector`, `docling-sidecar`):
+
+```bash
+glab api "projects/lipso%2Finternal%2Fagentic-coding-knowledge/repository/files/bpp%2Frepos.md/raw?ref=main" > "$WORK/repos.md"
+# rows: "| repo-name | https://gitlab.com/<path> | description |" (Backend + Frontend tables)
+while IFS='|' read -r _ name link _; do
+  name=$(echo "$name" | xargs); link=$(echo "$link" | xargs)
+  [[ "$link" == https://gitlab.com/* ]] || continue
+  path=${link#https://gitlab.com/}
+  if [ -z "${ENC[$name]:-}" ]; then
+    ENC[$name]=$(printf %s "$path" | sed 's#/#%2F#g')
+    echo "ADDED-FROM-LIST $name ($path)"
+  fi
+done < <(grep -E '^\|[^|]+\| *https://gitlab.com/' "$WORK/repos.md")
+```
+
+- Every list repo missing from `ENC` is **added** (encoded path derived from the link — this also handles subgroups like `brokernet/servo/...`). The branch probe then decides naturally whether it participates ("no staging branch" stays an expected outcome).
+- If the fetch fails or parses to zero rows, **say so loudly in the preview** ("cross-check skipped — list unreachable") and continue with filter+extras; never silently pretend the check ran.
+- Repos discovered by the filter but absent from the list are fine (list may lag) — report them informationally.
+
 ## MR defaults (non-negotiable)
 
 | Field | Value |
@@ -249,6 +274,7 @@ Final summary: created MRs (with URLs), reused open MRs, skipped repos (no diffs
 - **Forgetting the UI patch-version bump** → the five UI repos (callidus-bvs / servo / cockpit / hotel / onboarding) need the `package.json` patch bump committed on the source branch BEFORE the MR; document-cms and backends don't.
 - **Double-bumping on re-run** → always apply the idempotency guard (source vs target version differ = already bumped).
 - **Missing servo-ui / callidus-bvs-ui** → both live in subgroups; the group listing without `include_subgroups` never returns them — they come from the always-include extras.
+- **Skipping the bpp/repos.md cross-check** → the filter+extras provably drift (2026-08-14: six repos missed, e.g. `brokernet-app`, `servo-hw-connector`). Always fetch the list and add its missing repos before probing; if unreachable, flag it in the preview instead of silently proceeding.
 
 ## Red flags — STOP
 
