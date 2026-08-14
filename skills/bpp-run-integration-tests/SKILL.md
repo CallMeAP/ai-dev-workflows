@@ -1,6 +1,6 @@
 ---
 name: bpp-run-integration-tests
-description: Use when user wants to run end-to-end / integration tests in a BPP .NET repo and auto-heal failures — phrases like "run integration tests", "run e2e tests", "are integration tests green", "fix failing integration tests", "check integration tests". Discovers test projects, starts the local stack via bpp-start-local-stack, runs `dotnet test --filter Category=Integration`, and on failure investigates recent commits in cwd + bpp-shared before stopping for user input. Always skips bpp-document-analysis (aka bpp-doci) and bpp-agent entirely (no unit, no e2e).
+description: Use when user wants to run end-to-end / integration tests in a BPP .NET repo and auto-heal failures — phrases like "run integration tests", "run e2e tests", "are integration tests green", "fix failing integration tests", "check integration tests". Discovers test projects, starts the local stack via bpp-start-local-stack, runs `dotnet test --filter "Category=Integration|Category=LocalIntegration"`, and on failure investigates recent commits in cwd + bpp-shared before stopping for user input. Always skips bpp-document-analysis (aka bpp-doci) and bpp-agent entirely (no unit, no e2e).
 ---
 
 # bpp-run-integration-tests
@@ -73,8 +73,10 @@ Other repos may have their own gitignored test-config. **Discovery hint:** if `O
 For each discovered project:
 
 ```bash
-dotnet test <project>.csproj --filter "Category=Integration" --logger "console;verbosity=normal" --nologo
+dotnet test <project>.csproj --filter "Category=Integration|Category=LocalIntegration" --logger "console;verbosity=normal" --nologo
 ```
+
+**Both categories, always (blind spot proven 2026-08-14):** bpp-auth, bpp-chat, bpp-push, bpp-stella and bpp-id-austria tag their e2e EXCLUSIVELY as `[Category(IntegrationTestCategories.LocalIntegration)]`; bpp-file and bpp-cheggnet use BOTH categories. A run filtered only on `Category=Integration` reports "No test matches" in those five repos and the fleet summary looks green while ZERO e2e ran. The OR-filter above matches either tag. **Zero-match guard:** if a discovered project reports "No test matches the given testcase filter", that is a filter problem, not "repo has no e2e" — grep `IntegrationTestCategories\.` in the project and fix the filter before classifying.
 
 Capture: pass/fail counts, names of failed tests, full stack traces.
 
@@ -84,7 +86,7 @@ Capture: pass/fail counts, names of failed tests, full stack traces.
 
 ```bash
 for proj in <projects-with-integration-tests>; do
-  dotnet test "$proj" --filter "Category=Integration" --nologo
+  dotnet test "$proj" --filter "Category=Integration|Category=LocalIntegration" --nologo
   sleep 60   # let bpp-auth's login rate-limit window reset before the next suite
 done
 ```
@@ -122,7 +124,7 @@ Leave any test edits unstaged for the user to review.
 |---|---|
 | Discover | `grep -rlnE 'Category\("(Local)?Integration"|Category\(IntegrationTestCategories\.' --include="*.cs"` |
 | Start stack | invoke `bpp-start-local-stack` skill |
-| Run | `dotnet test X.csproj --filter "Category=Integration"` |
+| Run | `dotnet test X.csproj --filter "Category=Integration|Category=LocalIntegration"` |
 | Recent commits (cwd) | `git log --since="48 hours ago" --oneline --name-only` |
 | Recent commits (shared) | `git -C ~/Entwicklung/bpp/bpp-shared log --since="48 hours ago" --oneline --name-only` |
 
@@ -141,5 +143,6 @@ Leave any test edits unstaged for the user to review.
 - **Looping indefinitely** — respect the 3-run cap.
 - **Committing fixes silently** — never. Leave changes for user review.
 - **Grepping only the literal `Category("Integration")`** → misses suites tagged via the `IntegrationTestCategories` constant (all 8 bpp-backend module e2e suites) — they silently get classified unit-only and never run.
+- **Filtering only `Category=Integration` at run time** → five repos (auth, chat, push, stella, id-austria) tag e2e exclusively as `LocalIntegration`; the run prints "No test matches" and the repo false-greens with zero tests executed (proven 2026-08-14 fleet run). Always use the OR-filter and treat any zero-match as a filter bug.
 - **Running every e2e suite at once / back-to-back** (`dotnet test <sln>`) → bursts bpp-auth logins → mass `OneTimeSetUp` 429s that look like a regression but aren't. Space suites ≥60s (see Step 4).
 - **Treating a worktree suite's missing-gitignored-config `OneTimeSetUp` failures as a regression** → gitignored local test-config does not travel into a worktree (tracked files only); copy it from the main checkout first (see Worktree runs). Signatures: stella `FileNotFoundException` (firebase-e2e.local.json), file `MinIO-Passwort fehlt` (appsettings.local.json).
