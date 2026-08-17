@@ -33,7 +33,7 @@ Not for: bulk dev→staging promotion (`bpp-promote-dev-to-staging`), running e2
 
 ## The `glab-base` trap (read first)
 
-BPP repos carry **two** remotes: `origin` → the repo itself, and `glab-base` → `brokernet/bpp-shared`. Bare `glab` may resolve to `glab-base` and create the MR **in bpp-shared**. Always derive the project from `origin` and pin `-R brokernet/<repo>` on every `glab` call.
+BPP repos carry **two** remotes: `origin` → the repo itself, and `glab-base` → `lipso/clients/brokernet/bpp-shared`. Bare `glab` may resolve to `glab-base` and create the MR **in bpp-shared**. Always derive the project from `origin` and pin `-R lipso/clients/brokernet/<repo>` on every `glab` call.
 
 ```bash
 REPO=$(git remote get-url origin | sed -E 's#.*/brokernet/([^/]+?)(\.git)?$#\1#')   # e.g. bpp-backend
@@ -202,8 +202,8 @@ If no `.sln`, run each `*.Tests.csproj` with the same `--filter`. Capture pass/f
 | Find a member's coverage | `git grep -n <route-or-method> -- '*Tests*'` |
 | Push | `git push -u origin <branch>` |
 | Existing MR? | `glab api .../merge_requests?state=opened&source_branch=<b>&target_branch=development` |
-| Create MR | `glab mr create -R brokernet/<repo> -b development --assignee apittrich --reviewer apittrich --fill --yes` |
-| Set assignee+reviewer (always follow up) | `glab mr update <iid> -R brokernet/<repo> --assignee apittrich --reviewer apittrich` |
+| Create MR | `glab mr create -R lipso/clients/brokernet/<repo> -b development --assignee apittrich --reviewer apittrich --fill --yes` |
+| Set assignee+reviewer (always follow up) | `glab mr update <iid> -R lipso/clients/brokernet/<repo> --assignee apittrich --reviewer apittrich` |
 | Unit tests | `dotnet test <sln> --filter "Category!=LocalIntegration&Category!=Integration"` |
 | Ping | `PushNotification(status="proactive", message="…")` |
 
@@ -212,10 +212,10 @@ If no `.sln`, run each `*.Tests.csproj` with the same `--filter`. Capture pass/f
 - **Creating the MR before checking new-surface coverage** → new endpoints / `I*Service` methods / DTO mappers ship untested. Enumerate the diff's new public surface (step 4) and prove each has a test — or get a named waiver — first.
 - **Treating "unit suite green" as coverage** → the suite passes without ever calling a member no test references. Green ≠ covered; only a test that exercises THIS member counts.
 - **Skipping e2e coverage because the local stack is down** → this skill only requires the test to EXIST, not to run; write it (per `bpp-add-integration-tests`) and let `bpp-run-integration-tests` run it later.
-- **Letting `glab` pick `glab-base`** → MR lands in bpp-shared. Always pin `-R brokernet/<repo>` from `origin`.
+- **Letting `glab` pick `glab-base`** → MR lands in bpp-shared. Always pin `-R lipso/clients/brokernet/<repo>` from `origin`.
 - **MR'ing from a protected branch** → `development→development` is empty / rejected. Auto-create a `feature/*` branch first.
 - **Including integration tests in the gate** → they need the local stack and trip bpp-auth's 429; this skill is unit-only (`Category!=LocalIntegration&Category!=Integration`).
-- **Relying on creation-time `--reviewer`/`--assignee` alone** → glab silently drops these on `glab mr create`, leaving the MR with no assignee/reviewer. Always follow up with `glab mr update <iid> --assignee apittrich --reviewer apittrich -R brokernet/<repo>` (on new and reused MRs).
+- **Relying on creation-time `--reviewer`/`--assignee` alone** → glab silently drops these on `glab mr create`, leaving the MR with no assignee/reviewer. Always follow up with `glab mr update <iid> --assignee apittrich --reviewer apittrich -R lipso/clients/brokernet/<repo>` (on new and reused MRs).
 - **Duplicating an MR** → query open MRs for the source branch first; a push already updates an existing one.
 - **`--force` push** → never.
 - **Editing tests to go green** → out of scope; report red and stop.

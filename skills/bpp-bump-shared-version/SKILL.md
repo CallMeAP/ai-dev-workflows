@@ -71,7 +71,7 @@ Apply the same up-to-date + downgrade guards on the worktree's props content fir
 ### 1. Fetch latest -development version
 
 ```bash
-LATEST=$(glab api "projects/brokernet%2Fbpp-shared/packages?per_page=20&order_by=created_at&sort=desc" \
+LATEST=$(glab api "projects/lipso%2Fclients%2Fbrokernet%2Fbpp-shared/packages?per_page=20&order_by=created_at&sort=desc" \
   | jq -r '[.[] | select(.version | test("-development\\+"))][0].version')
 
 [ -z "$LATEST" ] || [ "$LATEST" = "null" ] && { echo "FAIL — no -development package found" >&2; exit 1; }
@@ -86,11 +86,11 @@ List `bpp-*` projects in the `brokernet/` group, then probe each repo's root tre
 declare -A PROPSPATH REMOTEVER
 declare -a CONSUMERS NONCONSUMERS UNVERIFIED
 
-mapfile -t ALLREPOS < <(glab api "/groups/brokernet/projects?per_page=100&simple=true" \
+mapfile -t ALLREPOS < <(glab api "/groups/lipso%2Fclients%2Fbrokernet/projects?per_page=100&simple=true" \
   | jq -r '.[] | select(.path | test("^bpp-")) | .path' | grep -vx 'bpp-shared' | sort)
 
 for repo in "${ALLREPOS[@]}"; do
-  enc="brokernet%2F${repo}"
+  enc="lipso%2Fclients%2Fbrokernet%2F${repo}"
   tree=$(glab api "/projects/${enc}/repository/tree?ref=development&per_page=100" 2>/dev/null)
   if ! echo "$tree" | jq -e 'type=="array"' >/dev/null 2>&1; then
     UNVERIFIED+=("$repo"); continue
@@ -189,7 +189,7 @@ For consumers with no local clone, commit the rewritten props file directly on `
 
 ```bash
 for repo in "${REMOTE_ONLY[@]}"; do
-  enc="brokernet%2F${repo}"
+  enc="lipso%2Fclients%2Fbrokernet%2F${repo}"
   props_rel="${PROPSPATH[$repo]}"
   props_enc="${props_rel//\//%2F}"
 

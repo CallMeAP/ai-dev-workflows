@@ -38,10 +38,10 @@ Exclude everything else (ops scripts, infra, archived).
 
 These are explicitly added on every run regardless of the filter:
 - `brokernet-document-cms` — in `brokernet/` group but has no `-ui$` suffix → filter misses it.
-- `callidus-bvs-ui` — in the `brokernet/callidus/` **subgroup**, so the group listing never returns it; needs the encoded path `brokernet%2Fcallidus%2Fcallidus-bvs-ui`.
-- `servo-ui` — in the `brokernet/servo/` **subgroup**; encoded path `brokernet%2Fservo%2Fservo-ui`.
+- `callidus-bvs-ui` — in the `lipso/clients/brokernet/callidus/` **subgroup**, so the group listing never returns it; needs the encoded path `lipso%2Fclients%2Fbrokernet%2Fcallidus%2Fcallidus-bvs-ui`.
+- `servo-ui` — in the `lipso/clients/brokernet/servo/` **subgroup**; encoded path `lipso%2Fclients%2Fbrokernet%2Fservo%2Fservo-ui`.
 
-Because one extra lives in a subgroup, the encoded project path can't be derived as `brokernet%2F${repo}` for every repo. The workflow therefore builds a per-repo `ENC[repo]` → encoded-path map and uses `${ENC[$repo]}` everywhere instead of hardcoding `brokernet%2F${repo}`.
+Because one extra lives in a subgroup, the encoded project path can't be derived as `lipso%2Fclients%2Fbrokernet%2F${repo}` for every repo. The workflow therefore builds a per-repo `ENC[repo]` → encoded-path map and uses `${ENC[$repo]}` everywhere instead of hardcoding `lipso%2Fclients%2Fbrokernet%2F${repo}`.
 
 ### Authoritative cross-check: bpp/repos.md (MANDATORY)
 
@@ -109,21 +109,21 @@ The preview (step 4) must mark which repos will receive a bump so the user confi
 
 ### 1. Discover repos
 
-Build a `name → encoded-project-path` map. Filtered repos get `brokernet%2F${repo}`; the always-include extras are added explicitly (two with subgroup-encoded paths). Every later step keys off `${ENC[$repo]}`.
+Build a `name → encoded-project-path` map. Filtered repos get `lipso%2Fclients%2Fbrokernet%2F${repo}`; the always-include extras are added explicitly (two with subgroup-encoded paths). Every later step keys off `${ENC[$repo]}`.
 
 ```bash
 declare -A ENC
 
 # Filtered repos from the brokernet/ group
 while read -r repo; do
-  ENC[$repo]="brokernet%2F${repo}"
-done < <(glab api "/groups/brokernet/projects?per_page=100&simple=true" \
+  ENC[$repo]="lipso%2Fclients%2Fbrokernet%2F${repo}"
+done < <(glab api "/groups/lipso%2Fclients%2Fbrokernet/projects?per_page=100&simple=true" \
   | jq -r '.[] | select(.path | test("^(bpp-|brokernet-.*-ui$)")) | .path')
 
 # Always-include extras (filter misses them / subgroup)
-ENC[brokernet-document-cms]="brokernet%2Fbrokernet-document-cms"
-ENC[callidus-bvs-ui]="brokernet%2Fcallidus%2Fcallidus-bvs-ui"
-ENC[servo-ui]="brokernet%2Fservo%2Fservo-ui"
+ENC[brokernet-document-cms]="lipso%2Fclients%2Fbrokernet%2Fbrokernet-document-cms"
+ENC[callidus-bvs-ui]="lipso%2Fclients%2Fbrokernet%2Fcallidus%2Fcallidus-bvs-ui"
+ENC[servo-ui]="lipso%2Fclients%2Fbrokernet%2Fservo%2Fservo-ui"
 
 REPOS=("${!ENC[@]}")
 ```

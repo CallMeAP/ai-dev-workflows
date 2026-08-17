@@ -120,7 +120,7 @@ Follow **`bpp-create-mr`**. Target `development`, reviewer `apittrich`, and pin 
 git -C <worktree> add <new-test-file> ...          # explicit adds only — never git add -A
 git -C <worktree> commit -m "test(<module>): close e2e coverage gaps"
 git -C <worktree> push -u origin test/e2e-audit-$slug     # never --force
-glab mr create -R brokernet/<repo> --source-branch test/e2e-audit-$slug \
+glab mr create -R lipso/clients/brokernet/<repo> --source-branch test/e2e-audit-$slug \
   --target-branch development --reviewer apittrich --fill
 ```
 
@@ -144,7 +144,7 @@ A case that needs infrastructure not available locally (real Minio blobs, an ext
 | Match | `HttpClient` route calls in `IntegrationTests/`, not test names |
 | Write | `bpp-add-integration-tests` pattern, worktree off `origin/development` |
 | Run | `bpp-run-integration-tests` conventions (stack up, 1 suite, ≥60s, ≤3 runs) |
-| MR | `bpp-create-mr`, `-R brokernet/<repo>`, reviewer apittrich, no `--force` |
+| MR | `bpp-create-mr`, `-R lipso/clients/brokernet/<repo>`, reviewer apittrich, no `--force` |
 
 ## Common Mistakes
 
@@ -166,5 +166,5 @@ A case that needs infrastructure not available locally (real Minio blobs, an ext
 - About to **loosen an assertion** (status-only, `Contains`, remove a field check) to go green → STOP. That fakes coverage. Fix the seed/test or report the bug.
 - About to audit or write against a checkout you did **not fetch** → STOP. Fetch `origin/development` first.
 - About to `git checkout` / switch a **main checkout's** branch → STOP. Use a worktree.
-- About to `git add -A` / `--force` / omit the reviewer or `-R` pin → STOP. Explicit adds, plain push, `-R brokernet/<repo>`, reviewer apittrich.
+- About to `git add -A` / `--force` / omit the reviewer or `-R` pin → STOP. Explicit adds, plain push, `-R lipso/clients/brokernet/<repo>`, reviewer apittrich.
 - About to seed a **non-`@go-plattform.at`** mail recipient in an e2e test → STOP. Real mail would dispatch.

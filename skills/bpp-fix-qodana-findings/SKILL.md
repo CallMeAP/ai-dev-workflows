@@ -14,7 +14,7 @@ Playbook for turning Qodana MR-pipeline findings into reviewable fix MRs across 
 Latest MR pipeline's qodana report per repo (no artifact-zip download needed — direct file endpoint):
 
 ```bash
-pid="brokernet%2F<repo>"
+pid="lipso%2Fclients%2Fbrokernet%2F<repo>"
 pl=$(glab api "projects/$pid/pipelines?source=merge_request_event&per_page=1" | jq -r '.[0].id')
 jid=$(glab api "projects/$pid/pipelines/$pl/jobs?per_page=50" | jq -r '[.[] | select(.name|test("qodana";"i"))][0].id')
 glab api "projects/$pid/jobs/$jid/artifacts/.qodana/results/gl-code-quality-report.json" > qodana_<repo>.json
@@ -99,7 +99,7 @@ Caveat on `RedundantSuppressNullableWarningExpression`: `!` is compile-time-only
 - Java repos (bpp-mail, bpp-js-report): `VulnerableLibrariesLocal` → prefer ONE Spring Boot parent patch-bump (BOM covers most CVEs) + explicit overrides for stragglers; `JvmTaintAnalysis` on PDF/attachment endpoints = usually false positive (attachment disposition ≠ HTML render) — assess per endpoint in the MR description, don't rewrite code.
 - Verification mode is the user's call: local build+unit tests OR pipeline-only ("don't build locally") — in pipeline-only mode be MORE conservative (that's when the blind-mass-edit ban matters most; a 400-edit Redundant* bulk pass belongs to a cleanupcode+build task, not a no-build sweep).
 - Local-restore-blocked repos (e.g. doci — no local project-ref override + NuGet 401 on restore): ship **config-only** changes and **defer code batches explicitly as build-blocked**; never push code edits you could not build/verify locally.
-- glab traps: `glab mr create`/`view` broken → `glab api POST /projects/brokernet%2F<repo>/merge_requests`; reviewer via `glab mr update <iid> --reviewer apittrich -R brokernet/<repo>`; MR description from a /tmp file fails (sandbox + HTTP 415) → inline `-f description="$(cat file)"`.
+- glab traps: `glab mr create`/`view` broken → `glab api POST /projects/lipso%2Fclients%2Fbrokernet%2F<repo>/merge_requests`; reviewer via `glab mr update <iid> --reviewer apittrich -R lipso/clients/brokernet/<repo>`; MR description from a /tmp file fails (sandbox + HTTP 415) → inline `-f description="$(cat file)"`.
 
 ## Deliverable shape (per MR description)
 

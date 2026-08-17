@@ -38,7 +38,7 @@ Regenerates the GitLab-only section by diffing the full `brokernet/` group (incl
 INDEX=/home/alex/Entwicklung/bpp/bpp-backend/dev/apittrich/project_index.md
 WORK=$(mktemp -d)
 
-glab api "/groups/brokernet/projects?include_subgroups=true&archived=false&per_page=100&simple=true" --paginate \
+glab api "/groups/lipso%2Fclients%2Fbrokernet/projects?include_subgroups=true&archived=false&per_page=100&simple=true" --paginate \
   | jq -r '.[] | [.path_with_namespace, (.description // "" | gsub("\n"; " "))] | @tsv' \
   | sort > "$WORK/gitlab.tsv"
 [ -s "$WORK/gitlab.tsv" ] || { echo "FAIL — empty GitLab listing, aborting (do NOT rewrite the section)" >&2; exit 1; }
