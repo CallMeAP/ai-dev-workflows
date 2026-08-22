@@ -36,7 +36,7 @@ To force a qodana run against current development, per repo:
 
 1. Branch `chore/qodana-refresh-<date>` off development **via the GitLab API** (create-branch endpoint) — never switch a shared local checkout's branch, and never rely on a local-checkout branch to trigger the scan.
 2. Append ONE trivial line to `README.md`/`PROJECT.md`: `<!-- qodana refresh probe <date> -->`. The qodana ci-component has **no `rules:changes` gating** (verified 2026-07-16), so a docs-only touch triggers the scan in every repo.
-3. Open a **Draft** MR targeting development; set the reviewer with a separate `glab mr update <iid> --reviewer apittrich` (creation-time `reviewer_ids` are silently dropped).
+3. Open a **Draft** MR targeting development, **labelled `qodana`** (see Process rules); set the reviewer with a separate `glab mr update <iid> --reviewer apittrich` (creation-time `reviewer_ids` are silently dropped).
 4. Poll the pipeline with a **bounded bash sleep-loop inside a single Bash call** — never "wait" across turns (waiting agents go idle instead of polling).
 5. The probe MR **becomes the fix MR**: push the classified fixes onto the same branch, **remove the probe marker line first** (README/PROJECT.md must end byte-identical to development), then un-draft it — or **close** it if the fresh report is clean.
 
@@ -92,14 +92,27 @@ Caveat on `RedundantSuppressNullableWarningExpression`: `!` is compile-time-only
 
 - Temp worktree per repo (`git worktree add … -b chore/qodana-fixes origin/development`); never switch main checkouts. When using the probe flow, add the worktree on the already-pushed remote `chore/qodana-refresh-<date>` branch instead — the fixes land there and un-draft that MR (do not open a second branch).
 - If AutoMapper-removal/other big refactor MRs are open in the repo: **stack** the fix MR on that chain (backend: base+target the top branch, note auto-retarget) or defer (stella) — findings were scanned on development, so locate by file+content, not line numbers, and count "drift-skipped".
-- One commit per check-type. MR reviewer `apittrich`, target `development`.
+- One commit per check-type. MR reviewer `apittrich`, target `development`, **label `qodana`**.
+- **Every MR this skill opens carries the `qodana` label** — that label is the fleet-wide filter the whole batch is reviewed through ([dashboard](https://gitlab.com/dashboard/merge_requests/search?scope=all&state=opened&label_name[]=qodana)). An unlabelled MR is invisible there, so it silently drops out of the review sweep. Set it at creation (`labels` accepts a comma-separated string) and **verify it stuck** by re-reading the MR — a label that does not yet exist in the project is created on the fly, but a typo'd one is indistinguishable from a miss:
+  ```bash
+  curl -sH "PRIVATE-TOKEN: $TOKEN" -X POST "$API/projects/$P/merge_requests" \
+    --data-urlencode "source_branch=$BRANCH" --data-urlencode "target_branch=development" \
+    --data-urlencode "title=$TITLE" --data-urlencode "description=$(cat "$DESC")" \
+    --data-urlencode "labels=qodana"
+  # already-open MR (label only, leaves other labels intact):
+  curl -sH "PRIVATE-TOKEN: $TOKEN" -X PUT "$API/projects/$P/merge_requests/<iid>" \
+    --data-urlencode "add_labels=qodana"
+  # verify
+  curl -sH "PRIVATE-TOKEN: $TOKEN" "$API/projects/$P/merge_requests/<iid>" | jq -r '.labels'
+  ```
+  Use `add_labels=` on an existing MR, never `labels=` — the latter REPLACES the whole set and would drop e.g. `staging-deployment`.
 - Java repos, wrong analyzer trap: a Java repo whose CI passes `qodana_image: jetbrains/qodana-dotnet:*` reports **0 findings = fake-clean** (nothing analyzed). Use `jetbrains/qodana-jvm:*`. Verify the image matches the language before trusting a clean report.
 - Java toolchain trap on this box: `/usr/lib/jvm/java-21-openjdk-amd64` is JRE-ONLY (`mvn -version` claims 21, compile fails "release version 21 not supported") — use a full Temurin JDK 21 (scratchpad tarball).
 - Java image builds: ci-components `build-java-image` default Dockerfile hardcodes JDK 17 (no input until the jdk_version input ships + a release tag is cut).
 - Java repos (bpp-mail, bpp-js-report): `VulnerableLibrariesLocal` → prefer ONE Spring Boot parent patch-bump (BOM covers most CVEs) + explicit overrides for stragglers; `JvmTaintAnalysis` on PDF/attachment endpoints = usually false positive (attachment disposition ≠ HTML render) — assess per endpoint in the MR description, don't rewrite code.
 - Verification mode is the user's call: local build+unit tests OR pipeline-only ("don't build locally") — in pipeline-only mode be MORE conservative (that's when the blind-mass-edit ban matters most; a 400-edit Redundant* bulk pass belongs to a cleanupcode+build task, not a no-build sweep).
 - Local-restore-blocked repos (e.g. doci — no local project-ref override + NuGet 401 on restore): ship **config-only** changes and **defer code batches explicitly as build-blocked**; never push code edits you could not build/verify locally.
-- glab traps: `glab mr create`/`view` broken → `glab api POST /projects/lipso%2Fclients%2Fbrokernet%2F<repo>/merge_requests`; reviewer via `glab mr update <iid> --reviewer apittrich -R lipso/clients/brokernet/<repo>`; MR description from a /tmp file fails (sandbox + HTTP 415) → inline `-f description="$(cat file)"`.
+- glab traps: `glab mr create`/`view` broken → `glab api POST /projects/lipso%2Fclients%2Fbrokernet%2F<repo>/merge_requests`; reviewer via `glab mr update <iid> --reviewer apittrich -R lipso/clients/brokernet/<repo>`; MR description from a /tmp file fails (sandbox + HTTP 415) → inline `-f description="$(cat file)"`. If glab OAuth is dead (`invalid_grant`), drop to curl + a PAT from `git credential fill` — never print the token.
 
 ## Deliverable shape (per MR description)
 
