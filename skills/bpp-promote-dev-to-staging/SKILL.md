@@ -96,6 +96,20 @@ Affected UI repos (exactly these five):
 
 `brokernet-document-cms` and the `bpp-*` backends do NOT get a bump — MR only.
 
+### `brokernet-app` (go-stella) — do NOT bump it from this skill
+
+`brokernet-app` looks like a UI repo but its version does **not** live in one `package.json`. It sits in **16 files across 4 ecosystems** (Gradle `versionName`, Xcode `MARKETING_VERSION`, npm, and 12 Angular `src/environments/*` files). A naive root-`package.json` bump leaves the app reporting inconsistent versions across platforms, and a global search-replace on the pbxproj corrupts the 2 `MARKETING_VERSION` lines that belong to a separate Xcode extension target with its own release cadence.
+
+It has its own dedicated skill, maintained by nangert, which handles all 16 files with a hard verification gate:
+<https://gitlab.com/lipso/internal/agentic-coding-knowledge/-/blob/main/personal-workflows/nangert/skills/stella-bump-version-staging-mr/SKILL.md>
+
+Rules when a promotion wave includes `brokernet-app`:
+- **Never** bump its version from this skill — not `package.json`, not any environment file.
+- If the wave needs a go-stella release bump, hand that off to `stella-bump-version-staging-mr` (or the user) **first**, then create the promotion MR here so the bump commit rides in it.
+- If no bump is wanted, promote `brokernet-app` MR-only like the backends. That is the default.
+- Note that skill targets **`development` -> `staging`** and the `staging-deployment` **label** (not a git tag). For `staging` -> `main` it does not apply — bump handling there is out of its scope; ask the user.
+- Also note it is written for BSD `sed -i ''`; on this Linux box that invocation fails. Read it as the source of truth for *which files and which anchors*, not for verbatim commands.
+
 Mechanics, per UI repo that will get an MR:
 
 1. **Idempotency guard** — read `.version` from `package.json` on BOTH branches (`/repository/files/package.json/raw?ref=<branch>`). If source-branch version ≠ target-branch version, the bump already happened (e.g. re-run, or a manual bump) → skip the bump, create the MR only.
@@ -272,6 +286,7 @@ Final summary: created MRs (with URLs), reused open MRs, skipped repos (no diffs
 - **Omitting the change-summary description** → every created MR carries the short added/updated/fixed/removed summary; empty descriptions are no longer allowed.
 - **Adding assignee / reviewer** → defaults only; only override if user explicitly asks.
 - **Forgetting the UI patch-version bump** → the five UI repos (callidus-bvs / servo / cockpit / hotel / onboarding) need the `package.json` patch bump committed on the source branch BEFORE the MR; document-cms and backends don't.
+- **Bumping `brokernet-app` like a UI repo** → its version lives in 16 files across Gradle / Xcode / npm / Angular envs, not one `package.json`. Never bump it here; it has its own skill ([stella-bump-version-staging-mr](https://gitlab.com/lipso/internal/agentic-coding-knowledge/-/blob/main/personal-workflows/nangert/skills/stella-bump-version-staging-mr/SKILL.md)). Default in a promotion wave is MR-only.
 - **Double-bumping on re-run** → always apply the idempotency guard (source vs target version differ = already bumped).
 - **Missing servo-ui / callidus-bvs-ui** → both live in subgroups; the group listing without `include_subgroups` never returns them — they come from the always-include extras.
 - **Skipping the bpp/repos.md cross-check** → the filter+extras provably drift (2026-08-14: six repos missed, e.g. `brokernet-app`, `servo-hw-connector`). Always fetch the list and add its missing repos before probing; if unreachable, flag it in the preview instead of silently proceeding.
