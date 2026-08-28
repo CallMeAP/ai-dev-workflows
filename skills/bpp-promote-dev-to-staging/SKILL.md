@@ -84,7 +84,7 @@ done < <(grep -E '^\|[^|]+\| *https://gitlab.com/' "$WORK/repos.md")
 
 **UI repos need a version bump on the source branch BEFORE the promotion MR is created.** Rule (user directive 2026-08-06): **raise the PATCH version when promoting** — applies to BOTH directions. Reference commit: brokernet-hotel-ui `83b8bc87` ("raise version for staging", `package.json` version line change; that instance happened to be a major bump — the standing rule is patch).
 
-Affected UI repos (exactly these five):
+Affected UI repos (exactly these six):
 
 | Repo | package.json |
 |------|--------------|
@@ -286,7 +286,7 @@ Final summary: created MRs (with URLs), reused open MRs, skipped repos (no diffs
 - **Skipping preview** → never bulk-write across 13+ repos without explicit user confirmation.
 - **Omitting the change-summary description** → every created MR carries the short added/updated/fixed/removed summary; empty descriptions are no longer allowed.
 - **Adding assignee / reviewer** → defaults only; only override if user explicitly asks.
-- **Forgetting the UI patch-version bump** → the five UI repos (callidus-bvs / servo / cockpit / hotel / onboarding) need the `package.json` patch bump committed on the source branch BEFORE the MR; document-cms and backends don't.
+- **Forgetting the UI patch-version bump** → the six UI repos (callidus-bvs / servo / cockpit / hotel / onboarding / doci-dashboard) need the `package.json` patch bump committed on the source branch BEFORE the MR; document-cms and backends don't.
 - **Bumping `brokernet-app` like a UI repo** → its version lives in 16 files across Gradle / Xcode / npm / Angular envs, not one `package.json`. Never bump it here; it has its own skill ([stella-bump-version-staging-mr](https://gitlab.com/lipso/internal/agentic-coding-knowledge/-/blob/main/personal-workflows/nangert/skills/stella-bump-version-staging-mr/SKILL.md)). Default in a promotion wave is MR-only.
 - **Double-bumping on re-run** → always apply the idempotency guard (source vs target version differ = already bumped).
 - **Missing servo-ui / callidus-bvs-ui** → both live in subgroups; the group listing without `include_subgroups` never returns them — they come from the always-include extras.
