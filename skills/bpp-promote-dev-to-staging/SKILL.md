@@ -93,6 +93,7 @@ Affected UI repos (exactly these five):
 | `brokernet-cockpit-ui` | root `package.json` |
 | `brokernet-hotel-ui` | root `package.json` |
 | `brokernet-onboarding-ui` | root `package.json` |
+| `bpp-document-analysis-dashboard` | root `package.json` |
 
 `brokernet-document-cms` and the `bpp-*` backends do NOT get a bump — MR only.
 
