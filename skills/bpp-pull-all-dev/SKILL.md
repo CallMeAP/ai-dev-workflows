@@ -22,7 +22,7 @@ Update `development` in all local BPP repos under `~/Entwicklung/bpp/`. Never lo
 
 ### 1. Discover repos
 
-All directories in `~/Entwicklung/bpp/` that contain `.git`. Known non-repos / excluded: `bpp-to-dos` (not git), `infra`, `*.worktrees` (worktree containers — never pull these).
+All directories in `~/Entwicklung/bpp/` that contain `.git`. Known non-repos / excluded: `bpp-to-dos` (not git), `infra`, `*.worktrees` (worktree containers — never pull these), `bpp-cca-connector-internal` (temporary internal repo, slated for removal/merge — excluded from automated sweeps; it sits permanently on a feature branch, so the generic off-branch skip would surface it as a recurring "action needed" line on every run). Exact-name exclusion — `bpp-cca-connector` stays in.
 
 ### 2. Pull loop (safe by construction)
 
@@ -41,7 +41,7 @@ set -uo pipefail
 BASE=/home/alex/Entwicklung/bpp
 for repo in "$BASE"/*/; do
   name=$(basename "$repo")
-  case "$name" in *worktrees*|infra) continue;; esac
+  case "$name" in *worktrees*|infra|bpp-cca-connector-internal) continue;; esac
   [ -d "$repo/.git" ] || { echo "SKIP $name: not a git repo"; continue; }
   branch=$(git -C "$repo" rev-parse --abbrev-ref HEAD)
   [ "$branch" = "development" ] || { echo "SKIP $name: on branch '$branch'"; continue; }

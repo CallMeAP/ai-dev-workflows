@@ -34,6 +34,10 @@ Filtered repos in `brokernet/` group:
 
 Exclude everything else (ops scripts, infra, archived).
 
+### Always-exclude (matches the filter, but must NOT be promoted)
+
+- `bpp-cca-connector-internal` — temporary internal repo, slated for removal/merge — excluded from automated sweeps. Exact-name exclusion; `bpp-cca-connector` is a separate, real repo and stays in. It matches `^bpp-` **and** may appear in `repos.md`, so it is dropped in two places: the group-listing filter (step 1) and an `unset` after the cross-check below — otherwise the cross-check re-adds it.
+
 ### Always-include extras (do NOT match the filter / live in a subgroup)
 
 These are explicitly added on every run regardless of the filter:
@@ -62,6 +66,9 @@ while IFS='|' read -r _ name link _; do
     echo "ADDED-FROM-LIST $name ($path)"
   fi
 done < <(grep -E '^\|[^|]+\| *https://gitlab.com/' "$WORK/repos.md")
+
+# always-exclude: temporary internal repo, slated for removal/merge (the cross-check would re-add it)
+unset 'ENC[bpp-cca-connector-internal]'
 ```
 
 - Every list repo missing from `ENC` is **added** (encoded path derived from the link — this also handles subgroups like `brokernet/servo/...`). The branch probe then decides naturally whether it participates ("no staging branch" stays an expected outcome).
@@ -133,7 +140,7 @@ declare -A ENC
 while read -r repo; do
   ENC[$repo]="lipso%2Fclients%2Fbrokernet%2F${repo}"
 done < <(glab api "/groups/lipso%2Fclients%2Fbrokernet/projects?per_page=100&simple=true" \
-  | jq -r '.[] | select(.path | test("^(bpp-|brokernet-.*-ui$)")) | .path')
+  | jq -r '.[] | select(.path | test("^(bpp-|brokernet-.*-ui$)") and .path != "bpp-cca-connector-internal") | .path')
 
 # Always-include extras (filter misses them / subgroup)
 ENC[brokernet-document-cms]="lipso%2Fclients%2Fbrokernet%2Fbrokernet-document-cms"

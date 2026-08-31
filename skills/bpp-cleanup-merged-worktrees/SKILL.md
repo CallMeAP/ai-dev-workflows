@@ -50,6 +50,7 @@ add_cand() {
   local p="$1"; [ -z "$p" ] && return
   case "$p" in "$BASE"/*) ;; *) return;; esac      # must live under BASE (skips /tmp scratchpad worktrees)
   case "$p" in */.claude/*) return;; esac          # Claude Code-managed worktrees — never touch, CC prunes them
+  case "$p" in *bpp-cca-connector-internal*) return;; esac   # temporary internal repo, slated for removal/merge — excluded from automated sweeps (substring keeps `bpp-cca-connector` in scope)
   [ -n "${SEEN[$p]:-}" ] && return; SEEN[$p]=1; CANDS+=("$p")
 }
 # (a) stray .wt-* dirs directly under BASE (catches dirs whose worktree registration was pruned)

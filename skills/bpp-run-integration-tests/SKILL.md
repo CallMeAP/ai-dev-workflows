@@ -1,6 +1,6 @@
 ---
 name: bpp-run-integration-tests
-description: Use when user wants to run end-to-end / integration tests in a BPP .NET repo and auto-heal failures — phrases like "run integration tests", "run e2e tests", "are integration tests green", "fix failing integration tests", "check integration tests". Discovers test projects, starts the local stack via bpp-start-local-stack, runs `dotnet test --filter "Category=Integration|Category=LocalIntegration"`, and on failure investigates recent commits in cwd + bpp-shared before stopping for user input. Always skips bpp-document-analysis (aka bpp-doci) and bpp-agent entirely (no unit, no e2e).
+description: Use when user wants to run end-to-end / integration tests in a BPP .NET repo and auto-heal failures — phrases like "run integration tests", "run e2e tests", "are integration tests green", "fix failing integration tests", "check integration tests". Discovers test projects, starts the local stack via bpp-start-local-stack, runs `dotnet test --filter "Category=Integration|Category=LocalIntegration"`, and on failure investigates recent commits in cwd + bpp-shared before stopping for user input. Always skips bpp-document-analysis (aka bpp-doci), bpp-agent and bpp-cca-connector-internal entirely (no unit, no e2e).
 ---
 
 # bpp-run-integration-tests
@@ -17,7 +17,7 @@ Auto-discovers integration tests in a BPP .NET repo (NUnit + WebApplicationFacto
 
 ## Excluded repos (standing user directive, non-negotiable)
 
-**ALWAYS skip `bpp-document-analysis` (aka "bpp-doci") and `bpp-agent` — no unit tests, no integration/e2e tests**, whether cwd is that repo or a fleet-wide sweep includes it. Resolve repo names/paths via the `bpp-project-index` skill. If cwd IS one of these repos, report the standing exclusion and stop instead of running anything. In fleet summaries, list them as `SKIPPED (excluded by user directive)` — never as green or missing.
+**ALWAYS skip `bpp-document-analysis` (aka "bpp-doci"), `bpp-agent` and `bpp-cca-connector-internal` — no unit tests, no integration/e2e tests**, whether cwd is that repo or a fleet-wide sweep includes it. `bpp-cca-connector-internal` is a temporary internal repo, slated for removal/merge — excluded from automated sweeps; the exclusion is by exact name, `bpp-cca-connector` is a separate real repo and stays in scope. Resolve repo names/paths via the `bpp-project-index` skill. If cwd IS one of these repos, report the standing exclusion and stop instead of running anything. In fleet summaries, list them as `SKIPPED (excluded by user directive)` — never as green or missing.
 
 ## Conventions Discovered
 
@@ -137,7 +137,7 @@ Leave any test edits unstaged for the user to review.
 
 ## Common Mistakes
 
-- **Running anything in bpp-document-analysis (bpp-doci) or bpp-agent** → standing user exclusion, unit AND e2e. Skip + report, never run.
+- **Running anything in bpp-document-analysis (bpp-doci), bpp-agent or bpp-cca-connector-internal** → standing user exclusion, unit AND e2e. Skip + report, never run.
 - **Auto-fixing tests to make them green** when production regressed → masks the real bug. Always classify the failure first.
 - **Forcing `[Explicit]` tests to run** — they are opt-in for a reason.
 - **Looping indefinitely** — respect the 3-run cap.

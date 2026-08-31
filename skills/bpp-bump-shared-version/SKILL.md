@@ -30,7 +30,7 @@ Conservative on edge cases: skip + report rather than auto-fix.
 | Commit message | `chore: bump bpp-shared to {version}` (identical for local and API commits) |
 | Push remote | `origin` |
 | Channel | latest version with `-development+*` suffix |
-| Repo list | GitLab group `brokernet/`, projects matching `^bpp-`, excluding `bpp-shared` |
+| Repo list | GitLab group `brokernet/`, projects matching `^bpp-`, excluding `bpp-shared` and `bpp-cca-connector-internal` |
 | Consumer test | repo has a root-level `BPP.*/Directory.Build.props` on `development` containing `<BppSharedVersion>` (folder name varies — e.g. `BPP.DocumentAnalysis`, `BPP.Agent.NET`) |
 | Local clone path | `~/Entwicklung/bpp/{repo}` |
 
@@ -87,7 +87,7 @@ declare -A PROPSPATH REMOTEVER
 declare -a CONSUMERS NONCONSUMERS UNVERIFIED
 
 mapfile -t ALLREPOS < <(glab api "/groups/lipso%2Fclients%2Fbrokernet/projects?per_page=100&simple=true" \
-  | jq -r '.[] | select(.path | test("^bpp-")) | .path' | grep -vx 'bpp-shared' | sort)
+  | jq -r '.[] | select(.path | test("^bpp-")) | .path' | grep -vxE 'bpp-shared|bpp-cca-connector-internal' | sort)
 
 for repo in "${ALLREPOS[@]}"; do
   enc="lipso%2Fclients%2Fbrokernet%2F${repo}"
@@ -272,6 +272,7 @@ UNVERIFIED — could not inspect, possible missed consumers (N):
 - **Rewriting without a sanity check on the API path** → the rewritten content must differ from the original AND contain `LATEST`, otherwise skip. Never POST a no-op or corrupted file.
 - **Using `--force` on push** → never. Plain `git push origin development` only.
 - **Including `bpp-shared` itself** → it's the source, not a consumer. Excluded from the repo list.
+- **Including `bpp-cca-connector-internal`** → temporary internal repo, slated for removal/merge; excluded from automated sweeps even though it carries a `<BppSharedVersion>`. The exclusion is an exact-name match (`grep -vxE`) — `bpp-cca-connector` is a separate, real consumer and stays in.
 - **Running repos in parallel** → keep sequential. Per-repo output must be readable; any conflict needs a clear single-repo error.
 - **Skipping the downgrade guard** → applies to BOTH paths (local and API). If the current version is newer than `LATEST`, blindly rewriting would be a regression. Skip with `newer-local` / `newer-remote`.
 - **Trusting the discovery snapshot on the API path** → re-fetch the raw props at bump time; the version read during discovery may be stale by the time the commit is made.
