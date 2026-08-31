@@ -61,8 +61,10 @@ git -C ~/Entwicklung/bpp/bpp-shared ls-tree --name-only -r origin/development \
   BPP.Shared.NET/BPP.Shared.NET.DbMigrator/Migrations/ \
   | grep -oE '[0-9]{14}_[A-Za-z0-9_]+(?=\.cs$)' -P | grep -v '\.Designer$' | sort -u
 # what the DB has
+# NOTE: the columns are snake_case (migration_id), NOT EF's default "MigrationId" — the
+# quoted-PascalCase form errors here. The TABLE name stays quoted PascalCase.
 PGPASSWORD=admin psql -h localhost -p 5432 -U admin -d bpp -tAc \
-  'SELECT "MigrationId" FROM "__EFMigrationsHistory" ORDER BY 1;'
+  'SELECT migration_id FROM "__EFMigrationsHistory" ORDER BY migration_id;'
 ```
 
 Diff the two, **report the pending list, then apply** via the repo's DbMigrator (or `dotnet ef database
