@@ -31,6 +31,37 @@ human decides. Many `.wt-*` folders belong to **other agents working right now**
 Run **plan mode first** (default). Show the user the table. Only then run **apply mode**, and for any
 CONFIRM rows ask the user explicitly before removing them by hand — apply mode never auto-removes CONFIRM.
 
+### Settling a CONFIRM row — patch-identity, NOT a three-dot diff
+
+`ahead>0` only means the branch tip is not an *ancestor* of dev. It does **not** mean the content is
+missing: a squash- or rebase-merged branch has its work in dev under **different commit hashes**. Two
+tests separate "genuinely unmerged" from "merged under a rewritten hash":
+
+```bash
+# (1) patch-identity: '-' = this patch already exists upstream, '+' = it does not
+git -C <repo> cherry origin/development <branch>
+
+# (2) two-dot diff restricted to the files the branch actually touched
+files=$(git -C <repo> diff --name-only origin/development...<branch>)
+git -C <repo> diff --stat origin/development <branch> -- $files
+```
+
+**All `-` from `git cherry` AND an empty two-dot diff over those files ⇒ the content landed. Safe to
+remove.** Any `+` line, or a non-empty two-dot diff, ⇒ real work is missing — **KEEP** and show the user
+what is in it.
+
+🔴 **Do NOT judge this with `git diff origin/development...<branch>` (three dots).** Three-dot measures
+merge-base→branch, so a squash/rebase-merged branch still displays its entire diff and every row reads as
+"unsafe". It also inflates rows whose files dev has since evolved. **Measured 2026-08-31: the three-dot
+test called all 5 CONFIRM rows unsafe; patch-identity proved all 5 had landed** — including two that the
+ancestor test alone had made look like genuine post-merge work (1 and 10 commits outside dev).
+
+**Expect `git branch -d` to REFUSE on every CONFIRM row** — the tip is not an ancestor, which is the whole
+reason it is a CONFIRM. That refusal is the **correct outcome, not a failure**: remove the worktree, leave
+the branch, report it. **Never escalate to `-D`.** A stale local branch pointer costs nothing; `-D` is the
+one command here that destroys unmerged work if the read is wrong.
+
+
 - Plan (default): `bash cleanup.sh` or `bash cleanup.sh plan`
 - Apply (removes only REMOVE rows, re-verified at removal time): `bash cleanup.sh apply`
 
@@ -161,12 +192,12 @@ exit 0
 
 - **Plan table** — every candidate as `VERDICT | worktree | branch | reason`, then `SUMMARY: REMOVE=n CONFIRM=n KEEP=n`.
 - **Apply run** — one line per REMOVE row: `REMOVED …` (with branch deleted / retained) or `SKIP … <reason>`.
-- Report back three buckets: **removed**, **kept (with reason)**, **needs-confirmation (CONFIRM)** — and for CONFIRM rows tell the user *why* (squash / post-merge) so they can OK a manual `git worktree remove` + `git branch -D`.
+- Report back three buckets: **removed**, **kept (with reason)**, **needs-confirmation (CONFIRM)** — and for CONFIRM rows tell the user *why* (squash / post-merge) plus the patch-identity result, so they can OK a manual `git worktree remove`. **Do not suggest `git branch -D`** — leave the branch.
 
 ## Common Mistakes
 
 - **`is-ancestor` alone = REMOVE** → a freshly-created worktree sitting *exactly* at `origin/development` (ahead=0 **and** behind=0) is a trivial ancestor with no merged work to reclaim — almost always a live agent's fresh worktree. Require **behind>0** (dev advanced past the branch) before auto-removing; ahead=0/behind=0 is KEEP.
-- **Treating a squash merge as unmerged** → squash-merged branch tips are NOT ancestors of dev (`ahead>0`), so the ancestor check says "unmerged". Cross-check the GitLab MR state; a merged MR with local commits still-outside-dev is **CONFIRM**, never auto-REMOVE (its commits could also be genuine post-merge work).
+- **Treating a squash merge as unmerged** → squash-merged branch tips are NOT ancestors of dev (`ahead>0`), so the ancestor check says "unmerged". Cross-check the GitLab MR state; a merged MR with local commits still-outside-dev is **CONFIRM**, never auto-REMOVE (its commits could also be genuine post-merge work). Settle it with patch-identity (`git cherry`) + a two-dot diff over the touched files — **never a three-dot diff**, which reports every squash/rebase merge as unsafe.
 - **`git worktree remove --force`** → strips uncommitted/untracked work silently. Never use `--force`; plain `remove` refuses on a dirty/locked worktree, which is the desired safety.
 - **`git branch -D`** → force-deletes unmerged branches, orphaning commits. Only ever `git branch -d`; if it refuses (squash merge), retain the branch and report it.
 - **Removing Claude Code worktrees** → paths under `**/.claude/worktrees/*` are managed (and auto-pruned) by Claude Code; excluding `*/.claude/*` prevents yanking a worktree out from under a running agent. The `/tmp/**/scratchpad/*` worktrees are out of scope too (not under BASE).
