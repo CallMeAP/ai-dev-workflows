@@ -1,6 +1,6 @@
 ---
 name: bpp-regen-connector-clients
-description: Use when regenerating the NSwag auto-generated *.g.cs connector clients in any BPP .NET repo with a *.Connectors project (bpp-backend, bpp-cheggnet-connector, bpp-vera-connector, bpp-document-analysis) — phrases like "regen connectors", "update connector clients", "regenerate nswag clients", "refresh api-docs / swagger json", "connector client out of date", "bpp-mail/bpp-file/bpp-push/js-report API changed".
+description: Use when regenerating the NSwag auto-generated *.g.cs connector clients in any BPP .NET repo with a *.Connectors project (bpp-backend, bpp-cheggnet-connector, bpp-vera-connector, bpp-document-analysis) or the BppAuthConnector inside bpp-shared — phrases like "regen connectors", "update connector clients", "regenerate nswag clients", "refresh api-docs / swagger json", "connector client out of date", "bpp-mail/bpp-file/bpp-push/js-report/bpp-auth API changed", "bpp-auth client is stale".
 ---
 
 # BPP: Regenerate NSwag connector clients
@@ -18,6 +18,7 @@ Refreshes the committed OpenAPI specs (`api-docs-*.json`) from the **running loc
 | `ConnectorBppFile` | `bpp-file` | dotnet | 5242 | `http://localhost:5242/api-doc/v1/swagger.json` |
 | `ConnectorBppPush` | `bpp-push` | dotnet | 5245 | `http://localhost:5245/api-doc/v1/swagger.json` |
 | `ConnectorBppMail` | `bpp-mail` | java | 8082 | `http://localhost:8082/v3/api-docs` |
+| `BppAuthConnector` **(lives in `bpp-shared`, not a `*.Connectors` repo)** | `bpp-auth` | dotnet | 5240 | `http://localhost:5240/api-doc/v1/swagger.json` |
 | `ConnectorJsReport` | `bpp-js-report-connector` | java | 8081 | `http://localhost:8081/v3/api-docs` |
 | `ConnectorHw`, `ConnectorEpz`, `ConnectorFiab`, `ConnectorVariasSign`, `ConnectorVeraApi` | — external, no local repo | — | — | **SKIP** — regen only if the user supplies an updated spec |
 
@@ -26,6 +27,23 @@ Ports are pinned by the local stack; cross-check against `*Connector.BaseUrl` in
 **Endpoint gotchas (do NOT guess paths):**
 - .NET services serve Swashbuckle at `/api-doc/v1/swagger.json` — NOT `/swagger/v1/swagger.json`. Gated to `CurrentEnvironmentUtil.IsLocal()`; the stack script sets `ASPNETCORE_ENVIRONMENT=local`, so it works locally only.
 - Java services (springdoc) have api-docs **disabled by default even locally** (`springdoc.api-docs.enabled: false`). They 404 unless started with `SPRINGDOC_APIDOCS_ENABLED=true SPRINGDOC_SWAGGERUI_ENABLED=true` in the environment.
+
+## The `bpp-shared` / `BppAuthConnector` exception (read before regenerating it)
+
+`BppAuthConnector` does **not** follow the `*.Connectors` repo pattern. Four differences, each of which breaks a step below if you assume the normal shape:
+
+| | Normal connectors | `BppAuthConnector` |
+|---|---|---|
+| Repo | consuming repo (bpp-backend, …) | **`bpp-shared`** |
+| Folder | `<Repo>.Connectors/ConnectorBppFile/` | `BPP.Shared.NET/BPP.Shared.NET/Connectors/**BppAuthConnector**/` |
+| NSwag `<Target>` | `*.Connectors/*.csproj` | **`BPP.Shared.NET/BPP.Shared.NET/BPP.Shared.NET.csproj`** (`NSwagBppAuth`, commented out) |
+| Reaches consumers | on merge | **only after a package publish + `<BppSharedVersion>` bump** |
+
+- **Folder-glob traps.** The discovery glob in step 2 (`$REPO/*/*.Connectors/*.csproj`) and the ctor guard in step 6 (`Connector*/*.g.cs`) both **silently miss** this connector — its folder starts with `BppAuth`, not `Connector`. Use the explicit path; a clean run that never touched it is a false pass.
+- **This spec goes stale silently.** The `NSwagBppAuth` target has been commented out since the file was written (spec frozen at Nov 2025 while the live API moved on), so drift here is measured in *months*, not days. Expect a large, real diff — do not mistake it for format churn.
+- **Blast radius is fleet-wide.** Every service that talks to bpp-auth consumes this client, so a regen can be source-breaking far beyond bpp-shared. Measure the delta and grep the fleet for usages of changed members **before** shipping; put the delta summary in the MR description.
+- **Always ship it as its own MR** in bpp-shared → `development`, reviewer `apittrich`. Never fold an auth-client regen into an unrelated connector-regen MR — it makes both unreviewable. And never merge it without an explicit GO: a bad auth client breaks every service at once.
+- **Re-comment `NSwagBppAuth` before committing.** Left enabled, every future bpp-shared build — CI included, and every dev without the local stack up — would try to reach a running bpp-auth and fail.
 
 ## Preconditions
 
@@ -48,6 +66,8 @@ In the consuming repo, find the connectors project and its NSwag targets:
 CSPROJ=$(ls $REPO/*/*.Connectors/*.csproj)
 grep -o 'nswag run [^ ]*' "$CSPROJ"          # one commented <Target> per connector
 ```
+
+**This glob does not match `bpp-shared`** — its target lives in `BPP.Shared.NET/BPP.Shared.NET/BPP.Shared.NET.csproj`. When the scope includes `BppAuthConnector`, set `CSPROJ` to that path explicitly (see the exception section above).
 
 Each `Connector*/nswag-*.json` config names its input spec (`documentGenerator.fromDocument.url` → the `api-docs-*.json` sitting next to it) and output (`codeGenerators.openApiToCSharpClient.output` → the `.g.cs`, `className`). Scope = connectors from the map above whose source repo exists locally; list skipped external connectors in the final summary.
 
@@ -111,6 +131,8 @@ Older NSwag toolchains regenerate a single-arg `Client(HttpClient)` ctor with `B
 ```bash
 # className varies (e.g. JsReportConnectorClient) — match the ctor signature, not the class name
 grep -L '(string baseUrl, System.Net.Http.HttpClient httpClient)' Connector*/*.g.cs
+# bpp-shared: the folder is BppAuthConnector/, NOT Connector* — the glob above misses it
+grep -L '(string baseUrl, System.Net.Http.HttpClient httpClient)' Connectors/BppAuthConnector/*.g.cs
 ```
 
 If a ctor regressed: **hand-patch the `.g.cs`** back to the two-arg form (re-add the `baseUrl` param, set `BaseUrl = baseUrl;`, drop the hardcoded URL). This is the one sanctioned manual edit to a generated file (per the Connectors module CLAUDE.md). Never "fix" it by changing `Connector*ServiceExtensions` to the single-arg call. Report every patch in the summary.
@@ -143,3 +165,6 @@ Per connector: `regenerated | up-to-date | skipped (external) | FAILED (reason)`
 | Leaving NSwag targets uncommented | Every teammate Debug build would hit the network. Always `git restore` the csproj. |
 | Accepting a single-arg generated ctor | Silently pins connectors to localhost in prod. Guard + hand-patch (step 6). |
 | Auto-fixing broken call sites or committing | Out of scope: report only, leave tree uncommitted. |
+| Using the `*.Connectors` / `Connector*/` globs for `BppAuthConnector` | Both miss it (repo is `bpp-shared`, folder is `BppAuthConnector`). The run looks clean having skipped it entirely. |
+| Treating a bpp-shared regen as done at merge | It reaches consumers only after a package publish + `<BppSharedVersion>` bump. Flag that wave as a follow-up. |
+| Folding the auth-client regen into another connector MR | Fleet-wide blast radius; it gets its own bpp-shared MR, reviewer apittrich, unmerged. |
