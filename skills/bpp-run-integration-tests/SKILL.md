@@ -49,6 +49,35 @@ Build the working set: csproj files whose source contains an integration categor
 - **bpp-vera-connector**: read `BPP.VeraConnector.NET.App/appsettings.local.json` → `VeraIntegrationTesting.{VeraReadTestsEnabled,VeraSyncTestsEnabled,VeraWriteTestsEnabled}`. If all `false`, warn user — most tests will skip.
 - **bpp-backend**: confirm `appsettings.local.json` exists for the App project.
 
+#### Migration pre-check (ALL repos, do this before any suite)
+
+The local DB must be at `origin/development`'s bpp-shared migrations. A stale schema turns the whole
+suite red for the wrong reason and reads exactly like a mass regression.
+
+```bash
+git -C ~/Entwicklung/bpp/bpp-shared fetch -q origin development
+# what the code expects
+git -C ~/Entwicklung/bpp/bpp-shared ls-tree --name-only -r origin/development \
+  BPP.Shared.NET/BPP.Shared.NET.DbMigrator/Migrations/ \
+  | grep -oE '[0-9]{14}_[A-Za-z0-9_]+(?=\.cs$)' -P | grep -v '\.Designer$' | sort -u
+# what the DB has
+PGPASSWORD=admin psql -h localhost -p 5432 -U admin -d bpp -tAc \
+  'SELECT "MigrationId" FROM "__EFMigrationsHistory" ORDER BY 1;'
+```
+
+Diff the two, **report the pending list, then apply** via the repo's DbMigrator (or `dotnet ef database
+update`) and re-check that the pending list is empty.
+
+**STOP and ask instead of applying** when: a pending migration **drops** a column/table/constraint (the
+local DB holds real prod-shaped e2e data); the **DB is ahead of the code** (a `MigrationId` exists that
+the branch no longer has — the DB was built from another branch); or `dotnet ef` reports designer/snapshot
+drift. **Never scaffold, edit or delete a migration here — this check only applies existing ones.**
+
+Traps: never probe with `--no-build` (stale assembly → phantom drift); a new PG enum label cannot be used
+in the same migration that adds it (`55P04`); bpp-shared's DbMigrator `appsettings.json` in the main
+checkout carries uncommitted user edits — the migrator may read it, but never print, diff, stage or
+commit it.
+
 ### 3. Start local stack
 
 Invoke `bpp-start-local-stack` skill (it verifies via status afterward). If any service is DOWN, **stop** — report and ask user.
@@ -123,6 +152,7 @@ Leave any test edits unstaged for the user to review.
 | Step | Command |
 |---|---|
 | Discover | `grep -rlnE 'Category\("(Local)?Integration"|Category\(IntegrationTestCategories\.' --include="*.cs"` |
+| Migrations | diff `origin/development` migrations vs `__EFMigrationsHistory`, apply pending, re-check empty |
 | Start stack | invoke `bpp-start-local-stack` skill |
 | Run | `dotnet test X.csproj --filter "Category=Integration|Category=LocalIntegration"` |
 | Recent commits (cwd) | `git log --since="48 hours ago" --oneline --name-only` |
@@ -131,6 +161,7 @@ Leave any test edits unstaged for the user to review.
 ## Stop Conditions (non-negotiable)
 
 - Local stack failed to come up.
+- Local DB is behind on migrations and a pending one is destructive, or the DB is ahead of the code → STOP, ask.
 - A failed test maps to a recent commit in cwd or bpp-shared → STOP, do not edit tests.
 - 3 runs exhausted.
 - Failure reason unclear.
@@ -138,6 +169,7 @@ Leave any test edits unstaged for the user to review.
 ## Common Mistakes
 
 - **Running anything in bpp-document-analysis (bpp-doci), bpp-agent or bpp-cca-connector-internal** → standing user exclusion, unit AND e2e. Skip + report, never run.
+- **Running the suite against a stale schema** → every suite goes red for the wrong reason and looks like a mass regression. Run the migration pre-check first.
 - **Auto-fixing tests to make them green** when production regressed → masks the real bug. Always classify the failure first.
 - **Forcing `[Explicit]` tests to run** — they are opt-in for a reason.
 - **Looping indefinitely** — respect the 3-run cap.
