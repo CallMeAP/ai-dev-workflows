@@ -1,9 +1,9 @@
 ---
-name: stundenliste
+name: lipsum-stundenliste
 description: Use when building the hour list (Stundenliste) that goes out with an invoice from Kimai time entries — phrases like "Stundenliste für August", "hour list for the invoice", "Stundenliste erstellen", "Rechnung-0000XX_Stundenliste.xlsx", "export my hours as excel for billing". Produces the Kimai-export xlsx layout grouped and colour-coded by project with a SUBTOTAL row.
 ---
 
-# stundenliste
+# lipsum-stundenliste
 
 ## Overview
 
@@ -15,7 +15,7 @@ green bold `SUBTOTAL` row at the bottom.
 Run the script. Do not rebuild the layout by hand.
 
 ```bash
-python3 ~/.claude/skills/stundenliste/make_stundenliste.py \
+python3 ~/.claude/skills/lipsum-stundenliste/make_stundenliste.py \
   --month 2026-08 --out /home/alex/Downloads/Rechnung-000042_Stundenliste.xlsx
 ```
 
