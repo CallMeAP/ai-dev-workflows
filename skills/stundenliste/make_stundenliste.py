@@ -14,12 +14,37 @@ TOKEN_FILE = "/home/alex/kimai.token"
 
 HEADERS = ["Date", "From", "To", "Duration", "Name", "User", "E-mail",
            "Staff number", "Customer", "Project", "Activity", "Description", "Billable"]
-WIDTHS = [9.2, 10.0, 5.0, 10.0, 13.8, 7.0, 15.4, 15.0, 13.3, 18.1, 8.8, 50.0, 10.0]
+# Column widths are auto-fitted from content (see fit_width) - the Kimai export
+# sizes them per month, so the Project/Description columns differ every time.
 # Google-Sheets palette, assigned to project groups in order of appearance.
 PALETTE = ["FFD966", "B4A7D6", "9FC5E8", "DD7E6B", "B6D7A8", "A2C4C9",
            "F9CB9C", "D5A6BD", "C9DAF8", "EA9999", "D9EAD3", "D9D2E9"]
 HEADER_FILL = "EEEEEE"
-TOTAL_FILL = "6AA84F"
+TOTAL_FILL = "6AA84F"      # Rechnung-000042 used this; 000039/000041 used 93C47D
+MIN_WIDTH, MAX_WIDTH = 5.0, 65.0
+
+
+def fit_width(header, values):
+    """Approximate the Kimai export's auto-fit width for one column.
+
+    Calibrated against Rechnung-000039/000041 (untouched auto-fit files); within
+    ~1 character. Exact replication would need PhpSpreadsheet's font metrics.
+    """
+    longest = 0
+    for v in values:
+        if isinstance(v, dt.datetime):
+            n = len("2026-08-07")
+        elif isinstance(v, dt.timedelta):
+            n = len("03:30")
+        elif isinstance(v, bool):
+            n = len("TRUE")
+        elif v is None:
+            n = 0
+        else:
+            n = max((len(line) for line in str(v).split("\n")), default=0)
+        longest = max(longest, n)
+    w = max(len(header) * 1.02, longest * 0.79) + 0.5
+    return round(min(max(w, MIN_WIDTH), MAX_WIDTH), 2)
 
 
 def api(path):
@@ -59,7 +84,7 @@ def fetch(begin, end):
     } for t in rows]
 
 
-def build(entries, out_path, user):
+def build(entries, out_path, user, total_fill=TOTAL_FILL):
     # Groups alphabetical by project; rows inside a group by date ascending.
     groups = sorted({e["project"] for e in entries}, key=str.casefold)
     colors = {p: PALETTE[i % len(PALETTE)] for i, p in enumerate(groups)}
@@ -97,12 +122,14 @@ def build(entries, out_path, user):
     total.number_format = "[hh]:mm"
     for col in range(1, len(HEADERS) + 1):
         c = ws.cell(row, col)
-        c.fill = PatternFill("solid", fgColor=TOTAL_FILL)
+        c.fill = PatternFill("solid", fgColor=total_fill)
         c.font = Font(bold=True, size=12)
     ws.cell(row, 1).number_format = "yyyy-mm-dd"
 
-    for i, w in enumerate(WIDTHS, 1):
-        ws.column_dimensions[get_column_letter(i)].width = w
+    for i, head in enumerate(HEADERS, 1):
+        col = get_column_letter(i)
+        ws.column_dimensions[col].width = fit_width(
+            head, [ws.cell(r, i).value for r in range(2, row)])
     ws.auto_filter.ref = f"A1:{get_column_letter(len(HEADERS))}1"
     wb.save(out_path)
     return row - 2, sum(e["duration"] for e in entries)
@@ -114,6 +141,8 @@ def main():
     ap.add_argument("--begin")
     ap.add_argument("--end")
     ap.add_argument("--out", required=True)
+    ap.add_argument("--total-color", default=TOTAL_FILL,
+                    help="fill of the SUBTOTAL row (default %(default)s; 93C47D also seen)")
     a = ap.parse_args()
     if a.month:
         y, m = map(int, a.month.split("-"))
@@ -126,7 +155,7 @@ def main():
     if not entries:
         raise SystemExit(f"no timesheets between {begin} and {end} - nothing written")
     user = entries[0]["user"]
-    n, secs = build(entries, a.out, user)
+    n, secs = build(entries, a.out, user, a.total_color)
     print(f"{a.out}: {n} rows, {secs / 3600:.2f} h, {begin}..{end}")
 
 

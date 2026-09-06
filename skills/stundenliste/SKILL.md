@@ -30,13 +30,13 @@ Reproduce these exactly — they are what the user's manual files look like.
 |---|---|
 | Sheet name | `Sheet1` |
 | Columns A–M | Date, From, To, Duration, Name, User, E-mail, Staff number, Customer, Project, Activity, Description, Billable |
-| Column widths | 9.2, 10, 5, 10, 13.8, 7, 15.4, 15, 13.3, 18.1, 8.8, 50, 10 |
+| Column widths | auto-fitted from content (`fit_width`) — Kimai sizes them per month, so Project/Description differ every time; never hardcode one month's widths |
 | Header row | bold, size 12, fill `EEEEEE`, thin bottom border, autofilter `A1:M1` |
 | `Date` (A) | real datetime, number format `yyyy-mm-dd` |
 | `From`/`To` (B, C) | strings `HH:MM` |
 | `Duration` (D) | real `timedelta`, number format `[hh]:mm` |
 | `Staff number` (H) | empty (Kimai `accountNumber` is null) |
-| Total row | one row below the last entry, `=SUBTOTAL(9,D2:D<last>)` in D, fill `6AA84F`, bold, whole row filled |
+| Total row | one row below the last entry, `=SUBTOTAL(9,D2:D<last>)` in D, bold, whole row filled. Fill defaults to `6AA84F` (Rechnung-000042); `Rechnung-000039`/`000041` used `93C47D` — override with `--total-color` |
 | Font | Calibri 12 throughout |
 
 ## Grouping and colour rules
@@ -66,7 +66,11 @@ These are the ones that actually break the export:
 ## Verifying a generated file
 
 Regenerate a month the user already built by hand and compare — content must match
-order-insensitively, only group order and colours may differ:
+order-insensitively. Expected cosmetic differences: group order, group colours, the
+total-row green, and column widths within ~2 (column B lands ~1.9 narrow; the real export's
+metrics are not reproducible without PhpSpreadsheet's font tables).
+
+Verified: 2026-06, 2026-07 and 2026-08 all reproduce the manual files' rows and sums exactly.
 
 ```bash
 python3 - <<'PY'
