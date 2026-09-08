@@ -69,7 +69,12 @@ Known-non-issues loop (spans A, B, D, E): `references/known-non-issues.md`.
 
 Ledger formats and fingerprinting: `references/ledger.md`.
 
-**`known-non-issues.md` in `bpp-audit-reports` is read every run.** It is the audit's memory of what
+**Two memory files in `bpp-audit-reports` are read every run**, and they pull in opposite directions:
+`common-issues.md` (patterns that *keep going wrong* — a hunt list for R1, raising sensitivity) and
+`known-non-issues.md` (things that *look wrong but aren't* — lowering it). Putting an entry in the
+wrong file inverts its effect.
+
+**`known-non-issues.md`** It is the audit's memory of what
 it already got wrong. Phase A loads it, Phase B passes the relevant entries to the reviewers, Phase D
 consults it before ruling a finding real, and Phase E appends to it on every `false-positive`.
 Without that loop the audit re-raises the same dismissed finding forever. See

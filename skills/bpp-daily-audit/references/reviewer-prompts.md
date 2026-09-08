@@ -14,6 +14,20 @@ Three agents per work item, dispatched **in parallel in one message**. Model: **
 file the diff names, it is already supplied; if it needs one the diff does not name, that is a
 finding about missing context, not a reason to widen the input.
 
+## Hunt list — `common-issues.md`
+
+Before the lens instructions, every **R1** prompt carries the entries from `common-issues.md` in
+`bpp-audit-reports` as an explicit hunt list: patterns already confirmed to recur in this codebase,
+each with its detection heuristic and its counter-risk.
+
+Tell R1 plainly: *these are known to recur here — check for each one, and also check whether a fix
+for one has been applied in the wrong way (each entry names how).* A hunt list is additive; it never
+replaces the lens's own judgement, and finding none of them is a normal outcome.
+
+The current entries include the **cartesian `Include` explosion** (two or more collection includes in
+one query without `.AsSplitQuery()`, timing out rather than returning a wrong answer) — including its
+inverse, an `.AsSplitQuery()` added to an order-dependent query with no `OrderBy`.
+
 ## Lenses
 
 ### R1 — Correctness
@@ -27,6 +41,8 @@ Logic errors and defects in the changed code itself.
 - Swallowed exceptions, empty catch, logging instead of throwing where the caller needs the failure.
 - Soft-delete correctness: `SoftDeleteAsync` vs hard delete, dependent-entity checks before delete.
 - Concurrency: shared mutable state, cache key collisions.
+- Every pattern in the `common-issues.md` hunt list, in both directions — the defect, and a fix for it
+  applied wrongly.
 
 ### R2 — Spec-fit  *(ticket and status-change work items only)*
 
@@ -62,6 +78,22 @@ Project rules from `CLAUDE.md`. These are the findings most likely to be real an
 - Module-boundary violations: feature logic placed in a foreign module without the documented
   cross-reference comment.
 - File naming: files not prefixed with the module's singular name.
+
+## Batching lenses per repo — allowed, with one hard limit
+
+When a repo's work items are small, one agent per lens **per repo** (covering all that repo's work
+items) is cheaper than one agent per lens per work item, and gives the reviewer cross-item context.
+That is permitted.
+
+**But never collapse to a single agent for a repo.** Observed 2026-09-08: batching R1+R3 into one
+agent for `bpp-shared`, and R1+R2+R3 into one for `bpp-stella-ui`, left those repos' findings with
+**no peer to debate them** — Phase C silently degraded to nothing for two of four repos, and the
+findings went to adjudication undebated.
+
+The rule: **at least two independent agents per repo that produced any finding.** If a repo's work
+genuinely only warrants one lens, either run a second lens anyway, or record in the report that this
+repo's findings were **not debated** and treat their confidence accordingly. Never let a repo's
+findings reach adjudication undebated without saying so.
 
 ## Output contract
 

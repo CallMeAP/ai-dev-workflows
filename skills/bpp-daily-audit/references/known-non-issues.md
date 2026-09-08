@@ -1,3 +1,20 @@
+# The two memory files
+
+`bpp-audit-reports` carries two lists the audit reads every run. They pull in **opposite directions**,
+and putting an entry in the wrong one inverts its effect:
+
+| File | Meaning | Effect on a reviewer |
+|---|---|---|
+| `common-issues.md` | *keeps going wrong* — recurring real defect patterns | **raises** sensitivity: hunt for it |
+| `known-non-issues.md` | *looks wrong, isn't* — already ruled out | **lowers** sensitivity: engage the prior reasoning first |
+
+Both are loaded in Phase A. `common-issues.md` entries go to **R1** as an explicit hunt list (and to
+R3 when the pattern is a convention). `known-non-issues.md` entries go to whichever lens raised the
+original finding.
+
+An entry graduates from a finding to `common-issues.md` when the same shape is confirmed in two or
+more repos, or twice in one repo — Phase E proposes it, a human confirms it.
+
 # The known-non-issues loop
 
 `known-non-issues.md` lives at the root of `bpp-audit-reports`. It is the audit's memory of findings
@@ -44,6 +61,22 @@ rule_id heading, repo/scope, first-raised run and fingerprint, the claim, **why 
 That last field matters most: an entry without it becomes a permanent blind spot.
 
 Under `--dry-run`, nothing is appended — the same as every other write.
+
+## A counter-risk is not a finding generator
+
+Each `common-issues.md` entry names how its own fix can be applied wrongly. That counter-risk is
+there so a reviewer recognises a *concrete* bad instance — not so every application of the fix gets
+flagged.
+
+Observed 2026-09-08: the `AsSplitQuery` counter-risk (split queries share no snapshot across
+statements) produced a finding against five correct split-query fixes. It was rebutted — the trade-off
+is inherent, documented, and accepted; the "inconsistent" value it can produce was already a normal
+handled state; and the proposed transaction fix would have reinstated the 30 s timeout the commits
+existed to remove.
+
+**Rule:** report a counter-risk only when the specific instance shows concrete harm — an actually
+order-dependent query with no `OrderBy`, not merely the presence of `.AsSplitQuery()`. A generic
+trade-off belongs in `common-issues.md` once, never as a recurring per-repo finding.
 
 ## What must NOT go in the file
 

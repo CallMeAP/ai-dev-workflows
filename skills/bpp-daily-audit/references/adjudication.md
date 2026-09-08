@@ -45,6 +45,21 @@ never `targeted-mr`:**
 5. **Security-relevant** — authorization gates, credentials, data exposure, tenant isolation.
 6. **The fix would touch more than 5 files** (`files_touched_by_fix`, honestly estimated).
 
+### Open question — rule 3 is broader than its rationale
+
+Rule 3 says "any change inside `bpp-shared`", because a shared change ships as a NuGet package and a
+fix there is a fleet-wide pin bump. That rationale does **not** apply to a change confined to
+`BPP.Shared.NET.Tests` — a test-only fix ripples to nobody and needs no consumer bump.
+
+Raised 2026-09-08 by a real finding (a weak enum-mapping test in `bpp-shared`) that rule 3 forced to
+escalate despite being a one-file test fix.
+
+**The rule is NOT relaxed until a human decides.** Narrowing a guard mid-run so that a write becomes
+permissible is precisely the failure mode the escalate-regardless list exists to prevent. Adjudicate
+by the rule as written, and put the proposed refinement in the report.
+
+Proposed wording for review: *"any change inside `bpp-shared` outside its test projects."*
+
 An escalation is not a lesser outcome. It is the correct outcome for anything that needs a human to
 sequence it.
 

@@ -58,6 +58,11 @@ fingerprint() {   # repo branch path rule_id claim
 **Line numbers are deliberately excluded.** Code shifts; the finding does not. Including the line
 would re-report the same bug after any unrelated edit above it.
 
+**`branch` is included, and that is a sharp edge.** The same defect on `development` and on `staging`
+fingerprints differently. That is correct for a genuine branch-exclusive divergence, and wrong for a
+promoted commit — which is why cross-branch commit dedup (`discovery.md` A3b) must run in Phase A,
+*before* fingerprints are computed. Fingerprinting cannot clean up after a missing A3b.
+
 ## Dedup rule
 
 | Recorded outcome | On a later run |

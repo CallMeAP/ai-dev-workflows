@@ -124,6 +124,74 @@ Handle it, do not abort:
 Distinguish this from a **permission** problem: if *every* ticket fetch fails, that is an auth
 failure — abort with a partial report, do not label the whole board unresolvable.
 
+### A3b. Cross-branch commit dedup — MANDATORY
+
+**A commit that appears on more than one branch is reviewed once.** Promotion means the same SHAs
+land on `development`, then `staging`, then `main`. Verified 2026-09-08 on `bpp-stella`: **8 of 8**
+staging commits and **6 of 6** main commits were byte-identical SHAs already present on
+`development`.
+
+Reviewing per-branch without this step:
+
+- triples reviewer, debate and adjudication cost for every promoted commit;
+- emits the same finding three times — and the ledger will **not** catch it, because `branch` is part
+  of the fingerprint, so the three copies fingerprint differently;
+- produces three escalation files, or three MRs, for one defect.
+
+The rule:
+
+1. Collect the commit SHAs per repo across all three branches.
+2. Assign each SHA to the **most upstream branch it appears on**, in the order
+   `development` → `staging` → `main`.
+3. Build work items only from that assignment. Record the other branches the commit is present on as
+   a `also_on` field on the work item — the report shows it, and an MR targets the most upstream
+   branch that carries the bug.
+4. Only **branch-exclusive** commits — a hotfix landed straight on `staging` or `main` and not yet
+   back-merged — become their own work item. Those are exactly the ones that need the back-merge
+   checklist, so they matter disproportionately despite being rare.
+
+```bash
+cut -f1 t-${repo}-development.tsv | sort > "$WORK/dev.txt"
+comm -23 <(cut -f1 "t-${repo}-staging.tsv" | sort) "$WORK/dev.txt"   # staging-exclusive == real hotfixes
+```
+
+A repo whose `staging` commits are entirely a subset of `development` is reported as
+"staging: N commits, all already reviewed on development" — not as "no commits", which would be false.
+
+### A3c. Exclude machine-generated files before measuring or reviewing
+
+**The 1500-line cap is measured on human-authored lines only.** Generated files are excluded from the
+diff before the cap is applied and before anything reaches a reviewer.
+
+Verified 2026-09-08 on `bpp-shared`: a two-enum-value change measured **25,523 changed lines**, of
+which **25,354 (99.3%)** were two EF `*.Designer.cs` migration snapshots. Unfiltered, the cap defers
+the work item for "manual review" while the actual reviewable change is ~170 lines. Every
+migration-bearing change set in the fleet would hit this.
+
+Exclude at minimum:
+
+```
+*/Migrations/*.Designer.cs        EF migration snapshots
+*/Migrations/*ModelSnapshot.cs    EF model snapshot
+*.g.cs                            NSwag-generated connector clients
+package-lock.json  yarn.lock  *.lock
+*.min.js  *.min.css
+```
+
+```bash
+git -C "$L" show "$sha" -- . \
+  ':(exclude)*/Migrations/*.Designer.cs' \
+  ':(exclude)*/Migrations/*ModelSnapshot.cs' \
+  ':(exclude)*.g.cs' ':(exclude)*-lock.json' ':(exclude)*.lock'
+```
+
+The **migration `.cs` file itself is NOT excluded** — the `Up`/`Down` body is exactly what a reviewer
+should read, and a schema change is on the escalate-regardless list. Only the generated snapshot
+beside it is dropped.
+
+The report must state the exclusion: "N changed lines (M generated lines excluded)". Silently
+shrinking a diff would make the cap column meaningless.
+
 ## A4. Jira
 
 Board filter (verified 2026-09-08 — 268 tickets, mostly `Staging-Deployed`):
@@ -139,6 +207,18 @@ acli jira workitem view "$KEY" --json > "$WORK/ticket-$KEY.json"
   input to the status-change sweep only.
 - Status-change sweep: compare each ticket's `fields.status.name` against `ledger.jira[KEY].status`.
   Changed → one status-change work item. Unchanged → nothing.
+
+## A4b. Load the two memory files
+
+```bash
+REPORTS=~/Entwicklung/bpp/bpp-audit-reports
+git -C "$REPORTS" pull --ff-only -q      # another machine may have run since
+[ -f "$REPORTS/common-issues.md" ]    || echo "WARNING: common-issues.md missing"
+[ -f "$REPORTS/known-non-issues.md" ] || echo "WARNING: known-non-issues.md missing"
+```
+
+Either file missing is a **degradation**, reported, not a silent skip. See
+`references/known-non-issues.md` for what each does and which lens receives it.
 
 ## A5. Ledger dedup — before any dispatch
 
