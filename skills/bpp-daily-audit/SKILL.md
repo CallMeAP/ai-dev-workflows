@@ -112,6 +112,12 @@ report and queued first next run.
    silently skipped forever.
 7. **NuGet MRs target `development`. Always.** Never `staging`, never `main`.
 8. **Bot MRs are opened, never merged.**
+9. **Never open an MR without the duplicate pre-flight** (`references/act.md`) — search open, merged
+   AND closed MRs by fingerprint first. A closed-unmerged MR is a human rejection: record `rejected`,
+   never silently re-open it, and never leave it recorded as `mr` (that suppresses the finding
+   forever).
+10. **Every MR description ends with the finding fingerprint and `🤖 Generated with Claude Code`.**
+   Without the fingerprint the next run cannot see the MR and will open a duplicate.
 9. **Never skip the known-non-issues file.** Not loading it is not a neutral omission — it
    guarantees repeat false positives and trains the reader to ignore the report.
 
@@ -138,6 +144,8 @@ report and queued first next run.
 - About to bump `<BppSharedVersion>` in the NuGet sweep → stop; that belongs to `bpp-bump-shared-version`.
 - About to auto-MR a major version bump → stop; report it, licences flip on majors.
 - Run finished with no report written → stop; the report is the deliverable.
+- About to open an MR without having searched `state=all` for the fingerprint → stop; check first.
+- About to re-open an MR a human closed unmerged → stop; that is a rejection, not a gap.
 - About to rule a finding `false-positive` without appending it to `known-non-issues.md` → stop; the
   dismissal is only useful if the next run inherits it.
 - About to dismiss a finding *because* it appears in `known-non-issues.md`, without engaging its

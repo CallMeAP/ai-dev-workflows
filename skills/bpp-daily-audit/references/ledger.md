@@ -50,7 +50,10 @@ permanent blind spot.
 {"fingerprint":"…","first_seen":"2026-09-08T12:07:00+02:00","last_seen":"2026-09-08T12:07:00+02:00","run_id":"2026-09-08-1207","repo":"bpp-backend","branch":"development","file":"BPP.Backend.NET.Contract/Services/ContractService.cs","rule_id":"r1.ef-tracking","severity":"high","ticket":"BRO-1234","claim":"…","verdict":"real","outcome":"mr","mr_url":"https://gitlab.com/…/merge_requests/301","escalation_path":null}
 ```
 
-`outcome` ∈ `mr` | `escalated` | `false-positive` | `needs-human` | `deferred`.
+`outcome` ∈ `mr` | `fixed` | `rejected` | `escalated` | `false-positive` | `needs-human` | `deferred`.
+
+`mr` means *an MR is open* — it is a **transient** state, not a conclusion. Every run resolves it
+further (see below). `fixed` = its MR merged. `rejected` = its MR was closed unmerged.
 
 ## Fingerprint
 
@@ -77,11 +80,26 @@ fingerprints differently. That is correct for a genuine branch-exclusive diverge
 promoted commit — which is why cross-branch commit dedup (`discovery.md` A3b) must run in Phase A,
 *before* fingerprints are computed. Fingerprinting cannot clean up after a missing A3b.
 
+## Refresh open MR outcomes — first thing, every run
+
+Before dedup, re-check every finding recorded as `mr`. Leaving them at `mr` forever is what turns a
+rejection into permanent silence.
+
+```bash
+jq -r 'select(.outcome=="mr") | "\(.repo)\t\(.mr_url)\t\(.fingerprint)"' ledger/findings.jsonl
+# for each: GET the MR, then
+#   merged            -> outcome "fixed"
+#   closed, no merge  -> outcome "rejected"  + surface once (see references/act.md)
+#   still open        -> leave as "mr"
+```
+
 ## Dedup rule
 
 | Recorded outcome | On a later run |
 |---|---|
-| `mr` | skip — only `last_seen` is updated |
+| `mr` | skip — only `last_seen` is updated (after the refresh above) |
+| `fixed` | skip — but if the same claim reappears, it is a **regression**: raise it as new |
+| `rejected` | skip the MR, **never re-open one**; surface once for a reason, then `known-non-issues.md` or a standing escalation |
 | `escalated` | skip — only `last_seen` is updated |
 | `false-positive` | skip — only `last_seen` is updated |
 | `needs-human` | skip — only `last_seen` is updated |

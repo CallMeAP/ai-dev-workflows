@@ -6,6 +6,45 @@
 ledger write. The report is printed to the terminal and to
 `$HOME/.local/state/bpp-daily-audit/dry-run-$RUN_ID.md`. A dry run that opens an MR is a bug.
 
+## Before opening ANY MR — the duplicate pre-flight
+
+**Never create an MR without searching for one that already covers the finding.** Run all three
+checks; any hit changes the outcome.
+
+```bash
+# 1. Is an MR already open, merged or closed for this finding?
+#    The fingerprint is embedded in every audit MR description (see the template below).
+glab api "/projects/${enc}/merge_requests?state=all&per_page=100" \
+  | jq -r --arg fp "$FINGERPRINT" '.[] | select(.description | test($fp)) | "\(.iid)\t\(.state)\t\(.web_url)"'
+
+# 2. Does a branch from a previous attempt still exist?
+glab api "/projects/${enc}/repository/branches?search=audit%2F" | jq -r '.[].name'
+
+# 3. Is the finding still real on the current branch head? Re-verify the claim.
+git -C "$LOCAL" show "origin/${TARGET_BRANCH}:${FILE}"
+```
+
+| Existing MR state | What to do |
+|---|---|
+| **open** | Do **not** create a second one. Record outcome `mr` pointing at it and move on. |
+| **merged** | The fix probably shipped. **Re-verify the finding against the current head** — if it is gone, record `fixed`; if it survived, this is a new finding and needs a new claim, not a re-open. |
+| **closed, not merged** | **A human rejected it.** See below — this is the case that silently breaks the audit. |
+| none | Proceed. |
+
+### A closed-unmerged MR is a rejection, and must not be suppressed
+
+Real case 2026-09-08: bpp-stella !133 was opened by this audit and **closed without merging**. The
+ledger recorded outcome `mr`, and the dedup rule skips anything recorded as `mr` — so the finding
+would have been suppressed forever despite never being fixed, and never re-surfaced for anyone.
+
+When a finding's MR is closed unmerged:
+
+1. Record outcome **`rejected`**, never leave it as `mr`.
+2. Do **not** silently re-open an identical MR on the next run — that is how an audit becomes noise.
+3. Surface it **once** as an escalation asking for the reason, then either add a
+   `known-non-issues.md` entry (if it was wrong) or keep it as an open escalation (if it was right
+   but declined). A rejection nobody recorded is indistinguishable from a fix.
+
 ## `targeted-mr`
 
 Model **Opus 5**, effort **high** — it writes code that lands on a real branch.
@@ -95,8 +134,16 @@ Dynamic verification: <confirmed on development | not requested | downgraded, ca
 
 ### Provenance
 Run `<RUN_ID>` · report: <link to the report file in bpp-audit-reports> · ticket: <BRO-xxxx>
+Finding fingerprint: `<fingerprint>`
 Opened automatically by the `bpp-daily-audit` skill. Never auto-merged — review as normal.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
 ```
+
+**Both trailing lines are mandatory.** The **fingerprint** is what the duplicate pre-flight searches
+on — an MR without it is invisible to the next run, which will happily open a second one. The
+**`🤖 Generated with Claude Code`** footer closes every audit MR description, hand-written ones
+included.
 
 ### Back-merge checklist — `staging` and `main` targets only
 
