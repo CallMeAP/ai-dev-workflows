@@ -35,9 +35,9 @@ happen.
 |---|---|
 | 1. Skill written | done |
 | 2. `bpp-audit-reports` repo + `audit-bot` group label created | **done 2026-09-08** — repo id 86222771, label inherited group-wide (verified on `servo-ui`) |
-| 3. Dry-run tuning | **partially done 2026-09-08** — single-repo run on `bpp-backend` (2 real findings, 1 needs-human, 1 false positive killed by debate). Fleet discovery, `repos.md` cross-check, status-change sweep and ledger dedup still unexercised. |
-| 4. Supervised live run | pending |
-| 5. `/sync-my-skills bpp-daily-audit` | pending |
+| 3. Dry-run tuning | **done 2026-09-08** — 2 runs: single-repo (`bpp-backend`) and fleet (32 repos, 4 active). 11 findings, 2 false positives killed by debate. 8 skill defects found and fixed. Still unexercised: the Jira status-change sweep, the caps (never fired), and a fleet-wide NuGet sweep. |
+| 4. Supervised live run | **next** — would open 2 deferred MRs (bpp-stella migration guide, bpp-stella-ui stale Dockerfile) |
+| 5. `/sync-my-skills bpp-daily-audit` | **done 2026-09-08** — canonical + mirror |
 | 6. systemd timer armed at 12:07 | pending |
 
 Do not skip ahead. A live run before step 3 opens real MRs from untuned reviewer prompts.

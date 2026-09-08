@@ -24,6 +24,10 @@ And for **its own** findings, on seeing the rebuttals: `hold` or `concede`.
 
 ## Rules
 
+- **Spot-check a citation before acting on it.** A cited file, guide or line number is an assertion,
+  not a fact — verify it exists on `origin/<branch>` (`git show origin/<branch>:<path>`) before it
+  changes an outcome. Real case 2026-09-08: a concurrence cited two migration guides that exist only
+  in an unmerged sibling worktree.
 - **A rebuttal must cite something.** "I don't think that's an issue" is not a rebuttal; it is an
   abstain. A rebuttal without a named code path or guard is discarded and treated as `abstain`.
 - **Dissent is preserved, never averaged.** The output carries every position. Phase D reads the

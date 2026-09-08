@@ -67,6 +67,10 @@ sequence it.
 
 Optional, opt-in per finding, and tightly bounded.
 
+**Never for the Angular UIs.** `brokernet-cockpit-ui` and `bpp-stella-ui` are not reliably buildable
+or startable on this machine (user directive 2026-09-08). Findings there are static-analysis-only —
+do not attempt a local build, `npm start`, or a screenshot to confirm them.
+
 **Permitted only when the finding is on `development`.** The local stack is always on
 `development`; starting it against `staging` or `main` risks an EF migration mismatch against the
 local database. A `staging` or `main` finding is static-analysis-only — no exceptions.

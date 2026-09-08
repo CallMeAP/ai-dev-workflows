@@ -19,6 +19,29 @@ git -C "$LOCAL" worktree add "$WORK/wt-$REPO" -b "$BRANCH" "origin/$TARGET_BRANC
 Use a **worktree**, never the user's working tree — the user may be mid-task in that checkout. Remove
 the worktree when done (`git worktree remove`).
 
+### Never run `git stash` in a user repository
+
+Not `stash push`, not `stash pop`, not "just for a moment". A worktree removes the need entirely.
+
+Verified failure 2026-09-08 (bpp-stella): `git stash push -- <path>` matched **nothing**, because the
+file being staged was untracked and `stash push` ignores untracked files without `-u`. It printed no
+error. The subsequent `git stash pop` therefore popped **the user's own pre-existing stash**, which
+conflicted; `git add <dir>` then staged the conflict markers and they were committed and pushed into
+an MR.
+
+Three failures compound here, and a worktree prevents all three:
+
+1. `git stash push -- <pathspec>` silently no-ops on untracked paths.
+2. `git stash pop` with no argument takes `stash@{0}` — whoever put it there.
+3. `git add <directory>` happily stages conflict markers.
+
+If a repo's working tree is dirty and you are not in a worktree, **stop** — do not stash, do not
+checkout. Create the worktree.
+
+**Before every commit, verify what is staged:** `git diff --cached --name-status` must list exactly
+the files you intended, and `git grep -nE '^(<<<<<<<|>>>>>>>|=======)$' -- <staged paths>` must be
+empty.
+
 `TARGET_BRANCH` is the branch the bug lives on: `development`, `staging` or `main`.
 
 ### Before pushing
@@ -38,6 +61,12 @@ the patch, do not open the MR — escalate the finding with the failure output.
 | Title | `AUDIT-BOT: <summary> (BRO-xxxx)` — omit the key for unkeyed findings |
 | Label | `audit-bot` |
 | Reviewer | `apittrich` |
+
+**The `audit-bot` label marks provenance, not authorship.** Any MR that fixes a finding this audit
+raised carries it — including one a human wrote by hand after reading an escalation. The label is how
+someone traces an MR back to the report that caused it; restricting it to pipeline-opened MRs would
+break exactly the trail it exists to provide. When you open an MR for an audit finding yourself, add
+the label and link the report.
 
 ```bash
 glab api --method POST "/projects/${enc}/merge_requests" \

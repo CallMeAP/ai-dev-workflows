@@ -54,7 +54,7 @@ subgroups (`servo/`, `callidus/`) — create it once, not 25 times.
 glab api --method POST "/groups/lipso%2Fclients%2Fbrokernet/labels" \
   -f name="audit-bot" \
   -f color="#8E44AD" \
-  -f description="MR opened automatically by the bpp-daily-audit reviewer pipeline. Review as normal; never auto-merged."
+  -f description="Findet oder behebt ein Finding des bpp-daily-audit — egal ob der MR vom Audit automatisch geoeffnet oder von Hand geschrieben wurde. Review wie jeder andere MR; wird nie automatisch gemerged."
 ```
 
 Existing group labels for reference: `devops`, `main-deployment`, `qodana`, `staging-deployment`.

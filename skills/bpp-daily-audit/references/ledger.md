@@ -26,6 +26,20 @@ ledger/findings.jsonl  one JSON object per finding, append-only
 }
 ```
 
+### The SHA is the branch HEAD — nothing else
+
+`repos[repo][branch].sha` is **the commit id of the branch tip**, taken from the branch probe
+(`/repository/branches/<br>` → `.commit.id`). It is a watermark, not a finding.
+
+**Never record the newest commit of the reviewed window.** Verified failure 2026-09-08: the fleet run
+stored the newest commit of the 24-hour bootstrap window. Those commits sit on feature branches, so
+commits merged into `development` from *sibling* branches are not their ancestors — the next
+`compare?from=<that sha>` resurfaced 15 bpp-stella, 10 bpp-file and 8 bpp-stella-ui commits dated
+**days earlier** than the ones already reviewed. Only `bpp-backend`, where a real branch head happened
+to be stored, deduped correctly.
+
+The rule: capture `head` during A2's branch probe and write **that** value at the end of the run.
+
 **Advance a repo/branch SHA only when its scan completed.** A repo in `failed.tsv` keeps its old SHA
 so the next run rescans the same window. This is what stops a transient API error from creating a
 permanent blind spot.
