@@ -37,6 +37,7 @@ Exclude everything else (ops scripts, infra, archived).
 ### Always-exclude (matches the filter, but must NOT be promoted)
 
 - `bpp-cca-connector-internal` — temporary internal repo, slated for removal/merge — excluded from automated sweeps. Exact-name exclusion; `bpp-cca-connector` is a separate, real repo and stays in. It matches `^bpp-` **and** may appear in `repos.md`, so it is dropped in two places: the group-listing filter (step 1) and an `unset` after the cross-check below — otherwise the cross-check re-adds it.
+- `bpp-audit-reports` — generated output of the `bpp-daily-audit` skill (reports, escalations, finding ledger). It has a single `main` branch and no product code, so it is never promoted. Dropped in the same two places as above.
 
 ### Always-include extras (do NOT match the filter / live in a subgroup)
 
@@ -67,8 +68,10 @@ while IFS='|' read -r _ name link _; do
   fi
 done < <(grep -E '^\|[^|]+\| *https://gitlab.com/' "$WORK/repos.md")
 
-# always-exclude: temporary internal repo, slated for removal/merge (the cross-check would re-add it)
-unset 'ENC[bpp-cca-connector-internal]'
+# always-exclude (the cross-check would re-add them):
+#   bpp-cca-connector-internal — temporary internal repo, slated for removal/merge
+#   bpp-audit-reports          — generated audit output, single main branch, never promoted
+unset 'ENC[bpp-cca-connector-internal]' 'ENC[bpp-audit-reports]'
 ```
 
 - Every list repo missing from `ENC` is **added** (encoded path derived from the link — this also handles subgroups like `brokernet/servo/...`). The branch probe then decides naturally whether it participates ("no staging branch" stays an expected outcome).
@@ -140,7 +143,7 @@ declare -A ENC
 while read -r repo; do
   ENC[$repo]="lipso%2Fclients%2Fbrokernet%2F${repo}"
 done < <(glab api "/groups/lipso%2Fclients%2Fbrokernet/projects?per_page=100&simple=true" \
-  | jq -r '.[] | select(.path | test("^(bpp-|brokernet-.*-ui$)") and .path != "bpp-cca-connector-internal") | .path')
+  | jq -r '.[] | select((.path | test("^(bpp-|brokernet-.*-ui$)")) and (.path | IN("bpp-cca-connector-internal", "bpp-audit-reports") | not)) | .path')
 
 # Always-include extras (filter misses them / subgroup)
 ENC[brokernet-document-cms]="lipso%2Fclients%2Fbrokernet%2Fbrokernet-document-cms"
@@ -285,6 +288,7 @@ Final summary: created MRs (with URLs), reused open MRs, skipped repos (no diffs
 - **Creating MRs without diff check** → GitLab returns "no commits between branches"; always compare first.
 - **Gating on commit count instead of `.diffs | length`** → degenerate merge-commit-only promotions create empty MRs.
 - **Trusting `jq '.commits | length'` for missing-branch detection** → `null | length` is `0` in jq; a missing branch silently reads as "no diffs". Probe branches explicitly.
+- **Writing `select(.path | test(...) and .path != "x")`** → inside `select(.path | ...)` the pipe rebinds `.` to the string, so the second `.path` fails with `Cannot index string with string "path"` and the whole listing aborts (verified 2026-09-08; this was a live bug in this skill). Each field access needs its own parenthesised pipe: `select((.path | test(...)) and (.path | IN("a","b") | not))`.
 - **Wrong label for the direction** → `staging-deployment` vs `main-deployment`; ops dashboards filter on these. staging→main is NOT `prod-deployment` (retired).
 - **Wrong title casing or arrow** → exactly `Development -> Staging` / `Staging -> Main` (space, single `->`, space).
 - **Matching existing MRs by title** → legacy MRs use `-->`; match on source/target branch only.

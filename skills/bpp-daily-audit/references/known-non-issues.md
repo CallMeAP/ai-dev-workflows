@@ -1,0 +1,54 @@
+# The known-non-issues loop
+
+`known-non-issues.md` lives at the root of `bpp-audit-reports`. It is the audit's memory of findings
+it already raised that turned out not to be defects. Without it the audit re-raises the same
+dismissed claim every day and the report stops being read.
+
+## Phase A — load it
+
+```bash
+KNI=~/Entwicklung/bpp/bpp-audit-reports/known-non-issues.md
+[ -f "$KNI" ] || echo "WARNING: known-non-issues.md missing — report this as a degradation"
+```
+
+A missing file is a **degradation**, not a silent skip: say so in the report.
+
+## Phase B — pass the relevant entries to reviewers
+
+Give each reviewer the entries whose **repo/scope matches the work item**, plus every entry in the
+"Patterns, not single findings" section (those are repo-agnostic). Do not paste the whole file into
+every prompt — it grows without bound, and irrelevant entries dilute the lens.
+
+Tell reviewers plainly: *an entry is context, not a prohibition. If you believe a listed non-issue is
+now real, raise it and say what changed.*
+
+## Phase D — consult before ruling
+
+Before returning `verdict: real`, check whether a matching entry exists. If it does, the adjudicator
+must either:
+
+- **engage it** — state what changed in the code or the ticket that makes the old reasoning no longer
+  hold, and rule `real`; or
+- **defer to it** — rule `false-positive`, and note in the report that a known non-issue recurred
+  (useful signal: it means the reviewer prompt keeps producing it).
+
+Never rule `real` by ignoring an entry, and never rule `false-positive` by citing an entry without
+reading it.
+
+## Phase E — append on every false positive
+
+Every finding whose outcome is `false-positive` gets an entry appended, using the file's format:
+rule_id heading, repo/scope, first-raised run and fingerprint, the claim, **why it is not an issue**
+(with the citations the rebuttal used), and **what would make it real again**.
+
+That last field matters most: an entry without it becomes a permanent blind spot.
+
+Under `--dry-run`, nothing is appended — the same as every other write.
+
+## What must NOT go in the file
+
+- A finding ruled `needs-human`. It is unresolved, not dismissed. Leave it as an open escalation; a
+  pointer stub in the file is allowed only if it says explicitly that it is not yet a non-issue.
+- A finding nobody actually adjudicated.
+- A real defect somebody decided not to fix. That is accepted risk and belongs in the escalation
+  record and the ticket, not in a list that suppresses future detection.
