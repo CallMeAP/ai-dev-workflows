@@ -9,17 +9,41 @@ Three agents per work item, dispatched **in parallel in one message**. Model: **
 - The **named changed files** at that ref, fetched per `discovery.md` A6.
 - For a ticket work item: the BRO ticket's summary, description and acceptance criteria.
 - **The repo's own `CLAUDE.md`, read through git** — never off the filesystem, which reaches sibling
-  worktrees whose paths look native:
+  worktrees whose paths look native. **Root first, then `.claude/CLAUDE.md`:**
 
   ```bash
   git -C "$LOCAL" show "origin/$br:CLAUDE.md" > "$WORK/claudemd-${repo}.md" 2>/dev/null \
+    || git -C "$LOCAL" show "origin/$br:.claude/CLAUDE.md" > "$WORK/claudemd-${repo}.md" 2>/dev/null \
     || echo "no CLAUDE.md on origin/$br"     # rule skipped for this repo, not reported clean
   ```
 
   It goes to **R3**, which owns `cross-claudemd-convention-violation`. **Only this repo's file** —
   `CLAUDE.md` content differs per repo, and enforcing one repo's convention against another is that
-  rule's defining misfire. 32 fleet repos have one (measured 2026-09-09); a repo without one has the
-  rule skipped.
+  rule's defining misfire.
+
+  Measured 2026-09-09 over the 59 projects of the group (default branch): **20 repos keep one at the
+  root, 4 keep one only at `.claude/CLAUDE.md`, 35 have none.** All four dot-directory repos are UI
+  (`brokernet-cockpit-ui`, `bpp-stella-ui`, `brokernet-onboarding-ui`,
+  `bpp-document-analysis-dashboard`) — **no UI repo in the fleet has a root `CLAUDE.md`**, so a
+  root-only fetch reported every Angular repo as having no conventions at all. Hence the fallback.
+  A repo with neither has the rule skipped, never reported clean.
+- **The scope-matching shared fleet standard**, from `lipso/internal/agentic-coding-knowledge`,
+  fetched in Phase A §A4c and read only from `$WORK`:
+
+  | Repo kind | File passed to R3 | Rule it drives |
+  |---|---|---|
+  | .NET repo | `$WORK/shared-dotnet-claudemd.md` (`.net/CLAUDE.md`) | `be-shared-dotnet-standard-violation` |
+  | Angular UI repo | `$WORK/shared-angular-claudemd.md` (`angular/CLAUDE.md`) | `fe-shared-angular-standard-violation` |
+  | `brokernet-document-cms`, infra, everything else | none | — |
+
+  **Tell R3 the precedence explicitly, in the prompt.** The audited repo's own `CLAUDE.md` **wins**:
+  where the repo's file contradicts the shared one there is **no finding**; where it states the same
+  convention the finding is `cross-claudemd-convention-violation`'s (or a specific `be-*`/`fe-*`
+  id's) and the shared rule **stays silent**; only where the repo's file is **silent** — or absent —
+  does the shared standard fire. Both shared files are repo-provenanced copies that can be stale in
+  either direction, so silence in them is never permission. Full contract, scope filter, the
+  `personal-workflows/**` exclusion and the degrade-don't-abort argument:
+  **`references/shared-standards-fetch.md`**.
 - **The rules from `$WORK/rules.md` that apply to this repo** — filtered by `scope` and by each
   rule's `applies-to`, per `references/rules-fetch.md`. That filtered set is the lens's checklist.
 
@@ -110,6 +134,21 @@ quoting the offending line. Two bounds make it a rule rather than a style-guide 
   another repo, or simply considers good practice is out of scope. `CLAUDE.md` is an actively
   maintained surface — the `AsSplitQuery` convention was pushed into 17 repos' files on 2026-09-09,
   and the other 15 repos with a `CLAUDE.md` did not get it.
+
+R3 also owns the two **shared-standard** rules, `be-shared-dotnet-standard-violation` and
+`fe-shared-angular-standard-violation` — the same shape as the catch-all, but sourced from the
+knowledge repo instead of the repo itself, and **one step further down the same deferral chain**:
+
+```
+specific be-* / fe-* id  →  cross-claudemd-convention-violation  →  be|fe-shared-*-standard-violation
+```
+
+They fire **only on a point the audited repo's own `CLAUDE.md` is silent about**. That is where the
+coverage actually is: no UI repo has a root `CLAUDE.md`, and this file's three `fe-` rules are all
+build/codegen hygiene — without `angular/CLAUDE.md` the fleet's Angular code is reviewed against no
+written convention at all. Same bounds as the catch-all: only files the work item touched, never a
+repo-wide sweep, never an edit to any `CLAUDE.md`, and a concrete `failure_scenario` or it is not a
+finding.
 
 **R3's checklist is the filtered rule set, not a list kept here.** It receives every in-scope rule
 from `rules.md` whose `detect` needs judgement — the migration-guide rules, `DtoMapper` shape,

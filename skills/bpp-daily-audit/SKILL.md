@@ -71,16 +71,30 @@ Ledger formats and fingerprinting: `references/ledger.md`.
 
 Rule set — fetch, parse, scope filter, failure handling: `references/rules-fetch.md`.
 
-**Three files in `bpp-audit-reports` are read every run**, and each does a different job:
+Shared fleet standards (`.net/CLAUDE.md`, `angular/CLAUDE.md` from
+`lipso/internal/agentic-coding-knowledge`) — fetch, normative scope, precedence against the repo's
+own `CLAUDE.md`, degrade-don't-abort: `references/shared-standards-fetch.md`.
 
-| File | Question | Effect |
-|---|---|---|
-| `rules.md` | *what do we check for?* | **defines** the checklist — Phase B's lenses are driven by it |
-| `common-issues.md` | *what keeps going wrong?* | **raises** sensitivity: a hunt list for R1 |
-| `known-non-issues.md` | *what looks wrong but isn't?* | **lowers** it: engage the prior reasoning first |
+**Five inputs are read every run**, and each does a different job:
 
-Putting an entry in the wrong file inverts or loses its effect. `rules.md` is the only one whose
-absence **aborts** the run — the other two degrade it and are reported.
+| Input | Where from | Question | Effect |
+|---|---|---|---|
+| `rules.md` | `bpp-audit-reports` | *what do we check for?* | **defines** the checklist — Phase B's lenses are driven by it |
+| `common-issues.md` | `bpp-audit-reports` | *what keeps going wrong?* | **raises** sensitivity: a hunt list for R1 |
+| `known-non-issues.md` | `bpp-audit-reports` | *what looks wrong but isn't?* | **lowers** it: engage the prior reasoning first |
+| the audited repo's own `CLAUDE.md` | the repo, via git | *what did **this** repo write down?* | R3's per-repo conventions |
+| `.net/CLAUDE.md`, `angular/CLAUDE.md` | `lipso/internal/agentic-coding-knowledge` | *what does the fleet expect of a .NET / Angular repo?* | fills the gap where a repo wrote nothing down |
+
+Putting an entry in the wrong file inverts or loses its effect. **`rules.md` is the only one whose
+absence aborts the run** — every other input degrades it and is reported.
+
+**Precedence, strongest to weakest:** a specific `be-*` / `fe-*` rule → the audited repo's own
+`CLAUDE.md` (`cross-claudemd-convention-violation`) → the shared standards
+(`be|fe-shared-*-standard-violation`). **The repo's own file always wins over the shared one**, and
+one violated line yields exactly one finding. Only the four paths `.net/CLAUDE.md`,
+`angular/CLAUDE.md`, `bpp/repos.md` and `bpp/bpp-tag-and-release/SKILL.md` are fleet-normative;
+**`personal-workflows/**` is excluded** — individual developers' setups, never a standard to audit
+anyone against.
 
 **`known-non-issues.md`** It is the audit's memory of what
 it already got wrong. Phase A loads it, Phase B passes the relevant entries to the reviewers, Phase D
@@ -157,7 +171,16 @@ report and queued first next run.
 - **Renaming a rule id to make it read better** — ids are part of the finding fingerprint. A rename
   re-opens every finding that rule ever produced, escalations and dismissals included.
 - **Passing backend rules to a frontend repo's reviewer** — filter by `scope` first
-  (`references/rules-fetch.md`); an off-scope rule yields silence or an invented finding.
+  (`references/rules-fetch.md`); an off-scope rule yields silence or an invented finding. The same
+  filter governs the shared standards: `.net/CLAUDE.md` never reaches a UI repo's reviewer,
+  `angular/CLAUDE.md` never a .NET repo's.
+- **Flagging a repo against the *shared* `CLAUDE.md` when its own file says otherwise** — the repo's
+  own file wins, always. A shared-standard finding is valid only where the repo's file is silent.
+  Both shared files are repo-provenanced copies (`.net/` is `bpp-backend`'s verbatim, `angular/` is
+  `brokernet-cockpit-ui`'s and already one standard behind it), so they carry repo-specific facts
+  that are not fleet standards — a connector repo is not deficient for having no `PROJECT.md`.
+- **Quoting `personal-workflows/**` at anyone** — that tree is individual developers' own setups. A
+  finding sourced from it flags someone for not following a convention they never agreed to.
 
 ## Red flags — STOP
 
@@ -175,3 +198,7 @@ report and queued first next run.
 - About to dispatch a reviewer with no rules loaded, or after a failed `rules.md` fetch → stop; abort
   and write the partial report. A rule-less run is not a lighter run, it is an unreported one.
 - About to add a rule to this skill's text → stop; it belongs in `bpp-audit-reports/rules.md`.
+- About to abort the run because a shared standards file was unreachable → stop; those degrade and
+  are reported. Only `rules.md` aborts (`references/shared-standards-fetch.md` argues why).
+- About to write to `agentic-coding-knowledge` → stop; that repo is read-only to the audit, and its
+  checkout carries unrelated dirty files.

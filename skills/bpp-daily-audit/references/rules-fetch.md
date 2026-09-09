@@ -72,6 +72,19 @@ reviewer looking at Angular guarantees either silence or an invented finding.
 **A rule that does not apply is skipped, never reported as clean.** "0 findings" must mean the rule
 ran, or the report overstates coverage.
 
+## Not the only standards a reviewer gets
+
+`rules.md` is the checklist. **Two further standards files are fetched from a different repo** —
+`.net/CLAUDE.md` and `angular/CLAUDE.md` in `lipso/internal/agentic-coding-knowledge` — and handed to
+R3 beside the audited repo's own `CLAUDE.md`. They have their own contract, in
+**`references/shared-standards-fetch.md`**, deliberately kept out of this file: their failure
+behaviour is **degrade loudly**, the exact opposite of the abort above, and the two policies must not
+sit under one heading where the wrong one gets copied. That file argues the difference.
+
+Precedence in one line: **specific `be-*` / `fe-*` id → `cross-claudemd-convention-violation` →
+`be|fe-shared-*-standard-violation`**. The audited repo's own `CLAUDE.md` always outranks the shared
+file.
+
 ## Editing rules
 
 Rules are edited **in `bpp-audit-reports/rules.md`**, committed there, and picked up by the next run.

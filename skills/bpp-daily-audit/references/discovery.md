@@ -264,6 +264,41 @@ with a partial report rather than degrading it into a review against nothing. A 
 continues on the rules that loaded and names the rest as a degradation. Full contract — sources,
 parse, scope filter, why abort — in `references/rules-fetch.md`.
 
+## A4c. Load the shared fleet standards
+
+A **second** knowledge source, from a different repo: `.net/CLAUDE.md` and `angular/CLAUDE.md` in
+`lipso/internal/agentic-coding-knowledge`. They drive `be-shared-dotnet-standard-violation` and
+`fe-shared-angular-standard-violation`, and are handed to R3 beside the repo's own `CLAUDE.md`.
+
+```bash
+KNOW=~/Entwicklung/lipso/agentic-coding-knowledge
+KNOW_ENC=lipso%2Finternal%2Fagentic-coding-knowledge
+
+fetch_shared() {   # $1 = path in the knowledge repo, $2 = destination in $WORK
+  if [ -d "$KNOW/.git" ]; then
+    git -C "$KNOW" fetch --quiet origin main 2>/dev/null
+    git -C "$KNOW" show "origin/main:$1" > "$2" 2>/dev/null && return 0
+  fi
+  glab api "/projects/${KNOW_ENC}/repository/files/$(printf %s "$1" | jq -sRr @uri)/raw?ref=main" \
+    > "$2" 2>/dev/null && [ -s "$2" ]
+}
+
+fetch_shared ".net/CLAUDE.md"    "$WORK/shared-dotnet-claudemd.md" \
+  || echo "DEGRADED: .net/CLAUDE.md unreachable — be-shared-dotnet-standard-violation skipped" >> "$WORK/degradations.txt"
+fetch_shared "angular/CLAUDE.md" "$WORK/shared-angular-claudemd.md" \
+  || echo "DEGRADED: angular/CLAUDE.md unreachable — fe-shared-angular-standard-violation skipped" >> "$WORK/degradations.txt"
+```
+
+- **Read-only, and never written to.** The audit's own outputs go to `bpp-audit-reports`. That
+  checkout is a user working tree with unrelated dirty files — read it through
+  `git show origin/main:`, never `cat`, never `pull`, never a branch switch (non-negotiable #5).
+- **`bpp/repos.md` is already fetched in §A1.** Do not fetch it twice.
+- **`personal-workflows/**` is out of scope** — individual developers' own setups, never fleet
+  standards. Never fetched, never passed to a lens, never cited by a finding.
+- **Unreachable degrades, it does not abort** — unlike `rules.md`. The rule is *skipped* for the run
+  (never reported clean) and named in the report. The argument for why the two policies differ is in
+  `references/shared-standards-fetch.md`; do not "harmonise" them.
+
 ## A5. Ledger dedup — before any dispatch
 
 Compute each candidate finding slot's fingerprint and drop what is already known. This is the single

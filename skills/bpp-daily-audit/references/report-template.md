@@ -49,8 +49,10 @@ actually written.
 
 ## Degradations
 <anything that reduced coverage: repos.md unreachable, caps hit, a dynamic verification downgraded,
-an auth failure, a `rules.md` entry that failed to parse (name it — the check did not run). Empty
-section means nothing degraded — say so explicitly rather than omitting it.>
+an auth failure, a `rules.md` entry that failed to parse (name it — the check did not run), a shared
+standards file unreachable (name the file AND the rule id it disabled, e.g. "`angular/CLAUDE.md`
+unreachable — `fe-shared-angular-standard-violation` did not run on 2 UI repos"). Empty section
+means nothing degraded — say so explicitly rather than omitting it.>
 ```
 
 ## Honesty rules
@@ -63,6 +65,10 @@ section means nothing degraded — say so explicitly rather than omitting it.>
 - Test results are reported as they happened, including "not run".
 - If `bpp/repos.md` was unreachable, the report says the repo cross-check was skipped and the repo
   set may be incomplete.
+- **A shared standards file that could not be fetched is a degradation, never a silent skip.** Name
+  the file, the rule id it disabled, and how many repos of that kind went unchecked as a result. The
+  run is still complete — those rules are additive, not the checklist (`rules-fetch.md` vs
+  `shared-standards-fetch.md`) — but "0 findings" from a rule that never ran overstates coverage.
 - **The reverse delta is reported too.** Any audited repo the authoritative `bpp/repos.md` does not
   name is listed as "in the group but not in `repos.md`: …" — the run found a gap in the list of
   record, and it stays visible until someone fixes the list upstream. Measured 2026-09-09: three such
