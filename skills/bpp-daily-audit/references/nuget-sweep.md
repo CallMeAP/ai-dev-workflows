@@ -8,8 +8,9 @@ here; read it before acting on a bump.
 
 - Discovered repos that are **.NET** (contain a `*.sln`).
 - `bpp-mail` and `bpp-js-report-connector` are **Maven** — skipped, with the reason reported.
-- Repos with **no local checkout are skipped and reported**: `dotnet restore` needs the authenticated
-  GitLab private feed and a working tree.
+- Repos with **no local checkout are skipped and reported**: `dotnet restore` needs a working tree,
+  and without the developer's local `bpp-shared` path the `ProjectReference` override does not apply,
+  so restore would fall back to the private feed.
 - Caps: 6 repos per run, 2 MRs per run — a separate budget that never consumes the code-fix MR cap.
 
 ## Branch
@@ -20,21 +21,47 @@ reference is visible on `staging` or `main`.
 
 ## Detection — no model calls
 
+**Always pass `--source https://api.nuget.org/v3/index.json` to both `list` commands.** Without it the
+sweep is blind: verified 2026-09-08 *and* 2026-09-09, all 6 repos returned `401 Unauthorized` on both
+`--outdated` and `--vulnerable`, because those commands query **every configured source** for latest
+versions regardless of whether any package needs it, and the credential in `BPP.*/nuget.config`
+(`<packageSourceCredentials><gitlab>`) is stale.
+
 ```bash
-dotnet restore "$SLN"
-dotnet list "$SLN" package --outdated
-dotnet list "$SLN" package --vulnerable --include-transitive
+NUGET_ORG=https://api.nuget.org/v3/index.json
+
+dotnet restore "$SLN" 2>&1 | tee "$WORK/restore-$repo.log"          # audit warnings live here
+dotnet list "$SLN" package --outdated   --source "$NUGET_ORG"
+dotnet list "$SLN" package --vulnerable --include-transitive --source "$NUGET_ORG"
 ```
 
-**`restore` succeeding does not mean the sweep works.** Verified 2026-09-08 on `bpp-backend`:
-`dotnet restore` returned exit 0 (satisfiable from cache / existing assets) while
-`dotnet list package --outdated` failed with `401 Unauthorized` — the private GitLab feed accepts the
-restore but rejects the *version query*. Check each command's exit status separately.
+**Excluding the GitLab feed costs this sweep nothing.** The only package it hosts is
+`BPP.Shared.NET`, which is hard exclusion 1 below — the sweep may never bump it. And `restore` itself
+does not need the feed on a developer checkout: `BPP.*/Directory.Build.props` injects a local
+`ProjectReference` to `bpp-shared` when the developer's path exists, so bpp-shared resolves from
+source. Proven 2026-09-09 on `bpp-backend`: restore reported *"All projects are up-to-date"* while the
+un-sourced `--outdated` still 401'd; with `--source $NUGET_ORG` it returned 15 outdated packages for
+the App project alone.
 
-A **401** is a credentials problem, not a finding: report it as a per-repo failure, leave the
-ledger's `nuget.<repo>` entry untouched, do not remove the feed. Critically, when `--outdated` 401s
-the report must say **the outdated check produced no data** — an empty outdated table is then not
-evidence that nothing is outdated, and saying so is mandatory in the Degradations section.
+### Parse the restore log too — `--vulnerable` alone is not enough
+
+`dotnet restore` runs NuGet Audit and emits `NU1901`–`NU1904` warnings for known-vulnerable packages.
+**These are an independent signal and must be parsed**, because the two checks disagree: on
+`bpp-backend` 2026-09-09, `--vulnerable --source $NUGET_ORG` reported *"no vulnerable packages"* while
+the same restore emitted `NU1902: AngleSharp 0.17.1 has a known moderate severity vulnerability`
+(GHSA-pgww-w46g-26qg) in `BPP.Backend.NET.Rahmenvereinbarung` and `BPP.Backend.NET.News`.
+
+```bash
+grep -oE 'NU190[1-4]: Package .*' "$WORK/restore-$repo.log" | sort -u
+```
+
+Treat the union of both as the vulnerability set. A hit in only one is still a hit.
+
+**A 401 is now a defect in this sweep, not an accepted degradation.** If either `list` command 401s,
+the `--source` flag was omitted — fix the command and re-run. Only if it 401s *with* the flag is it a
+credentials problem: report it as a per-repo failure, leave the ledger's `nuget.<repo>` entry
+untouched, do not remove the feed, and state in Degradations that **the outdated check produced no
+data** — an empty outdated table is then not evidence that nothing is outdated.
 
 ### Transitive vulnerabilities
 
