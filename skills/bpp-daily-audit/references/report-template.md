@@ -49,7 +49,8 @@ actually written.
 
 ## Degradations
 <anything that reduced coverage: repos.md unreachable, caps hit, a dynamic verification downgraded,
-an auth failure. Empty section means nothing degraded — say so explicitly rather than omitting it.>
+an auth failure, a `rules.md` entry that failed to parse (name it — the check did not run). Empty
+section means nothing degraded — say so explicitly rather than omitting it.>
 ```
 
 ## Honesty rules
@@ -62,6 +63,10 @@ an auth failure. Empty section means nothing degraded — say so explicitly rath
 - Test results are reported as they happened, including "not run".
 - If `bpp/repos.md` was unreachable, the report says the repo cross-check was skipped and the repo
   set may be incomplete.
+- **The reverse delta is reported too.** Any audited repo the authoritative `bpp/repos.md` does not
+  name is listed as "in the group but not in `repos.md`: …" — the run found a gap in the list of
+  record, and it stays visible until someone fixes the list upstream. Measured 2026-09-09: three such
+  repos, two of them committed to that day (`references/discovery.md` §A1).
 
 ## Status file and notification
 

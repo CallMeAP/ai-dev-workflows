@@ -57,8 +57,8 @@ phase, not before.
 
 | Phase | What | Model | Reference |
 |---|---|---|---|
-| A | Discovery: repo map, branch probe, commit windows, Jira fetch, **ledger dedup** | none — bash/`glab`/`acli` | `references/discovery.md` |
-| B | Review: 3 lenses per work item, parallel | Sonnet 5, medium | `references/reviewer-prompts.md` |
+| A | Discovery: repo map, branch probe, commit windows, Jira fetch, **rule load**, **ledger dedup** | none — bash/`glab`/`acli` | `references/discovery.md` |
+| B | Review: 3 lenses per work item, parallel, driven by the fetched rules | Sonnet 5, medium | `references/reviewer-prompts.md` |
 | C | Debate: cross-rebuttal of every finding | Sonnet 5, medium | `references/debate-protocol.md` |
 | D | Adjudication: verdict + fixability | Opus 5, high | `references/adjudication.md` |
 | E | Act: MR or escalation, ledger write | Opus 5, high (MR authoring only) | `references/act.md` |
@@ -69,10 +69,18 @@ Known-non-issues loop (spans A, B, D, E): `references/known-non-issues.md`.
 
 Ledger formats and fingerprinting: `references/ledger.md`.
 
-**Two memory files in `bpp-audit-reports` are read every run**, and they pull in opposite directions:
-`common-issues.md` (patterns that *keep going wrong* — a hunt list for R1, raising sensitivity) and
-`known-non-issues.md` (things that *look wrong but aren't* — lowering it). Putting an entry in the
-wrong file inverts its effect.
+Rule set — fetch, parse, scope filter, failure handling: `references/rules-fetch.md`.
+
+**Three files in `bpp-audit-reports` are read every run**, and each does a different job:
+
+| File | Question | Effect |
+|---|---|---|
+| `rules.md` | *what do we check for?* | **defines** the checklist — Phase B's lenses are driven by it |
+| `common-issues.md` | *what keeps going wrong?* | **raises** sensitivity: a hunt list for R1 |
+| `known-non-issues.md` | *what looks wrong but isn't?* | **lowers** it: engage the prior reasoning first |
+
+Putting an entry in the wrong file inverts or loses its effect. `rules.md` is the only one whose
+absence **aborts** the run — the other two degrade it and are reported.
 
 **`known-non-issues.md`** It is the audit's memory of what
 it already got wrong. Phase A loads it, Phase B passes the relevant entries to the reviewers, Phase D
@@ -118,15 +126,21 @@ report and queued first next run.
    forever).
 10. **Every MR description ends with the finding fingerprint and `🤖 Generated with Claude Code`.**
    Without the fingerprint the next run cannot see the MR and will open a duplicate.
-9. **Never skip the known-non-issues file.** Not loading it is not a neutral omission — it
+11. **Never skip the known-non-issues file.** Not loading it is not a neutral omission — it
    guarantees repeat false positives and trains the reader to ignore the report.
+12. **No rules, no review.** `rules.md` unreachable or parsing to zero rules aborts the run with a
+   partial report. A rule-less run checks less while reporting the same shape — the one degradation
+   nobody can see afterwards.
 
 ## Common mistakes
 
 - **Trusting `jq '.commits | length'` to detect a missing branch** — `null | length` is `0` in jq, so
   a missing branch reads as "no new commits". Probe branches explicitly first (`references/discovery.md`).
-- **Building the repo set from `project_index.md`** — its GitLab-only section is stale. Discovery is
-  GitLab-side plus the mandatory `bpp/repos.md` cross-check.
+- **Building the repo set from `project_index.md`** — its GitLab-only section is stale. The
+  authoritative repo list is **`bpp/repos.md`** in the knowledge repo; the repo set is that list
+  **unioned** with the GitLab group filter, because both drift (measured 2026-09-09: 5 repos only the
+  list has, 3 only the group has — two of those three committed that same day). Never one alone.
+  See `references/discovery.md` §A1.
 - **Auditing `bpp-audit-reports`** — self-audit loop. It is on the always-exclude list.
 - **Concluding "X was not changed" from a compare payload** — compare output is truncated on large
   ranges. Treat counts as a lower bound; read the raw file when it matters.
@@ -136,6 +150,14 @@ report and queued first next run.
 - **Letting a debate consensus override the escalate-regardless list** — it cannot. The list wins.
 - **Auditing the whole 268-ticket board** — the board is only a spec source and a status-change
   trigger, never an iteration target.
+- **Editing an audit rule in this skill instead of in `rules.md`** — the rule set lives in
+  `bpp-audit-reports/rules.md` and nowhere else. A rule written here is read by nobody at runtime,
+  and the two copies drift until the report cites a rule the run never applied. Same for deleting
+  one: retire it in `rules.md`.
+- **Renaming a rule id to make it read better** — ids are part of the finding fingerprint. A rename
+  re-opens every finding that rule ever produced, escalations and dismissals included.
+- **Passing backend rules to a frontend repo's reviewer** — filter by `scope` first
+  (`references/rules-fetch.md`); an off-scope rule yields silence or an invented finding.
 
 ## Red flags — STOP
 
@@ -150,3 +172,6 @@ report and queued first next run.
   dismissal is only useful if the next run inherits it.
 - About to dismiss a finding *because* it appears in `known-non-issues.md`, without engaging its
   reasoning → stop; an entry is context, not a gag order.
+- About to dispatch a reviewer with no rules loaded, or after a failed `rules.md` fetch → stop; abort
+  and write the partial report. A rule-less run is not a lighter run, it is an unreported one.
+- About to add a rule to this skill's text → stop; it belongs in `bpp-audit-reports/rules.md`.

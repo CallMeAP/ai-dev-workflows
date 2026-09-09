@@ -8,6 +8,10 @@ and putting an entry in the wrong one inverts its effect:
 | `common-issues.md` | *keeps going wrong* — recurring real defect patterns | **raises** sensitivity: hunt for it |
 | `known-non-issues.md` | *looks wrong, isn't* — already ruled out | **lowers** sensitivity: engage the prior reasoning first |
 
+Neither is the checklist. That is `rules.md` — the standing set of checks, read every run and the
+only one of the three whose absence aborts the run (`references/rules-fetch.md`). A standing check
+belongs there, a recurring defect here in `common-issues.md`, a dismissal in `known-non-issues.md`.
+
 Both are loaded in Phase A. `common-issues.md` entries go to **R1** as an explicit hunt list (and to
 R3 when the pattern is a convention). `known-non-issues.md` entries go to whichever lens raised the
 original finding.

@@ -8,11 +8,41 @@ Three agents per work item, dispatched **in parallel in one message**. Model: **
 - The work item's aggregate diff (already capped at 1500 changed lines by Phase A).
 - The **named changed files** at that ref, fetched per `discovery.md` A6.
 - For a ticket work item: the BRO ticket's summary, description and acceptance criteria.
-- The repo's `CLAUDE.md` when one exists.
+- **The repo's own `CLAUDE.md`, read through git** — never off the filesystem, which reaches sibling
+  worktrees whose paths look native:
+
+  ```bash
+  git -C "$LOCAL" show "origin/$br:CLAUDE.md" > "$WORK/claudemd-${repo}.md" 2>/dev/null \
+    || echo "no CLAUDE.md on origin/$br"     # rule skipped for this repo, not reported clean
+  ```
+
+  It goes to **R3**, which owns `cross-claudemd-convention-violation`. **Only this repo's file** —
+  `CLAUDE.md` content differs per repo, and enforcing one repo's convention against another is that
+  rule's defining misfire. 32 fleet repos have one (measured 2026-09-09); a repo without one has the
+  rule skipped.
+- **The rules from `$WORK/rules.md` that apply to this repo** — filtered by `scope` and by each
+  rule's `applies-to`, per `references/rules-fetch.md`. That filtered set is the lens's checklist.
 
 **Never a repository, never a directory tree, never "explore the codebase".** If a reviewer needs a
 file the diff names, it is already supplied; if it needs one the diff does not name, that is a
 finding about missing context, not a reason to widen the input.
+
+## The rules drive the lenses
+
+`rules.md` in `bpp-audit-reports` is the checklist; the lenses below say who applies which part of it.
+
+- Every rule whose `detect` is a **command runs in bash, in Phase A** — never inside an agent
+  (non-negotiable #1). A reviewer receives the command's *result*, already computed.
+- A rule whose `detect` says *dispatch reviewer lens* goes to that lens with its `false-positive-notes`
+  attached. Those notes exist to stop a known misfire; a finding that walks straight into one costs a
+  debate round.
+- A finding raised against a rule **must carry that rule's `id` as its `rule_id`**, verbatim. The id
+  is part of the fingerprint — inventing a variant spelling creates a duplicate finding the ledger
+  cannot recognise.
+- A lens may still raise something no rule covers. It uses the `r{1,2,3}.<slug>` form, and if the same
+  shape recurs, Phase E proposes it as a new rule for a human to add to `rules.md`.
+- **Only in-scope rules are passed.** A backend rule never reaches a reviewer looking at an Angular
+  repo. A rule that does not apply is skipped, never reported as clean.
 
 ## Hunt list — `common-issues.md`
 
@@ -35,12 +65,13 @@ inverse, an `.AsSplitQuery()` added to an order-dependent query with no `OrderBy
 Logic errors and defects in the changed code itself.
 
 - Null / nullable-reference handling, `async` misuse (unawaited tasks, `async void`, sync-over-async).
-- **EF Core tracking**: read paths must use `QueryAllAsNoTracking()`, write paths `QueryAll()`.
-  Missing `.Include()` producing a silent null, or an `.Include()` chain that changes cardinality.
 - Boundary and off-by-one, wrong comparison operator, inverted guard.
 - Swallowed exceptions, empty catch, logging instead of throwing where the caller needs the failure.
-- Soft-delete correctness: `SoftDeleteAsync` vs hard delete, dependent-entity checks before delete.
+- Missing `.Include()` producing a silent null, or an `.Include()` chain that changes cardinality.
 - Concurrency: shared mutable state, cache key collisions.
+- The in-scope `rules.md` entries routed to R1 — EF tracking (`be-ef-tracking-misuse`) and
+  soft-delete correctness (`be-soft-delete-or-dependent-check-missing`) among them. Everything above
+  this line is R1's own judgement and deliberately has no rule id.
 - Every pattern in the `common-issues.md` hunt list, in both directions — the defect, and a fix for it
   applied wrongly.
 
@@ -65,19 +96,29 @@ contradicts the ticket — not merely because the ticket mentions work done else
 
 Project rules from `CLAUDE.md`. These are the findings most likely to be real and cheapest to fix.
 
-- **A DTO change with no endpoint migration guide** under
-  `BPP.Backend.NET.App/endpoint-migration-guides/` — adding, removing, renaming a property, changing
-  a type or nullability, changing an enum a DTO exposes. Additive counts.
-- `DtoMapper` shape: `Projection` expression EF-translatable (no helper calls inside the expression
-  tree), `Metadata` block inlined, compiled `ToInfoDto`, `ApplyUpdate` mapping every property.
-- A mapper changed without its `{Entity}DtoMapperTests` updated.
-- `BaseService` subclasses using primary-constructor parameters instead of the inherited
-  `_repositoryWrapper` / `_logger` / `_auditContextService`.
-- Re-inlined guards that belong in `ContractStateCheckerUtil` / `CustomerStateCheckerUtil`.
-- Missing `[AuditReason]` on a write endpoint; missing `[ProducesResponseType]`.
-- Module-boundary violations: feature logic placed in a foreign module without the documented
-  cross-reference comment.
-- File naming: files not prefixed with the module's singular name.
+R3 receives **the audited repo's `CLAUDE.md`** (fetched above) and owns the catch-all
+`cross-claudemd-convention-violation`: a violation of a convention that file states **explicitly**,
+quoting the offending line. Two bounds make it a rule rather than a style-guide dumping ground:
+
+- **The specific rule wins.** Eight ids already carve out the high-value conventions
+  (`be-mapper-shape-violation`, `be-baseservice-ctor-param-use`, `be-ef-tracking-misuse`,
+  `be-file-naming-module-prefix`, `be-module-boundary-violation`, `be-reinlined-state-checker-guard`,
+  `be-dto-change-without-migration-guide`, `be-missing-assplitquery-on-multi-collection-include`).
+  When both would fire, raise **one** finding under the specific id — two ids for one line means two
+  fingerprints for one defect.
+- **Nothing the file does not say.** A convention R3 infers from surrounding code, recalls from
+  another repo, or simply considers good practice is out of scope. `CLAUDE.md` is an actively
+  maintained surface — the `AsSplitQuery` convention was pushed into 17 repos' files on 2026-09-09,
+  and the other 15 repos with a `CLAUDE.md` did not get it.
+
+**R3's checklist is the filtered rule set, not a list kept here.** It receives every in-scope rule
+from `rules.md` whose `detect` needs judgement — the migration-guide rules, `DtoMapper` shape,
+mapper tests, `BaseService` field usage, re-inlined state-checker guards, `[AuditReason]` on writes,
+module boundaries, file naming — each with its own `false-positive-notes`. Enumerating them here too
+would guarantee the two copies drift.
+
+R3 also owns the mechanical rules' *results*: Phase A ran those commands, and R3 judges each hit
+against the rule's notes rather than re-running anything.
 
 ## Batching lenses per repo — allowed, with one hard limit
 

@@ -23,6 +23,7 @@ ledger/state.json          {"schema":1,"repos":{},"jira":{},"deferred":[],"nuget
 ledger/findings.jsonl      (empty)
 reports/.gitkeep
 escalations/.gitkeep
+rules.md                   the audit's checklist — without it a run aborts
 ```
 
 ### README.md content (required sections)

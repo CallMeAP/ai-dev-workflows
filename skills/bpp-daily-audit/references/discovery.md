@@ -23,25 +23,58 @@ ENC[callidus-bvs-ui]="lipso%2Fclients%2Fbrokernet%2Fcallidus%2Fcallidus-bvs-ui"
 ENC[servo-ui]="lipso%2Fclients%2Fbrokernet%2Fservo%2Fservo-ui"
 ```
 
-### Mandatory cross-check against `bpp/repos.md`
+### `bpp/repos.md` — the authoritative repo list, cross-checked against the group filter
 
-The filter + extras provably drift (2026-08-14: six repos missed). Fetch the central list and add
-everything it names:
+`bpp/repos.md` in the knowledge repo is **the fleet's repo list of record** — the only human-curated
+inventory of what belongs to BPP / Brokernet. It is fetched on every run and everything it names is
+audited.
+
+It is **not** used as the *sole* source, and that is deliberate: the drift runs in **both**
+directions, measured 2026-09-09 on a live fleet listing.
+
+| Direction | Count | Repos |
+|---|---|---|
+| in `repos.md`, missed by filter + extras | 5 | `brokernet-fiab-connector`, `brokernet-file-scanner`, `brokernet-varias-sign`, `docling-sidecar`, `servo-hw-connector` |
+| in the group, **missing from `repos.md`** | 3 | `bpp-arag-connector`, `bpp-external-mail-connector`, `bpp-partner-api-guide` |
+
+The three `repos.md` does not list are not dormant: **`bpp-arag-connector` and
+`bpp-external-mail-connector` both had commits on 2026-09-09**, making them among the most active
+repos in the fleet. Dropping the group filter would silently un-audit them — the exact failure this
+pipeline cannot detect afterwards. Keep the union.
+
+(The filter also surfaces `bpp-audit-reports` and `bpp-shared-template`; both are on the
+always-exclude list below and are correctly absent from `repos.md`.)
 
 ```bash
 glab api "projects/lipso%2Finternal%2Fagentic-coding-knowledge/repository/files/bpp%2Frepos.md/raw?ref=main" > "$WORK/repos.md"
 rows=0
+: > "$WORK/reposmd-names.txt"
 while IFS='|' read -r _ name link _; do
   name=$(echo "$name" | xargs); link=$(echo "$link" | xargs)
   [[ "$link" == https://gitlab.com/* ]] || continue
-  rows=$((rows+1))
+  rows=$((rows+1)); echo "$name" >> "$WORK/reposmd-names.txt"
   path=${link#https://gitlab.com/}
   [ -z "${ENC[$name]:-}" ] && ENC[$name]=$(printf %s "$path" | sed 's#/#%2F#g')
 done < <(grep -E '^\|[^|]+\| *https://gitlab.com/' "$WORK/repos.md")
+
+# report the reverse delta so repos.md's staleness is visible and someone fixes it upstream
+for r in "${!ENC[@]}"; do
+  grep -qx "$r" "$WORK/reposmd-names.txt" || echo "NOT IN repos.md: $r"
+done
 ```
 
+**Its links are old paths, and that is fine.** Every row reads
+`https://gitlab.com/brokernet/<repo>` (subgroup rows `.../brokernet/servo/servo-ui`,
+`.../brokernet/callidus/callidus-bvs-ui`), while the group moved to `lipso/clients/brokernet/`.
+**GitLab redirects the old path**, so the derived encoded path resolves through the API unchanged —
+verified 2026-09-09 for `bpp-backend`, `brokernet-fiab-connector`, `docling-sidecar` and both
+subgroup entries, each returning its current `lipso/clients/brokernet/…` namespace. Do not "fix" the
+derivation, and do not rewrite `repos.md`'s links to make it look right.
+
 If the fetch fails or `rows` is 0, **say so loudly in the report** ("repo cross-check skipped — list
-unreachable") and continue with filter + extras. Never silently pretend the check ran.
+unreachable") and continue with filter + extras. Never silently pretend the check ran. The reverse
+delta goes in the report too, as "in the group but not in `repos.md`: …" — a run that discovers a
+repo the list of record does not name has found a gap in the list, and saying nothing lets it rot.
 
 ### Always-exclude
 
@@ -208,17 +241,28 @@ acli jira workitem view "$KEY" --json > "$WORK/ticket-$KEY.json"
 - Status-change sweep: compare each ticket's `fields.status.name` against `ledger.jira[KEY].status`.
   Changed → one status-change work item. Unchanged → nothing.
 
-## A4b. Load the two memory files
+## A4b. Load the rule set and the two memory files
 
 ```bash
 REPORTS=~/Entwicklung/bpp/bpp-audit-reports
 git -C "$REPORTS" pull --ff-only -q      # another machine may have run since
 [ -f "$REPORTS/common-issues.md" ]    || echo "WARNING: common-issues.md missing"
 [ -f "$REPORTS/known-non-issues.md" ] || echo "WARNING: known-non-issues.md missing"
+
+# the rule set — Phase B's checklist
+cp "$REPORTS/rules.md" "$WORK/rules.md" 2>/dev/null \
+  || glab api "/projects/86222771/repository/files/rules.md/raw?ref=main" > "$WORK/rules.md"
+rules=$(grep -cE '^### `[a-z0-9.-]+`$' "$WORK/rules.md" 2>/dev/null || echo 0)
+[ "$rules" -gt 0 ] || { echo "FATAL: no rules loaded"; exit 1; }   # abort, write a partial report
 ```
 
-Either file missing is a **degradation**, reported, not a silent skip. See
+The two memory files missing is a **degradation**, reported, not a silent skip — see
 `references/known-non-issues.md` for what each does and which lens receives it.
+
+`rules.md` is stricter: it *is* the checklist, so an empty or unreachable rule set **aborts** the run
+with a partial report rather than degrading it into a review against nothing. A partial parse
+continues on the rules that loaded and names the rest as a degradation. Full contract — sources,
+parse, scope filter, why abort — in `references/rules-fetch.md`.
 
 ## A5. Ledger dedup — before any dispatch
 
