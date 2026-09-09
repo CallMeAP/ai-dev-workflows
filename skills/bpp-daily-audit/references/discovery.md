@@ -206,21 +206,55 @@ Exclude at minimum:
 ```
 */Migrations/*.Designer.cs        EF migration snapshots
 */Migrations/*ModelSnapshot.cs    EF model snapshot
-*.g.cs                            NSwag-generated connector clients
+*.g.cs                            NSwag-generated connector clients (backend)
+api-docs-*.json                   committed OpenAPI specs the clients regenerate from
+*/.openapi-generator/*            openapi-generator metadata (FILES, VERSION) — frontends
 package-lock.json  yarn.lock  *.lock
 *.min.js  *.min.css
 ```
+
+**Frontend generated clients are excluded from a manifest, not from a guessed glob.** The Angular
+repos generate one client per backend into `src/app/api/<service>/` via `openapi-generator-cli`
+(`npm run generate:models:*`), and each output directory carries
+`<dir>/.openapi-generator/FILES` listing **exactly** what was generated — 817 entries for
+`brokernet-cockpit-ui`'s `src/app/api/backend` alone, 1757 tracked files under `src/app/api` across
+its ten services. Derive the exclusion from that manifest so it stays correct when a client is added
+or the generator's layout changes:
+
+```bash
+# every path listed in a .openapi-generator/FILES manifest, repo-relative
+gen_manifest_paths() {           # $1 = local repo checkout, $2 = branch
+  git -C "$1" ls-tree -r --name-only "origin/$2" \
+    | grep -E '\.openapi-generator/FILES$' \
+    | while read -r manifest; do
+        dir=${manifest%/.openapi-generator/FILES}
+        git -C "$1" show "origin/$2:$manifest" | sed "s#^#${dir}/#"
+      done
+}
+```
+
+Drop any changed path that appears in that list, in addition to the pathspec excludes above. A repo
+with no manifest (no generated client) simply yields nothing.
 
 ```bash
 git -C "$L" show "$sha" -- . \
   ':(exclude)*/Migrations/*.Designer.cs' \
   ':(exclude)*/Migrations/*ModelSnapshot.cs' \
-  ':(exclude)*.g.cs' ':(exclude)*-lock.json' ':(exclude)*.lock'
+  ':(exclude)*.g.cs' ':(exclude)*-lock.json' ':(exclude)*.lock' \
+  ':(exclude)*api-docs-*.json' ':(exclude)*/.openapi-generator/*'
 ```
 
 The **migration `.cs` file itself is NOT excluded** — the `Up`/`Down` body is exactly what a reviewer
 should read, and a schema change is on the escalate-regardless list. Only the generated snapshot
 beside it is dropped.
+
+**`api-docs-*.json` stays readable to the rules that need it.** `be-stale-connector-client` compares
+that file's **commit date** against the source repo's controller commits — it reads git metadata, not
+the diff — so excluding the spec's 4,875 lines from the reviewed diff does not blind it.
+
+**Excluded does not mean invisible.** The report still names generated files that changed, so a
+reviewer can see when generated output moved without a regeneration commit beside it. Only the
+line-by-line content is withheld.
 
 The report must state the exclusion: "N changed lines (M generated lines excluded)". Silently
 shrinking a diff would make the cap column meaningless.
