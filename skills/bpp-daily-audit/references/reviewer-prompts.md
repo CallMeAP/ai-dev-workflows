@@ -203,6 +203,45 @@ Each agent returns **JSON only** — an array of findings, no prose, no preamble
   more than a small one.
 - An empty array is a valid and common answer. Do not manufacture findings to fill the response.
 
-**Parse tolerantly.** Despite an explicit "no markdown fence" instruction, agents sometimes wrap the
-array in ```json … ``` (observed 2026-09-08). Strip a leading/trailing fence before parsing rather
-than treating the response as malformed — and never discard a real finding over its wrapper.
+### There is no tool for returning findings — say so in the prompt
+
+**Every reviewer prompt must state this verbatim:**
+
+> There is no `ReportFindings` tool. No `submit_findings`, no reporting tool, no structured-output
+> tool of any kind exists in this pipeline. Your final assistant message **is** the output channel:
+> it must be the JSON array and nothing else — no preamble, no prose summary, no markdown fence.
+
+Observed 2026-09-09: two reviewers (bpp-backend R1, bpp-file R3) **invented a `ReportFindings` tool**,
+"called" it, and returned prose. Both sets of findings were recovered by hand-parsing the prose —
+one of them the medium-severity bpp-file escalation — but a stricter parser would have dropped them
+and reported both repos as clean. An agent that believes a tool exists does not need the contract
+repeated harder; it needs to be told the tool does not exist.
+
+### Response validation — a reviewer's output is never silently dropped
+
+Three steps, in order. **A silent drop is not an available outcome at any of them.**
+
+1. **Parse tolerantly.** Despite the "no markdown fence" instruction, agents wrap the array in
+   ```json … ``` (observed 2026-09-08). Strip a leading/trailing fence, and strip a prose preamble
+   before the first `[`, rather than treating the response as malformed. Never discard a real finding
+   over its wrapper.
+2. **Re-ask once, do not drop.** If step 1 does not yield a JSON array, `SendMessage` that agent
+   once: *"Your reply did not parse as JSON. There is no ReportFindings tool. Re-send only the JSON
+   array of your findings — `[]` if you found none."* Same 6-minute bounded wait as the debate
+   channel (`references/debate-protocol.md`).
+3. **Hand-extract, and mark it.** If the re-ask fails or times out, extract the findings from the
+   prose by hand into the contract shape and set `"recovered_from_prose": true` on each. Recovered
+   findings are debated and adjudicated normally.
+
+**The accounting is mechanical.** Before Phase C, the number of lenses dispatched must equal
+parsed + recovered + explicitly-empty:
+
+```bash
+# lenses dispatched for this run vs. responses accounted for
+test "$LENSES_DISPATCHED" -eq $(( PARSED + RECOVERED + EMPTY )) \
+  || echo "UNACCOUNTED reviewer responses — name each one in the report"
+```
+
+A lens whose output could be neither parsed nor recovered is **not** "no findings". Its work item is
+reported as **unreviewed by that lens**, in Degradations, naming the repo and the lens. A repo whose
+only responding lens failed this way is reported as unreviewed, never as clean.

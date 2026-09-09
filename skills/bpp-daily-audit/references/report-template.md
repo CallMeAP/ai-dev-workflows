@@ -30,6 +30,14 @@ actually written.
 ## Findings
 | Severity | Repo/branch | Ticket | Lens | Claim | Debate | Outcome |
 |---|---|---|---|---|---|---|
+<the Debate cell is `<consensus> (<debate_context>)`, e.g. `agreed (full)` or `disputed (fresh)` —
+a reader must be able to see, per finding, whether the original lenses debated it>
+
+## Reviewer and debate channel
+| Lenses dispatched | Parsed | Recovered from prose | Unaccounted | Resumed lenses answered | Fresh challengers used |
+|---|---|---|---|---|---|
+<Unaccounted MUST be 0; any other value names each lens and repo in Degradations, and those work
+items are reported unreviewed by that lens — never clean>
 
 ## MRs opened
 | Repo | MR | Target | Finding | Tests |
@@ -63,6 +71,12 @@ means nothing degraded — say so explicitly rather than omitting it.>
   SHA was not advanced — not omitted, and not folded into "no changes".
 - `no staging branch` is an expected topology outcome and is reported as such, never as an error.
 - Test results are reported as they happened, including "not run".
+- **A fresh challenger is a degradation, and is named.** Every finding whose `debate_context` is
+  `fresh` or `none` is listed in Degradations with the lens that went silent, and its verdict floor
+  (`needs-human`) is stated. A run in which the debate channel silently degraded and nobody could
+  tell afterwards is what produced the wrong dismissal of 2026-09-09.
+- **A reviewer response that could not be parsed is a degradation, never "no findings".** Name the
+  repo and the lens, and say whether the findings were recovered from prose.
 - If `bpp/repos.md` was unreachable, the report says the repo cross-check was skipped and the repo
   set may be incomplete.
 - **A shared standards file that could not be fetched is a degradation, never a silent skip.** Name

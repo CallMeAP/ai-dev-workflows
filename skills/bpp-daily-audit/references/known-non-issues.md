@@ -56,9 +56,30 @@ must either:
 Never rule `real` by ignoring an entry, and never rule `false-positive` by citing an entry without
 reading it.
 
-## Phase E — append on every false positive
+## Phase E — append on every false positive **that had a full-context debate**
 
-Every finding whose outcome is `false-positive` gets an entry appended, using the file's format:
+> **Gate: an entry may be appended only for a finding whose `debate_context` is `full`** — every
+> non-origin position came from an agent that reviewed the work item in Phase B. If any position came
+> from a fresh challenger (`fresh`), or the finding got no peer position at all (`none`), **no entry
+> is written — ever, regardless of verdict.** No full-context debate, no dismissal.
+
+```bash
+# the only condition under which this file is appended to
+[ "$VERDICT" = "false-positive" ] && [ "$DEBATE_CONTEXT" = "full" ] || echo "no entry — gate closed"
+```
+
+The gate is redundant with the Phase D verdict floor (`fresh`/`none` cannot reach `false-positive` at
+all) and that is deliberate: this write is the most expensive in the pipeline, because a wrong entry
+suppresses a real finding on every future run, permanently and invisibly.
+
+Real case 2026-09-09: a fresh challenger's miscounted rebuttal (158 keys measured, 12 claimed —
+`references/adjudication.md`) produced a `false-positive` and an entry here. The original lens's
+`hold` arrived minutes later and overturned it; the entry was removed and the finding re-filed as
+`needs-human`. Had that response been an hour later, the entry would have stood and the finding would
+never have been raised again.
+
+Every finding whose outcome is `false-positive` **and whose debate was full-context** gets an entry
+appended, using the file's format:
 rule_id heading, repo/scope, first-raised run and fingerprint, the claim, **why it is not an issue**
 (with the citations the rebuttal used), and **what would make it real again**.
 
@@ -86,6 +107,8 @@ trade-off belongs in `common-issues.md` once, never as a recurring per-repo find
 
 - A finding ruled `needs-human`. It is unresolved, not dismissed. Leave it as an open escalation; a
   pointer stub in the file is allowed only if it says explicitly that it is not yet a non-issue.
+- **A finding whose `debate_context` is `fresh` or `none`.** A challenger without Phase B context may
+  lower confidence in a finding; it may never close one, and it may never write here.
 - A finding nobody actually adjudicated.
 - A real defect somebody decided not to fix. That is accepted risk and belongs in the escalation
   record and the ticket, not in a list that suppresses future detection.

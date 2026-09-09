@@ -59,7 +59,7 @@ phase, not before.
 |---|---|---|---|
 | A | Discovery: repo map, branch probe, commit windows, Jira fetch, **rule load**, **ledger dedup** | none — bash/`glab`/`acli` | `references/discovery.md` |
 | B | Review: 3 lenses per work item, parallel, driven by the fetched rules | Sonnet 5, medium | `references/reviewer-prompts.md` |
-| C | Debate: cross-rebuttal of every finding | Sonnet 5, medium | `references/debate-protocol.md` |
+| C | Debate: cross-rebuttal of every finding — **resume the Phase B lenses, 6-minute bounded wait, fresh challengers only for the silent ones** | Sonnet 5, medium | `references/debate-protocol.md` |
 | D | Adjudication: verdict + fixability | Opus 5, high | `references/adjudication.md` |
 | E | Act: MR or escalation, ledger write | Opus 5, high (MR authoring only) | `references/act.md` |
 | F | Report: commit to `bpp-audit-reports` | Haiku 4.5, low | `references/report-template.md` |
@@ -98,9 +98,10 @@ anyone against.
 
 **`known-non-issues.md`** It is the audit's memory of what
 it already got wrong. Phase A loads it, Phase B passes the relevant entries to the reviewers, Phase D
-consults it before ruling a finding real, and Phase E appends to it on every `false-positive`.
-Without that loop the audit re-raises the same dismissed finding forever. See
-`references/known-non-issues.md`.
+consults it before ruling a finding real, and Phase E appends to it on every `false-positive`
+**whose debate was full-context** (`debate_context: full` — see non-negotiable 12).
+Without that loop the audit re-raises the same dismissed finding forever; without the gate it
+suppresses a real one forever. See `references/known-non-issues.md`.
 
 ## Caps (hard)
 
@@ -142,7 +143,16 @@ report and queued first next run.
    Without the fingerprint the next run cannot see the MR and will open a duplicate.
 11. **Never skip the known-non-issues file.** Not loading it is not a neutral omission — it
    guarantees repeat false positives and trains the reader to ignore the report.
-12. **No rules, no review.** `rules.md` unreachable or parsing to zero rules aborts the run with a
+12. **A context-less challenger may never close a finding.** Every finding carries `debate_context`
+   ∈ `full` | `fresh` | `none` from Phase C through Phase D into the ledger. `fresh` or `none`
+   floors the verdict at `needs-human` — `false-positive` is unavailable — and **no
+   `known-non-issues.md` entry may be written for it, ever**. A dismissal suppresses the claim on
+   every future run; it requires a debate by the agents that actually read the code.
+13. **A reviewer response is never silently dropped.** Lenses dispatched must equal parsed +
+   recovered-from-prose + explicitly-empty. An unparseable response is re-asked once, then
+   hand-extracted; if neither works, that work item is reported **unreviewed by that lens**, never
+   clean.
+14. **No rules, no review.** `rules.md` unreachable or parsing to zero rules aborts the run with a
    partial report. A rule-less run checks less while reporting the same shape — the one degradation
    nobody can see afterwards.
 
@@ -181,6 +191,22 @@ report and queued first next run.
   that are not fleet standards — a connector repo is not deficient for having no `PROJECT.md`.
 - **Quoting `personal-workflows/**` at anyone** — that tree is individual developers' own setups. A
   finding sourced from it flags someone for not following a convention they never agreed to.
+- **Substituting fresh challengers and then adjudicating as if the debate were normal** — a fresh
+  challenger has neither the diff-reading nor the rules the origin lens had. Verified 2026-09-09:
+  resumed lenses returned nothing in ~15 minutes, fresh challengers replaced them, one produced a
+  miscounted rebuttal, and a real finding was ruled `false-positive` **and written into
+  `known-non-issues.md`** — which suppresses it on every future run. Mark the finding `fresh` and
+  floor it at `needs-human` (`references/debate-protocol.md`).
+- **Accepting a rebuttal's percentage without checking what it counted** — the same case: the
+  challenger counted **all 158 `*Title` keys** in `de.json`, found 9 paired with a `*Message`, and
+  called the convention a 6 % oddity. Over the class the finding actually claimed —
+  `*(Success|Failed|Failure|Error)*Title`, **12 keys** — **9 of 12** are paired. Its own 9 pairs were
+  that class. A rebuttal with no stated population, or the wrong one, is **rejected**; the finding
+  then stands unrebutted, which is not the same as confirmed.
+- **Treating an unparseable reviewer response as "no findings"** — two reviewers invented a
+  `ReportFindings` tool that does not exist and returned prose (2026-09-09). Both were recovered by
+  hand; a stricter parser would have dropped the medium-severity bpp-file escalation and reported the
+  repo clean. Re-ask, then hand-extract, then report it unreviewed — never silently empty.
 
 ## Red flags — STOP
 
@@ -193,6 +219,14 @@ report and queued first next run.
 - About to re-open an MR a human closed unmerged → stop; that is a rejection, not a gap.
 - About to rule a finding `false-positive` without appending it to `known-non-issues.md` → stop; the
   dismissal is only useful if the next run inherits it.
+- About to rule `false-positive`, or write a `known-non-issues.md` entry, for a finding whose
+  `debate_context` is `fresh` or `none` → stop; the floor is `needs-human` and the file is gated.
+- About to block the run waiting for resumed Phase B agents past the 6-minute deadline → stop; fall
+  back to fresh challengers, and mark every finding they touch `fresh`.
+- About to let a "only N of M, so it is not a convention" rebuttal change an outcome without reading
+  its `population` → stop; an unstated or mismatched population is a rejected rebuttal.
+- About to report a repo clean when one of its lenses returned prose you could not parse → stop; that
+  is unreviewed, not clean.
 - About to dismiss a finding *because* it appears in `known-non-issues.md`, without engaging its
   reasoning → stop; an entry is context, not a gag order.
 - About to dispatch a reviewer with no rules loaded, or after a failed `rules.md` fetch → stop; abort

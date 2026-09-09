@@ -122,8 +122,9 @@ glab api --method POST "/projects/${enc}/merge_requests" \
 
 **Failure scenario:** <concrete inputs -> wrong result>
 
-**Lens:** <rule_id> · **Severity:** <high|medium|low> · **Debate:** <agreed|refined>
-<the rebuttal and how it was settled, if the finding was contested>
+**Lens:** <rule_id> · **Severity:** <high|medium|low> · **Debate:** <agreed|refined> (<full|fresh|none>)
+<the rebuttal and how it was settled, if the finding was contested; if a rebuttal was rejected for an
+unstated or mismatched population, say so and name both populations>
 
 ### Fix
 <what this MR changes and why it is the smallest change that fixes it>
@@ -165,7 +166,7 @@ Write `escalations/<YYYY-MM-DD-HHMM>-<repo>-<slug>.md`:
 # <claim>
 
 **Run:** <RUN_ID> · **Repo:** <repo> · **Branch:** <branch> · **Ticket:** <BRO-xxxx>
-**Severity:** <…> · **Lens:** <rule_id> · **Debate:** <consensus>
+**Severity:** <…> · **Lens:** <rule_id> · **Debate:** <consensus> (<full|fresh|none>)
 
 ## Failure scenario
 …
@@ -181,18 +182,28 @@ a cherry-pick to development, a human decision on X>
 <positions, verbatim, including the rebuttals>
 ```
 
-## `false-positive` → append to known-non-issues
+## `false-positive` → append to known-non-issues, **behind the full-context gate**
 
-Every finding ruled `false-positive` is appended to `known-non-issues.md` in `bpp-audit-reports`,
-in the file's own entry format, including **what would make it real again**. A dismissal that is not
-recorded is a dismissal the audit will have to make again tomorrow, and the day after.
+```bash
+[ "$DEBATE_CONTEXT" = "full" ] || { echo "no known-non-issues entry: debate_context=$DEBATE_CONTEXT"; }
+```
 
-See `references/known-non-issues.md` for the full loop and for what must never be added.
+Every finding ruled `false-positive` **whose `debate_context` is `full`** is appended to
+`known-non-issues.md` in `bpp-audit-reports`, in the file's own entry format, including **what would
+make it real again**. A dismissal that is not recorded is a dismissal the audit will have to make
+again tomorrow, and the day after.
+
+**A `fresh` or `none` debate never writes here**, and Phase D's verdict floor should already have
+made `false-positive` unreachable for such a finding — if one arrives anyway, the verdict is wrong,
+not the gate. See `references/known-non-issues.md` for the full loop and for what must never be
+added, and `references/debate-protocol.md` for how `debate_context` is set.
 
 ## Ledger write
 
 Every finding is appended to `ledger/findings.jsonl` with its outcome — `mr`, `escalated`,
-`false-positive`, `needs-human` or `deferred` — regardless of what happened. A finding that reached a
+`false-positive`, `needs-human` or `deferred` — regardless of what happened, and with its
+**`debate_context`** copied through from Phase C. The field is what lets a later run, or a human
+reading the ledger, tell whether a verdict was reached with or without the reviewing agents. A finding that reached a
 model and is not in the ledger will be re-reviewed and re-reported tomorrow.
 
 Advance `state.json` SHAs only for repo/branch pairs that completed. Then commit both the report and

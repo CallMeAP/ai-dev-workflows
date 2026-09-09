@@ -47,10 +47,22 @@ permanent blind spot.
 ## findings.jsonl
 
 ```json
-{"fingerprint":"…","first_seen":"2026-09-08T12:07:00+02:00","last_seen":"2026-09-08T12:07:00+02:00","run_id":"2026-09-08-1207","repo":"bpp-backend","branch":"development","file":"BPP.Backend.NET.Contract/Services/ContractService.cs","rule_id":"r1.ef-tracking","severity":"high","ticket":"BRO-1234","claim":"…","verdict":"real","outcome":"mr","mr_url":"https://gitlab.com/…/merge_requests/301","escalation_path":null}
+{"fingerprint":"…","first_seen":"2026-09-08T12:07:00+02:00","last_seen":"2026-09-08T12:07:00+02:00","run_id":"2026-09-08-1207","repo":"bpp-backend","branch":"development","file":"BPP.Backend.NET.Contract/Services/ContractService.cs","rule_id":"r1.ef-tracking","severity":"high","ticket":"BRO-1234","claim":"…","debate_context":"full","verdict":"real","outcome":"mr","mr_url":"https://gitlab.com/…/merge_requests/301","escalation_path":null}
 ```
 
 `outcome` ∈ `mr` | `fixed` | `rejected` | `escalated` | `false-positive` | `needs-human` | `deferred`.
+
+`debate_context` ∈ `full` | `fresh` | `none` — **mandatory on every row**, copied verbatim from
+Phase C (`references/debate-protocol.md`). It is the field that carries the verdict floor across
+phases: `fresh` or `none` means no fresh eyes read the code before the verdict, so `false-positive`
+was not available and no `known-non-issues.md` entry was written. A row with
+`"debate_context":"fresh"` and `"outcome":"false-positive"` is a bug in the run, and this one-liner
+finds it:
+
+```bash
+jq -r 'select(.debate_context!="full" and .outcome=="false-positive") | .fingerprint' ledger/findings.jsonl
+# any output at all = the floor was lost; re-open those findings as needs-human
+```
 
 `mr` means *an MR is open* — it is a **transient** state, not a conclusion. Every run resolves it
 further (see below). `fixed` = its MR merged. `rejected` = its MR was closed unmerged.
