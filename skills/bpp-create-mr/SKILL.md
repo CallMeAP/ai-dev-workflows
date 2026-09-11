@@ -36,7 +36,7 @@ Not for: bulk dev→staging promotion (`bpp-promote-dev-to-staging`), running e2
 BPP repos carry **two** remotes: `origin` → the repo itself, and `glab-base` → `lipso/clients/brokernet/bpp-shared`. Bare `glab` may resolve to `glab-base` and create the MR **in bpp-shared**. Always derive the project from `origin` and pin `-R lipso/clients/brokernet/<repo>` on every `glab` call.
 
 ```bash
-REPO=$(git remote get-url origin | sed -E 's#.*/brokernet/([^/]+?)(\.git)?$#\1#')   # e.g. bpp-backend
+REPO=$(git remote get-url origin | sed -E 's#.*/brokernet/##; s#\.git$##')   # e.g. bpp-backend
 PROJ="lipso/clients/brokernet/${REPO}"
 ```
 
@@ -194,7 +194,7 @@ If no `.sln`, run each `*.Tests.csproj` with the same `--filter`. Capture pass/f
 
 | Step | Command |
 |---|---|
-| Repo from origin | `git remote get-url origin \| sed -E 's#.*/brokernet/([^/]+?)(\.git)?$#\1#'` |
+| Repo from origin | `git remote get-url origin \| sed -E 's#.*/brokernet/##; s#\.git$##'` |
 | New branch | `git switch -c feature/<slug>` |
 | Commit | `git add -A && git commit -m "<msg>"` |
 | New endpoints in diff | `git diff origin/development...HEAD -- '*Controller.cs' \| grep -E '^\+.*\[Http'` |

@@ -63,13 +63,16 @@ for r in "${!ENC[@]}"; do
 done
 ```
 
-**Its links are old paths, and that is fine.** Every row reads
-`https://gitlab.com/brokernet/<repo>` (subgroup rows `.../brokernet/servo/servo-ui`,
-`.../brokernet/callidus/callidus-bvs-ui`), while the group moved to `lipso/clients/brokernet/`.
-**GitLab redirects the old path**, so the derived encoded path resolves through the API unchanged —
-verified 2026-09-09 for `bpp-backend`, `brokernet-fiab-connector`, `docling-sidecar` and both
-subgroup entries, each returning its current `lipso/clients/brokernet/…` namespace. Do not "fix" the
-derivation, and do not rewrite `repos.md`'s links to make it look right.
+**Its links are on the current namespace.** Every row reads
+`https://gitlab.com/lipso/clients/brokernet/<repo>` (subgroup rows
+`.../brokernet/servo/servo-ui`, `.../brokernet/callidus/callidus-bvs-ui`). All 34 links were
+modernized on 2026-09-11 and each was confirmed against `/projects/<encoded>` at its new path, so
+the GitLab redirect from the old `brokernet/` namespace is **no longer load-bearing** here.
+
+The derivation itself is unchanged and still mandatory: take the encoded path from the `Link`
+column, never from the repo name — subgroups (`servo/`, `callidus/`) still exist, so
+`lipso%2Fclients%2Fbrokernet%2F${repo}` remains wrong for `servo-ui`, `servo-hw-connector` and
+`callidus-bvs-ui`.
 
 If the fetch fails or `rows` is 0, **say so loudly in the report** ("repo cross-check skipped — list
 unreachable") and continue with filter + extras. Never silently pretend the check ran. The reverse
