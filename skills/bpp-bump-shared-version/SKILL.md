@@ -98,7 +98,7 @@ for repo in "${ALLREPOS[@]}"; do
   found=""
   for dir in $(echo "$tree" | jq -r '.[] | select(.type=="tree" and (.name|test("^BPP\\."))) | .name'); do
     version=$(glab api "/projects/${enc}/repository/files/${dir}%2FDirectory.Build.props/raw?ref=development" 2>/dev/null \
-      | grep -oP '(?<=<BppSharedVersion>)[^<]+' | head -1)
+      | sed -n 's/.*<BppSharedVersion>\([^<]*\)<\/BppSharedVersion>.*/\1/p' | head -1)
     if [ -n "$version" ]; then
       PROPSPATH[$repo]="${dir}/Directory.Build.props"
       REMOTEVER[$repo]="$version"
@@ -154,7 +154,7 @@ for repo in "${LOCAL_REPOS[@]}"; do
   fi
 
   # (3) read current version (from local file, post-pull)
-  current=$(grep -oP '(?<=<BppSharedVersion>)[^<]+' "$props" | head -1)
+  current=$(sed -n 's/.*<BppSharedVersion>\([^<]*\)<\/BppSharedVersion>.*/\1/p' "$props" | head -1)
   if [ -z "$current" ]; then
     SKIPPED+=("$repo: no-BppSharedVersion-in-props"); continue
   fi
@@ -195,7 +195,7 @@ for repo in "${REMOTE_ONLY[@]}"; do
 
   # (1) re-fetch raw props + current version
   raw=$(glab api "/projects/${enc}/repository/files/${props_enc}/raw?ref=development" 2>/dev/null)
-  current=$(echo "$raw" | grep -oP '(?<=<BppSharedVersion>)[^<]+' | head -1)
+  current=$(echo "$raw" | sed -n 's/.*<BppSharedVersion>\([^<]*\)<\/BppSharedVersion>.*/\1/p' | head -1)
   if [ -z "$current" ]; then
     SKIPPED+=("$repo: raw-fetch-failed"); continue
   fi
@@ -276,6 +276,7 @@ UNVERIFIED — could not inspect, possible missed consumers (N):
 - **Running repos in parallel** → keep sequential. Per-repo output must be readable; any conflict needs a clear single-repo error.
 - **Skipping the downgrade guard** → applies to BOTH paths (local and API). If the current version is newer than `LATEST`, blindly rewriting would be a regression. Skip with `newer-local` / `newer-remote`.
 - **Trusting the discovery snapshot on the API path** → re-fetch the raw props at bump time; the version read during discovery may be stale by the time the commit is made.
+- **`grep -oP` for the version** → dies in Git Bash with "-P supports only unibyte and UTF-8 locales", `current` ends up empty and every guard is bypassed (2026-08-17). The `sed -n` extraction above is portable; keep it.
 
 ## Red flags — STOP
 

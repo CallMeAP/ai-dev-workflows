@@ -1,19 +1,19 @@
 ---
 name: bpp-project-index
-description: Use when user mentions any BPP project (bpp-backend, bpp-auth, bpp-shared, bpp-stella, bpp-chat, bpp-file, bpp-push, bpp-mail, bpp-document-analysis, bpp-vera-connector, bpp-js-report-connector), a frontend (brokernet-cockpit-ui, brokernet-app / go-stella), or legacy Brokernet (old-brokernet, brokernet-backend, backend-* modules like backend-claim/customer/servo/polizzierung), asks for the path/location of a BPP/Brokernet repo or module on this machine, or asks to refresh/audit the index — "refresh project index", "is the index complete", "which repos are not checked out locally", "missing local checkouts".
+description: Use when user mentions any BPP project (bpp-backend, bpp-auth, bpp-shared, bpp-stella, bpp-chat, bpp-file, bpp-push, bpp-mail, bpp-document-analysis, bpp-vera-connector, bpp-js-report-connector), a frontend (brokernet-cockpit-ui, bpp-stella-ui / go-stella, formerly brokernet-app), or legacy Brokernet (old-brokernet, brokernet-backend, backend-* modules like backend-claim/customer/servo/polizzierung), asks for the path/location of a BPP/Brokernet repo or module on this machine, or asks to refresh/audit the index — "refresh project index", "is the index complete", "which repos are not checked out locally", "missing local checkouts".
 ---
 
 # BPP / Brokernet Project Index
 
 ## Overview
 
-Path lookup reference for all BPP (.NET + Java) backends, the current frontends (brokernet-cockpit-ui, brokernet-app / go-stella), and legacy Brokernet (Java/Maven) projects on this machine. Read the index whenever a project name is mentioned to resolve its path and purpose before exploring or editing code.
+Path lookup reference for all BPP (.NET + Java) backends, the current frontends (brokernet-cockpit-ui, bpp-stella-ui / go-stella, formerly brokernet-app), and legacy Brokernet (Java/Maven) projects on this machine. Read the index whenever a project name is mentioned to resolve its path and purpose before exploring or editing code.
 
 The index also carries an **auto-generated "GitLab-only" section** listing repos that exist in the GitLab `lipso/clients/brokernet/` group but are NOT checked out locally (discovery approach shared with bpp-bump-shared-version). This prevents "the index is silent about repo X" from being mistaken for "repo X doesn't exist".
 
 ## When to Use
 
-- User names a BPP repo (`bpp-*`), a frontend (`brokernet-cockpit-ui`, `brokernet-app` / go-stella), or a Brokernet module (`backend-*`, `brokernet-*`).
+- User names a BPP repo (`bpp-*`), a frontend (`brokernet-cockpit-ui`, `bpp-stella-ui` / go-stella, formerly `brokernet-app`), or a Brokernet module (`backend-*`, `brokernet-*`).
 - User asks "where is X", "what is Y", "path to Z" for BPP/Brokernet code or the cockpit/Stella frontends.
 - Cross-project work needing to locate a sibling repo (e.g. `bpp-shared` from `bpp-backend`).
 - Parity audits between new BPP .NET services and legacy Brokernet Java modules.
@@ -23,7 +23,7 @@ The index also carries an **auto-generated "GitLab-only" section** listing repos
 
 1. Read `/home/alex/Entwicklung/bpp/bpp-backend/dev/apittrich/project_index.md`.
 2. Resolve the project name → absolute path under `/home/alex/Entwicklung/bpp/` or `/home/alex/Entwicklung/brokernet/`.
-3. Use that path for subsequent file reads, greps, or `cd` operations.
+3. Use that path for subsequent file reads, greps, or `cd` operations. The go-stella frontend is `bpp-stella-ui` (GitLab project renamed from `brokernet-app` on 2026-09-01); treat "brokernet-app" as an alias, and expect older local checkouts to still carry the old folder name.
 4. If the name only appears in the **GitLab-only** section, the repo exists but has no local checkout — say so; suggest cloning (`bpp-*` → `~/Entwicklung/bpp/{name}`, everything else → `~/Entwicklung/brokernet/{name}`). Do NOT guess a local path.
 
 **Lookup NEVER makes network calls.** Reading the file is the entire operation.
@@ -98,6 +98,6 @@ Report these to the user as "local-only — check whether renamed/moved/archived
 
 - The index file is **tracked in bpp-backend** (`dev/apittrich/project_index.md`) — do not confuse it with the gitignored `PROJECT_INDEX.md` at repo root mentioned in CLAUDE.md. A refresh therefore leaves an uncommitted modification in bpp-backend; report it and let the user decide when to commit. The **hand-written tables are user-maintained — treat as source of truth; never edit them**. The skill owns ONLY the content between the `AUTO:GITLAB-ONLY` markers.
 - If a mentioned project is missing from the index entirely (including the GitLab-only section), tell the user; do not guess paths. Offer to run Refresh mode — it may simply be newer than the last refresh.
-- Two filesystem roots: `bpp/` (new backends) and `brokernet/` (legacy backends + the current `brokernet-cockpit-ui` / `brokernet-app` frontends — these are active, not legacy).
+- Two filesystem roots: `bpp/` (new backends) and `brokernet/` (legacy backends + the current `brokernet-cockpit-ui` / `bpp-stella-ui` (formerly `brokernet-app`) frontends — these are active, not legacy).
 - Refresh is on demand only — a path lookup must never trigger `glab` calls.
 - If the GitLab listing comes back empty/errored, abort the refresh; never replace the section with an empty table.
