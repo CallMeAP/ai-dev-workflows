@@ -33,6 +33,17 @@ is not machine config and stays literal: MR reviewers (`apittrich` for .NET/back
 `nangertLipso` for Angular/frontend), "maintained by nangert" attributions, Jira/GitLab handles in
 prose. Blanket-replacing those breaks the reviewer logic. Ambiguous → leave it and say so.
 
+**Every skill carries its own `README.md` — personal ones too.** For a skill under
+`personal-workflows/<user>/skills/` the README sits *beside* the skill and does **not** template it:
+the skill keeps its literal paths and real usernames. Same headings as a shared one — placeholders
+(usually "none"), prerequisites, repo layout it assumes, shell/OS assumptions, how to install it by
+hand, and a verification step. **Write it for your own skills only.** Writing one for someone else's
+means guessing their intent; ask the owner instead.
+
+Why this is a rule: a personal skill authored on macOS, using BSD `sed -i ''` six times and paths
+from before a repo became a monorepo, was installed onto a Linux machine with nothing warning anyone.
+It did not error — it edited nothing, or the wrong file.
+
 **Every shared skill carries its own `README.md`** naming the placeholders it uses, the prerequisites
 it assumes (authenticated `glab`, `jq`, `psql`, a running local stack, a sibling checkout, VPN, a
 `QODANA_TOKEN`, …), anything still developer-specific after install, and the `install.sh` line.
@@ -108,7 +119,12 @@ For each new/updated skill:
 - **New shared skill** → write its `skills/<name>/README.md` in the same change. A skill reaching the
   shared remote without one is incomplete.
 - **Personal skill** (`gs-*`, `lipsum-stundenliste`, `sync-my-skills`) → mirror copy goes to
-  `personal-workflows/apittrich/skills/<name>/`, literal paths, no placeholders, no README.
+  `personal-workflows/apittrich/skills/<name>/`, literal paths, no placeholders — but **with a
+  `README.md` beside it** (see above). Never de-personalise it and never move it into the shared
+  `skills/`.
+- **Non-`.md` support files do not reach the mirror.** SYNC.md's scope is tracked `.md` only, so a
+  skill whose `SKILL.md` invokes a sibling script (`lipsum-stundenliste` → `make_stundenliste.py`)
+  arrives there broken. Say so in that skill's README rather than widening the scope.
 - **Secret scan** every copied file before staging — grep for obvious credentials:
   ```bash
   grep -rInE '(BEGIN [A-Z ]*PRIVATE KEY|glpat-|ghp_|xox[baprs]-|AKIA[0-9A-Z]{16}|password\s*[:=]|secret\s*[:=]|api[_-]?key\s*[:=]|Bearer [A-Za-z0-9._-]{20,})' <copied-skill-dir>
@@ -208,6 +224,7 @@ Report: `new: […]`, `updated: […]`, `unchanged: […]`, `skipped (repo newer
 - **Pushing literal `/home/<you>/...` paths into the mirror's shared `skills/`** → `install.sh` renders placeholders, so a hardcoded path silently installs your machine's layout on someone else's. Reverse-render, then render back and diff.
 - **Blanket-replacing every username with `{{DEV_USER}}`** → reviewer names and "maintained by" attributions are real people, not machine config; replacing them breaks the reviewer logic.
 - **Committing the mirror on `main` / bare `git push` on a `docs/*` branch** → the branch's upstream is `origin/main`, so a bare push lands on `main`. Branch off `origin/main` and push by explicit refspec.
+- **A personal skill published without a README** → the installing developer gets no shell-dialect, layout or verification information at all, and personal skills are exactly the ones authored against one machine. Write it for your own; ask the owner for theirs.
 - **A new shared skill without its `README.md`** → the installing developer has no way to know its placeholders or prerequisites. Write it in the same change.
 - **Putting setup text inside `SKILL.md`** → `install.sh` renders `SKILL.md` into the runtime, so it costs tokens on every invocation. It belongs in the sibling `README.md`, which `install.sh` skips.
 - **`--force`** → never, on either remote.

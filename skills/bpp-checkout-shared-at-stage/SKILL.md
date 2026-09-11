@@ -74,18 +74,31 @@ Read the pin from every `bpp-*` consumer on the target stage. Folder under the r
 ```bash
 STAGE=staging
 declare -A PIN
+NOPIN=()
 for d in ~/Entwicklung/bpp/*/; do
   r=$(basename "$d"); case "$r" in *worktrees*|infra|bpp-shared) continue;; esac
   [ -d "$d/.git" ] || continue
   git -C "$d" fetch -q origin "$STAGE" 2>/dev/null || continue
   git -C "$d" rev-parse --verify -q "origin/$STAGE" >/dev/null || continue
   for dir in $(git -C "$d" ls-tree --name-only "origin/$STAGE" | grep '^BPP\.'); do
+    # Portable extraction. NOT `grep -oP`: PCRE lookbehind is absent on macOS and
+    # dies in Git Bash ("-P supports only unibyte and UTF-8 locales"), returning an
+    # empty string rather than an error — the repo then drops silently out of PIN.
     v=$(git -C "$d" show "origin/$STAGE:$dir/Directory.Build.props" 2>/dev/null \
-        | grep -oP '(?<=<BppSharedVersion>)[^<]+')
+        | sed -n 's/.*<BppSharedVersion>\([^<]*\)<\/BppSharedVersion>.*/\1/p' | head -1)
     [ -n "$v" ] && { PIN[$r]="$v"; break; }
   done
+  [ -n "${PIN[$r]:-}" ] || NOPIN+=("$r")
 done
 for r in "${!PIN[@]}"; do printf '%-32s %s\n' "$r" "${PIN[$r]}"; done | sort
+
+# Fail loudly instead of reducing over a silently-truncated set.
+if [ ${#PIN[@]} -eq 0 ]; then
+  echo "STOP - no consumer yielded a <BppSharedVersion> on $STAGE." >&2
+  echo "       That is an extraction failure, not an empty fleet. Fix it before reducing." >&2
+  exit 1
+fi
+[ ${#NOPIN[@]} -eq 0 ] || printf 'no pin read (non-consumer, or extraction failed): %s\n' "${NOPIN[*]}" >&2
 ```
 
 Then reduce to one commit **by git ancestry, not by version string** — two repos can pin the same
@@ -197,7 +210,7 @@ Verify both, then confirm. If `git pull` is not a fast-forward, report it rather
 
 | Step | Command |
 |---|---|
-| Pin on a stage | `git show origin/<stage>:BPP.*/Directory.Build.props \| grep -oP '(?<=<BppSharedVersion>)[^<]+'` |
+| Pin on a stage | `git show origin/<stage>:BPP.*/Directory.Build.props \| sed -n 's/.*<BppSharedVersion>\([^<]*\)<\/BppSharedVersion>.*/\1/p'` |
 | Version → commit | `sha=${version##*+}` — never grep `-development` |
 | Packages | `glab api "projects/lipso%2Fclients%2Fbrokernet%2Fbpp-shared/packages?..."` |
 | Newer of two SHAs | `git merge-base --is-ancestor A B` → B newer |

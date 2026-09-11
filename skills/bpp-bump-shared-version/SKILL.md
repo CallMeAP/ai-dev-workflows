@@ -57,7 +57,14 @@ repo_dir=~/Entwicklung/bpp/<repo>
 W=$(mktemp -d)/wt-bump
 git -C "$repo_dir" fetch -q origin development
 git -C "$repo_dir" worktree add "$W" --detach origin/development
-sed -i "s|<BppSharedVersion>[^<]*</BppSharedVersion>|<BppSharedVersion>${LATEST}</BppSharedVersion>|" "$W/<props-path>"
+# Portable in-place rewrite: GNU `sed -i` and BSD `sed -i ''` take incompatible
+# arguments, so write to a temp file and move. Then prove the rewrite took --
+# a silent no-op must never reach a commit.
+P="$W/<props-path>"
+sed "s|<BppSharedVersion>[^<]*</BppSharedVersion>|<BppSharedVersion>${LATEST}</BppSharedVersion>|" \
+  "$P" > "$P.tmp" && mv "$P.tmp" "$P"
+grep -q "<BppSharedVersion>${LATEST}</BppSharedVersion>" "$P" \
+  || { echo "FAIL - rewrite did not take in $P" >&2; exit 1; }
 git -C "$W" add <props-path>
 git -C "$W" commit -m "chore: bump bpp-shared to ${LATEST}"
 git -C "$W" push origin HEAD:development
@@ -186,8 +193,14 @@ for repo in "${LOCAL_REPOS[@]}"; do
     SKIPPED+=("$repo: newer-local ($current)"); continue
   fi
 
-  # (5) rewrite + commit + push
-  sed -i "s|<BppSharedVersion>[^<]*</BppSharedVersion>|<BppSharedVersion>${LATEST}</BppSharedVersion>|" "$props"
+  # (5) rewrite + commit + push. Temp-file + mv, not `sed -i`: the GNU and BSD
+  #     in-place forms are incompatible, and the wrong one eats the expression as a
+  #     backup suffix. Verify the new value landed before committing anything.
+  sed "s|<BppSharedVersion>[^<]*</BppSharedVersion>|<BppSharedVersion>${LATEST}</BppSharedVersion>|" \
+    "$props" > "$props.tmp" && mv "$props.tmp" "$props"
+  if ! grep -q "<BppSharedVersion>${LATEST}</BppSharedVersion>" "$props"; then
+    SKIPPED+=("$repo: rewrite-did-not-take"); continue
+  fi
   git add "$props"
   git commit -m "chore: bump bpp-shared to ${LATEST}" >/dev/null
   if git push origin development >/dev/null 2>&1; then
@@ -296,6 +309,7 @@ UNVERIFIED — could not inspect, possible missed consumers (N):
 - **Skipping the downgrade guard** → applies to BOTH paths (local and API). If the current version is newer than `LATEST`, blindly rewriting would be a regression. Skip with `newer-local` / `newer-remote`.
 - **Trusting the discovery snapshot on the API path** → re-fetch the raw props at bump time; the version read during discovery may be stale by the time the commit is made.
 - **`grep -oP` for the version** → dies in Git Bash with "-P supports only unibyte and UTF-8 locales", `current` ends up empty and every guard is bypassed (2026-08-17). The `sed -n` extraction above is portable; keep it.
+- **`sed -i` for the rewrite** → GNU takes `sed -i "expr"`, BSD/macOS requires `sed -i '' "expr"`; each form misparses under the other, and on BSD the expression is consumed as the backup suffix. Write to a temp file and `mv`, then `grep -q` the new value to prove the rewrite took — a no-op rewrite must never reach a commit.
 
 ## Red flags — STOP
 
