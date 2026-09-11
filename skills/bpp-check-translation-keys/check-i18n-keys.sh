@@ -32,15 +32,33 @@ git -C "$BE_REPO" fetch -q origin development || { echo "FAIL — bpp-backend fe
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
-# (1) Referenced keys from cockpit-ui dev: template pipes + TS service calls (static literals only).
+# (1) Referenced keys — FRONTEND (cockpit-ui): template pipes + TS service calls (static literals only).
 {
   git -C "$UI_REPO" grep -hoE "['\"][A-Za-z0-9_.]+['\"] *\| *transloco" "$REF" -- '*.html' '*.ts' 2>/dev/null
   git -C "$UI_REPO" grep -hoE "\.(translate|selectTranslate|selectTranslateObject|translateObject)\( *['\"][A-Za-z0-9_.]+['\"]" "$REF" -- '*.ts' '*.html' 2>/dev/null
-} | grep -oE "['\"][A-Za-z0-9_.]+['\"]" | tr -d "'\"" | sort -u > "$tmp/referenced.txt"
+} | grep -oE "['\"][A-Za-z0-9_.]+['\"]" | tr -d "'\"" | tr -d '\r' | sort -u > "$tmp/ref_fe.txt"
+
+# (1b) Referenced keys — BACKEND (bpp-backend): keys the API emits and the UI renders via transloco.
+#      Producers: `const string X = "a.b"` (the main one — *.error.* keys), CreateErrorResult("a.b"),
+#      `TranslationKey = "a.b"`, and permission.deny.* literals. dd.MM / HH.mm = date formats, not keys.
+{
+  git -C "$BE_REPO" grep -hoE 'const +string +[A-Za-z0-9_]+ *= *"[A-Za-z0-9_.]+"' "$REF" -- '*.cs' 2>/dev/null
+  git -C "$BE_REPO" grep -hoE 'CreateErrorResult\( *"[A-Za-z0-9_.]+"' "$REF" -- '*.cs' 2>/dev/null
+  git -C "$BE_REPO" grep -hoE 'TranslationKey *[=:] *"[A-Za-z0-9_.]+"' "$REF" -- '*.cs' 2>/dev/null
+  git -C "$BE_REPO" grep -hoE '"permission\.deny\.[A-Za-z0-9_.]+"' "$REF" -- '*.cs' 2>/dev/null
+# Keep only real translation keys: first segment a lowercase-led word + dot. Drops
+# numeric/date/version noise (1.0, 9.9, 15.03.2024) and date formats (dd.MM.yyyy).
+} | grep -oE '"[A-Za-z0-9_.]+"' | tr -d '"' | tr -d '\r' \
+  | grep -E '^[a-z][a-zA-Z0-9]*\.' | grep -vE '^(dd|HH|MM|yyyy)\.' | sort -u > "$tmp/ref_be.txt"
+
+# Combined referenced set drives all buckets below (frontend + backend).
+sort -u "$tmp/ref_fe.txt" "$tmp/ref_be.txt" > "$tmp/referenced.txt"
 
 # (2) Backend key sets from dev ref (flat dotted-key JSON).
-git -C "$BE_REPO" show "$REF:$DE_PATH" | jq -r 'keys[]' | sort -u > "$tmp/de.txt"
-git -C "$BE_REPO" show "$REF:$EN_PATH" | jq -r 'keys[]' | sort -u > "$tmp/en.txt"
+# tr -d '\r': on Windows git, `git show` emits CRLF, leaving a trailing \r on each
+# jq key — without stripping it, comm never matches and every key reports missing.
+git -C "$BE_REPO" show "$REF:$DE_PATH" | jq -r 'keys[]' | tr -d '\r' | sort -u > "$tmp/de.txt"
+git -C "$BE_REPO" show "$REF:$EN_PATH" | jq -r 'keys[]' | tr -d '\r' | sort -u > "$tmp/en.txt"
 
 # (3) Diffs.
 comm -23 "$tmp/referenced.txt" "$tmp/de.txt" > "$tmp/missing_de.txt"
@@ -49,9 +67,13 @@ comm -12 "$tmp/missing_de.txt" "$tmp/missing_en.txt" > "$tmp/missing_both.txt"
 comm -23 "$tmp/missing_de.txt" "$tmp/missing_en.txt" > "$tmp/missing_de_only.txt"
 comm -23 "$tmp/missing_en.txt" "$tmp/missing_de.txt" > "$tmp/missing_en_only.txt"
 
-# First cockpit-ui reference (file:line) for a key.
+# First reference (file:line) for a key — cockpit-ui first, then bpp-backend (for backend-emitted keys).
 locate() {
-  git -C "$UI_REPO" grep -nE "['\"]${1//./\\.}['\"]" "$REF" -- '*.html' '*.ts' 2>/dev/null \
+  local hit
+  hit=$(git -C "$UI_REPO" grep -nE "['\"]${1//./\\.}['\"]" "$REF" -- '*.html' '*.ts' 2>/dev/null \
+    | head -1 | sed -E "s#^$REF:##" | cut -d: -f1-2)
+  [ -n "$hit" ] && { echo "$hit"; return; }
+  git -C "$BE_REPO" grep -nE "\"${1//./\\.}\"" "$REF" -- '*.cs' 2>/dev/null \
     | head -1 | sed -E "s#^$REF:##" | cut -d: -f1-2
 }
 dump() {  # $1 = file, $2 = heading
@@ -79,6 +101,7 @@ echo; echo "UNRESOLVABLE / dynamic keys ($dyn) — check manually, NOT counted a
 
 echo
 echo "Summary: referenced(static)=$(wc -l < "$tmp/referenced.txt" | tr -d ' ')"\
+" [fe=$(wc -l < "$tmp/ref_fe.txt" | tr -d ' ') be=$(wc -l < "$tmp/ref_be.txt" | tr -d ' ')]"\
 " · de-keys=$(wc -l < "$tmp/de.txt" | tr -d ' ')"\
 " · en-keys=$(wc -l < "$tmp/en.txt" | tr -d ' ')"\
 " · missing-both=$(wc -l < "$tmp/missing_both.txt" | tr -d ' ')"\
