@@ -1,13 +1,13 @@
 ---
 name: bpp-bump-shared-version
-description: Use when bumping the BPP.Shared.NET package version across all BPP .NET repos — phrases like "bump bpp-shared", "update shared version", "sync bpp-shared across repos", "release shared package", "pull latest bpp-shared everywhere". Fetches the latest `*-development+*` package from the GitLab registry via `glab`, discovers ALL consumer repos GitLab-side (`bpp-*` repos whose `BPP.*/Directory.Build.props` contains `<BppSharedVersion>`), bumps locally cloned repos via pull→rewrite→commit→push and uncloned repos via a direct GitLab API commit. Unrelated local changes don't block a bump (detached-worktree fallback); skips repos whose props file itself is dirty, off-branch repos (bulk mode), and already-current repos.
+description: Use when bumping the BPP.Shared.NET package version across all BPP .NET repos — phrases like "bump bpp-shared", "update shared version", "sync bpp-shared across repos", "release shared package", "pull latest bpp-shared everywhere". Fetches the newest package by `created_at` from the GitLab registry via `glab` (scheme-agnostic — never filters on a `-development` suffix), discovers ALL consumer repos GitLab-side (`bpp-*` repos whose `BPP.*/Directory.Build.props` contains `<BppSharedVersion>`), bumps locally cloned repos via pull→rewrite→commit→push and uncloned repos via a direct GitLab API commit. Unrelated local changes don't block a bump (detached-worktree fallback); skips repos whose props file itself is dirty, off-branch repos (bulk mode), and already-current repos.
 ---
 
 # BPP: Bump bpp-shared version across all .NET repos
 
 ## Overview
 
-Single-command bulk update of the `<BppSharedVersion>` property in every BPP .NET consumer repo's `Directory.Build.props`, sourced from the latest `-development+*` package in the GitLab registry of `lipso/clients/brokernet/bpp-shared`.
+Single-command bulk update of the `<BppSharedVersion>` property in every BPP .NET consumer repo's `Directory.Build.props`, sourced from the **newest package by `created_at`** in the GitLab registry of `lipso/clients/brokernet/bpp-shared`.
 
 **The GitLab group is the source of truth for the consumer list** — a machine-local `find` over `~/Entwicklung/bpp/` misses consumers that aren't cloned on this machine (real precedent: `bpp-agent` existed only in GitLab and was silently missed by local-only discovery). Discovery therefore queries the `lipso/clients/brokernet/` group via `glab` (same pattern as bpp-promote-dev-to-staging), then:
 
@@ -29,7 +29,7 @@ Conservative on edge cases: skip + report rather than auto-fix.
 | Branch | `development` |
 | Commit message | `chore: bump bpp-shared to {version}` (identical for local and API commits) |
 | Push remote | `origin` |
-| Channel | latest version with `-development+*` suffix |
+| Channel | newest package by `created_at` — **no suffix filter** (see step 1) |
 | Repo list | GitLab group `lipso/clients/brokernet/`, projects matching `^bpp-`, excluding `bpp-shared` and `bpp-cca-connector-internal` |
 | Consumer test | repo has a root-level `BPP.*/Directory.Build.props` on `development` containing `<BppSharedVersion>` (folder name varies — e.g. `BPP.DocumentAnalysis`, `BPP.Agent.NET`) |
 | Local clone path | `~/Entwicklung/bpp/{repo}` |
@@ -42,7 +42,7 @@ A repo is **skipped + reported** (never auto-fixed) when:
 2. Local clone branch is not `development` (bulk flow; a targeted bump may use the worktree fallback instead — see below).
 3. `git pull --ff-only origin development` fails (e.g. diverged history).
 4. Local (or remote, for API-path repos) `<BppSharedVersion>` already equals fetched `LATEST` → reported as `up-to-date`.
-5. **Downgrade guard**: current version is *newer* than `LATEST` (semver-style compare on the `YYYY.M.D` portion before `-development`). Reported as `skipped (newer-local)` / `skipped (newer-remote)`.
+5. **Downgrade guard**: current version is *newer* than `LATEST` (semver-style compare on the bare `YYYY.M.D` portion — build metadata and any pre-release suffix stripped, see `ver_date` in step 1). Reported as `skipped (newer-local)` / `skipped (newer-remote)`.
 6. **A repo with a local clone is NEVER bumped via API** — if its local flow skips, it stays skipped (API commit behind the user's back would make their checkout diverge). The detached-worktree fallback is the sanctioned alternative: it commits via git on origin/development without touching the checkout.
 7. Discovery could not inspect a repo (tree/props fetch failed, e.g. missing `development` branch) → reported under **Unverified** — these are potential missed consumers; the run continues but the summary must call them out.
 
@@ -71,12 +71,27 @@ Apply the same up-to-date + downgrade guards on the worktree's props content fir
 ### 1. Fetch latest -development version
 
 ```bash
+# Newest package by created_at. NEVER filter on a version-naming suffix.
 LATEST=$(glab api "projects/lipso%2Fclients%2Fbrokernet%2Fbpp-shared/packages?per_page=20&order_by=created_at&sort=desc" \
-  | jq -r '[.[] | select(.version | test("-development\\+"))][0].version')
+  | jq -r '[.[] | select(.name == "BPP.Shared.NET")] | sort_by(.created_at) | reverse | .[0].version')
 
-[ -z "$LATEST" ] || [ "$LATEST" = "null" ] && { echo "FAIL — no -development package found" >&2; exit 1; }
-echo "Latest bpp-shared (development): $LATEST"
+[ -z "$LATEST" ] || [ "$LATEST" = "null" ] && { echo "FAIL — no BPP.Shared.NET package found" >&2; exit 1; }
+
+# Build metadata after '+' is the bpp-shared commit the package was built from.
+SHA=${LATEST##*+}
+
+# Bare YYYY.M.D for the downgrade guard: strip build metadata, then any pre-release suffix.
+# Works for both 2026.9.11-development+6ed0331a and 2026.9.11+f8c42280.
+ver_date() { local v=${1%%+*}; echo "${v%%-*}"; }
+
+echo "Latest bpp-shared: $LATEST (commit $SHA, date $(ver_date "$LATEST"))"
 ```
+
+**Do not filter on `-development` (or any other suffix).** bpp-shared dropped the stage/release build
+names on 2026-09-11 (`f8c42280` — *"remove stage and release builds. remove missleading development
+name"*), so the newest package carries **no suffix at all**. A `test("-development\\+")` filter does not
+fail on that — it silently returns the second-newest package and the whole fleet gets bumped to a stale
+version while the run reports success. The only safe selector is recency plus the package name.
 
 ### 2. Discover consumer repos in GitLab (authoritative)
 
@@ -162,9 +177,9 @@ for repo in "${LOCAL_REPOS[@]}"; do
     UPTODATE+=("$repo"); continue
   fi
 
-  # (4) downgrade guard — compare YYYY.M.D portion before -development
-  local_date=${current%-development*}
-  latest_date=${LATEST%-development*}
+  # (4) downgrade guard — compare bare YYYY.M.D (suffix-agnostic, see ver_date in step 1)
+  local_date=$(ver_date "$current")
+  latest_date=$(ver_date "$LATEST")
   newer=$(printf '%s\n%s\n' "$local_date" "$latest_date" \
     | sort -t. -k1,1n -k2,2n -k3,3n | tail -1)
   if [ "$newer" = "$local_date" ] && [ "$local_date" != "$latest_date" ]; then
@@ -203,9 +218,9 @@ for repo in "${REMOTE_ONLY[@]}"; do
     UPTODATE+=("$repo (remote)"); continue
   fi
 
-  # (2) downgrade guard
-  remote_date=${current%-development*}
-  latest_date=${LATEST%-development*}
+  # (2) downgrade guard — bare YYYY.M.D, suffix-agnostic (see ver_date in step 1)
+  remote_date=$(ver_date "$current")
+  latest_date=$(ver_date "$LATEST")
   newer=$(printf '%s\n%s\n' "$remote_date" "$latest_date" \
     | sort -t. -k1,1n -k2,2n -k3,3n | tail -1)
   if [ "$newer" = "$remote_date" ] && [ "$remote_date" != "$latest_date" ]; then
@@ -261,6 +276,10 @@ UNVERIFIED — could not inspect, possible missed consumers (N):
 
 ## Common mistakes
 
+- **Filtering the registry on a version-naming suffix** → `select(.version | test("-development\\+"))` was the
+  original selector; it broke silently on 2026-09-11 when bpp-shared stopped suffixing its packages, quietly
+  handing back the second-newest version. Select by recency + package name only, and parse the commit from
+  the `+` build metadata (`SHA=${LATEST##*+}`). The same applies to any future scheme change.
 - **Local-only `find` discovery** → misses consumers that aren't cloned on this machine (`bpp-agent` precedent). The GitLab group listing is the authoritative repo set; local `find` is not a substitute.
 - **API-bumping a repo that has a local clone** → never. Local clone present = local flow (or detached-worktree fallback) only; an API commit would silently diverge the user's checkout.
 - **Letting an unrelated dirty file block a bump** → the bump touches only `Directory.Build.props`; use the detached-worktree fallback instead of skipping (skip only when the props file itself is dirty).
@@ -283,6 +302,7 @@ UNVERIFIED — could not inspect, possible missed consumers (N):
 - About to `git stash` / `git checkout development` / `git reset` on a user's repo → STOP. Skip + notify only.
 - About to push without a successful `pull --ff-only` → STOP. Skip the repo.
 - `LATEST` is empty or `null` → STOP. Abort the whole run; do not continue with a blank version.
+- `LATEST` is not the top row of the registry listing → STOP. A filter is dropping the newest package; fix the selector before bumping anything.
 - About to POST an API commit for a repo that exists under `~/Entwicklung/bpp/` → STOP. Local clones use the local flow only.
 - About to POST an API commit whose content is empty, unchanged, or missing `LATEST` → STOP. The rewrite failed; skip the repo.
 - About to commit a change to a file that does not contain `<BppSharedVersion>` → STOP. The discovery filter failed; do not write.
