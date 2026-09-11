@@ -100,7 +100,10 @@ For each in-scope skill, compare the live copy to the repo copy:
 
 For each new/updated skill:
 - Copy the skill directory into canonical **verbatim**.
-- Mirror to the published copy per **SYNC.md's scope** (tracked `.md` only — `skills/**/*.md`). If a skill carries non-`.md` supporting files, SYNC.md's scope governs what reaches the mirror; do not widen it here.
+- Mirror to the published copy per **SYNC.md's scope** — top-level `*.md` plus the **whole** of
+  `skills/**`, including the `.sh` / `.py` a skill actually invokes. **Mirror a skill complete or not
+  at all**: a `SKILL.md` whose sibling script is missing fails at the first command with "No such file
+  or directory". SYNC.md governs the exclusions (`memory/`, `runAgents.sh`, large binary fixtures).
 - **Reverse-render on the way to the mirror** — a `bpp-*` skill goes to the shared `skills/` with every
   machine path turned back into a placeholder. Then **verify by rendering back** and diffing against the
   live skill:
@@ -122,9 +125,11 @@ For each new/updated skill:
   `personal-workflows/apittrich/skills/<name>/`, literal paths, no placeholders — but **with a
   `README.md` beside it** (see above). Never de-personalise it and never move it into the shared
   `skills/`.
-- **Non-`.md` support files do not reach the mirror.** SYNC.md's scope is tracked `.md` only, so a
-  skill whose `SKILL.md` invokes a sibling script (`lipsum-stundenliste` → `make_stundenliste.py`)
-  arrives there broken. Say so in that skill's README rather than widening the scope.
+- **Support files carry the same contract as the `.md`.** Under the shared `skills/` a `.sh`/`.py`
+  gets the same reverse-render (`start_local_stack.sh` ships `ROOT="{{BPP_ROOT}}"`); `install.sh`
+  renders it and preserves the executable bit. Under `personal-workflows/` it stays literal.
+  **Secret-scan every support file before staging** — executables are where a stray token lands, and
+  a widened scope puts them in a shared repo for the first time.
 - **Secret scan** every copied file before staging — grep for obvious credentials:
   ```bash
   grep -rInE '(BEGIN [A-Z ]*PRIVATE KEY|glpat-|ghp_|xox[baprs]-|AKIA[0-9A-Z]{16}|password\s*[:=]|secret\s*[:=]|api[_-]?key\s*[:=]|Bearer [A-Za-z0-9._-]{20,})' <copied-skill-dir>
@@ -208,7 +213,8 @@ Report: `new: […]`, `updated: […]`, `unchanged: […]`, `skipped (repo newer
 | Copy | **canonical = verbatim literal**; **mirror = reverse-rendered to `{{…}}`** + per-skill `README.md` |
 | Placeholder check | render mirror copy back with `paths.env`, diff vs live; `grep -rn '/home/' skills/` empty |
 | Personal skills | canonical `skills/`, mirror `personal-workflows/apittrich/skills/` — never shared `skills/` |
-| Secrets | grep copied files; read each hit; real credential → STOP (documented patterns are fine) |
+| Scope | top-level `*.md` + all of `skills/**` incl. support scripts; mirror a skill complete or not at all |
+| Secrets | grep copied files, **support scripts included**; read each hit; real credential → STOP (documented patterns are fine) |
 | Commit | explicit `git add <paths>`, Co-Authored-By trailer |
 | Push | canonical: plain `git push` to `main`. Mirror: `docs/*` branch → `push -u origin HEAD:refs/heads/docs/<topic>` → MR. Never `--force`, never merge |
 
