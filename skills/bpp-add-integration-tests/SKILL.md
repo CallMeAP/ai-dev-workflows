@@ -9,7 +9,8 @@ description: Use when adding end-to-end / self-seeding integration tests to a BP
 
 In-process `WebApplicationFactory<Program>` boots the module's API; a `[SetUpFixture] GlobalTestSetup`
 seeds its own data idempotently (raw Npgsql) and logs in, then exposes shared `HttpClient`s. Tests
-drive live HTTP calls against the real endpoints. Everything is tagged `[Category("Integration")]`.
+drive live HTTP calls against the real endpoints. Everything is tagged with the repo's integration
+category — `[Category("Integration")]` or `[Category("LocalIntegration")]` (see Categories below).
 
 **Self-seeding is the point:** the suite never depends on the bpp-shared `DbSeeder` having been run.
 Every run "ensures its data exists, else inserts it" and force-resets any field a test mutates.
@@ -42,9 +43,51 @@ Read one of these first; copy its structure.
    all fixtures, but NOT the unit-test namespace — so unit-only runs don't touch the DB): pre-flight
    probe → localhost DB guard → self-seed (raw Npgsql, `PasswordHasherUtil.Create` for any login
    user) → login → build authenticated client. Expose `internal static` clients/ids.
-7. **Fixtures per controller**, each `[Category("Integration")]`.
-8. **Run**: `dotnet test <proj> --filter "Category=Integration"`. CI excludes via
-   `--filter "Category!=Integration"`. Run twice to prove idempotency.
+7. **Fixtures per controller**, each tagged with the repo's integration category — follow what the
+   repo already uses (see Categories below); do not introduce the other name.
+8. **Run**: `dotnet test <proj> --filter "Category=Integration|Category=LocalIntegration"`. CI
+   excludes via `--filter "Category!=LocalIntegration&Category!=Integration"`. Run twice to prove
+   idempotency.
+
+## Categories — follow the repo, filter on both
+
+`Integration` and `LocalIntegration` are **synonyms**. bpp-backend's `IntegrationTestCategories`
+documents `Integration` as *"Tests, die gegen laufende Companion-Services ausgefuehrt werden
+duerfen"* — exactly what `LocalIntegration` means elsewhere. Which name a repo uses is history.
+
+**Authoring a new fixture: follow the repo's existing convention.** Census it first; do not hardcode
+either name and do not introduce a second one into a repo that already has one:
+
+```bash
+grep -rho 'Category("[A-Za-z]*Integration")' --include='*.cs' . | sort | uniq -c
+```
+
+bpp-backend prints `202 Category("Integration")`. bpp-auth (17 files), bpp-chat (9), bpp-push (4),
+bpp-stella (32) and bpp-id-austria-connector (7) tag e2e **exclusively** `LocalIntegration`;
+bpp-file, bpp-cheggnet and bpp-vera use both.
+
+**Discovering and filtering: always match both names**, whichever the repo authors in — otherwise a
+run in one of those five prints "No test matches" and false-greens having executed nothing (blind
+spot proven 2026-08-14):
+
+```bash
+TESTDIR=BPP.Backend.NET/BPP.Backend.NET.Contract.Tests   # the test project you are adding to
+PROJ="$TESTDIR/BPP.Backend.NET.Contract.Tests.csproj"
+SLN=BPP.Backend.NET/BPP.Backend.NET.sln
+
+# discovery — literal OR constant-tagged
+grep -rlnE 'Category\("(Local)?Integration"|Category\(IntegrationTestCategories\.' --include="*.cs" "$TESTDIR"
+
+# run
+dotnet test "$PROJ" --filter "Category=Integration|Category=LocalIntegration"
+
+# unit-only gate
+dotnet test "$SLN" --filter "Category!=LocalIntegration&Category!=Integration"
+```
+
+Module suites may tag via the **constant** `[Category(IntegrationTestCategories.Integration)]`; a
+grep for the literal string misses all 8 bpp-backend module e2e suites (proven 2026-07-13), which is
+why the discovery grep covers both spellings.
 
 ## Self-seeding rules
 

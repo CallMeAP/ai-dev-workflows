@@ -7,7 +7,7 @@ description: Use when auditing HTTP endpoint e2e/integration coverage in a BPP .
 
 ## Overview
 
-For every HTTP endpoint in the scoped module(s), prove it is exercised by a `[Category("Integration")]` e2e test across the required cases, produce a per-module coverage matrix, then **write the missing tests** (audit + write, not audit-only).
+For every HTTP endpoint in the scoped module(s), prove it is exercised by an e2e test tagged `[Category("Integration")]` **or** `[Category("LocalIntegration")]` (synonyms — see Categories below) across the required cases, produce a per-module coverage matrix, then **write the missing tests** (audit + write, not audit-only).
 
 **Two properties make this trustworthy:**
 
@@ -42,9 +42,47 @@ grep -rnE '\[Http(Get|Post|Put|Delete|Patch)' <module>/Controllers/ --include='*
 
 For each controller also record: the class-level `[Route(...)]`/route prefix, `[Authorize]` / `[AllowAnonymous]` / custom auth attributes (e.g. `[SelfValidatesPermissions]`, `[RequireDeveloper]`), and whether the action takes a `[FromBody]` DTO and/or an `{id:guid}` route param. These three facts decide which cases are *applicable* (next step).
 
+### Categories — always match BOTH, or you will invent work
+
+`Integration` and `LocalIntegration` are **synonyms**. bpp-backend's own `IntegrationTestCategories`
+documents `Integration` as *"Tests, die gegen laufende Companion-Services ausgefuehrt werden
+duerfen"* — exactly what `LocalIntegration` means elsewhere. Which name a repo uses is history, not
+meaning.
+
+Auditing on one name only is not a cosmetic error here. **Five repos tag their e2e exclusively as
+`LocalIntegration`** — bpp-auth (17 files), bpp-chat (9), bpp-push (4), bpp-stella (32),
+bpp-id-austria-connector (7); bpp-file, bpp-cheggnet and bpp-vera use both. Audit those five for
+`Category("Integration")` alone and every endpoint reports `GAP`, so this skill — which *writes the
+missing tests* — duplicates suites that already exist. A false negative that costs work, not just a
+wrong report.
+
+Two blind spots, both proven, both apply here:
+
+| Trap | Proven | Effect |
+|---|---|---|
+| Constant tagging `[Category(IntegrationTestCategories.Integration)]` | 2026-07-13 | a literal grep misses all 8 bpp-backend module e2e suites |
+| Exclusive `LocalIntegration` | 2026-08-14 | five repos report zero coverage / "No test matches" |
+
+Use these three forms, matching `bpp-run-integration-tests`:
+
+```bash
+TESTDIR=BPP.Backend.NET/BPP.Backend.NET.Contract.Tests   # the test project you are auditing
+PROJ="$TESTDIR/BPP.Backend.NET.Contract.Tests.csproj"
+SLN=BPP.Backend.NET/BPP.Backend.NET.sln
+
+# discovery — literal OR constant, both category names
+grep -rlnE 'Category\("(Local)?Integration"|Category\(IntegrationTestCategories\.' --include="*.cs" "$TESTDIR"
+
+# run
+dotnet test "$PROJ" --filter "Category=Integration|Category=LocalIntegration"
+
+# exclude (unit-only gate, per bpp-create-mr)
+dotnet test "$SLN" --filter "Category!=LocalIntegration&Category!=Integration"
+```
+
 ### 2. Coverage bar (per endpoint — user decision)
 
-An endpoint is **covered** only when ALL *applicable* cases below are asserted in a `[Category("Integration")]` e2e test:
+An endpoint is **covered** only when ALL *applicable* cases below are asserted in an e2e test tagged `[Category("Integration")]` **or** `[Category("LocalIntegration")]`:
 
 | Case | Applies when | Assert |
 |---|---|---|
@@ -110,7 +148,7 @@ Follow the **`bpp-add-integration-tests`** skill for the WAF + `GlobalTestSetup`
 Per `bpp-run-integration-tests` conventions: bring the stack up first (**`bpp-start-local-stack`**), run **one suite at a time, ≥60s apart** (bpp-auth login 429 has no retry), **max 3 runs per suite**.
 
 - **bpp-backend trap:** `BPP.Backend.NET.Public.Tests` is **not in the `.sln`** — build that csproj explicitly; a `dotnet test --no-build` on it silently exits 0 with no output (looks green, ran nothing).
-- Module e2e suites tag via the constant `[Category(IntegrationTestCategories.Integration)]` — a grep for the literal `Category("Integration")` misses them; `--filter "Category=Integration"` matches either form.
+- Module e2e suites tag via the constant `[Category(IntegrationTestCategories.Integration)]` — a grep for the literal `Category("Integration")` misses them. Use the discovery grep from Categories below; `--filter` matches on the constant's *value*, so a constant-tagged suite is caught by the category name it resolves to.
 
 ### 7. One MR per repo
 
@@ -141,6 +179,7 @@ A case that needs infrastructure not available locally (real Minio blobs, an ext
 | Fetch | `git -C <repo> fetch -q origin development` before auditing |
 | Inventory | `grep -rnE '\[Http(Get\|Post\|Put\|Delete\|Patch)' <module>/Controllers/` |
 | Cases | 2xx (+JSON fields), auth 401/403, 404 (id-routes), 400 (body routes) |
+| Categories | BOTH: `Category\("(Local)?Integration"\|Category\(IntegrationTestCategories\.` — never `Integration` alone |
 | Match | `HttpClient` route calls in `IntegrationTests/`, not test names |
 | Write | `bpp-add-integration-tests` pattern, worktree off `origin/development` |
 | Run | `bpp-run-integration-tests` conventions (stack up, 1 suite, ≥60s, ≤3 runs) |
@@ -156,6 +195,7 @@ A case that needs infrastructure not available locally (real Minio blobs, an ext
 - **Auditing a stale checkout** → fetch `origin/development` first; endpoints drift.
 - **Switching a main checkout's branch** → never. Always a worktree off `origin/development`.
 - **Grepping only literal `Category("Integration")`** → misses the constant-tagged module suites.
+- **Auditing on `Integration` alone** → bpp-auth, bpp-chat, bpp-push, bpp-stella and bpp-id-austria tag e2e EXCLUSIVELY as `LocalIntegration` (proven 2026-08-14). Every endpoint reports `GAP` and this skill then writes duplicates of tests that already exist. Always match both names.
 - **`--no-build` test on `BPP.Backend.NET.Public.Tests`** → not in the `.sln`; exits 0 having run nothing. Build the csproj.
 - **Running suites back-to-back** → bpp-auth login 429 (no retry) → whole suite dies in `OneTimeSetUp`, looks like a regression. Space ≥60s.
 - **Silently dropping infra-blocked cases** → document them as skipped in the MR description.
