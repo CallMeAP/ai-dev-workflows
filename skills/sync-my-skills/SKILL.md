@@ -13,6 +13,33 @@ Copies personal skills from the live runtime skills directory (`/home/alex/.clau
 
 Canonical repo: `/home/alex/Entwicklung/ai-dev-workflows` (remote `main`). SYNC.md names the published mirror and both remotes.
 
+## The two remotes have different contracts
+
+They are **not** two copies of the same thing. Sending the wrong shape to either one breaks it.
+
+| | **Canonical — GitHub, private** | **Mirror — GitLab, team-shared** |
+|---|---|---|
+| Repo | `github.com/CallMeAP/ai-dev-workflows` | `gitlab.com/lipso/internal/agentic-coding-knowledge` |
+| Content | **1:1 literal copy** of the live skill — absolute paths, this machine's username, ready to run | **developer-agnostic**: `{{BPP_ROOT}}`, `{{BROKERNET_ROOT}}`, `{{DEV_USER}}`, `{{WORKFLOWS_DIR}}`, `{{KNOWLEDGE_DIR}}` |
+| Where bpp-* skills go | `skills/<name>/` | `skills/<name>/` (shared) |
+| Where personal skills go (`gs-*`, `lipsum-stundenliste`, `sync-my-skills`) | `skills/<name>/` | `personal-workflows/apittrich/skills/<name>/` — **never** the shared `skills/` |
+| Per-skill `README.md` | not used | **required** — see below |
+| How it ships | direct `git push` to `main` (standing approval) | **`docs/*` branch + MR**, never a direct push to `main` |
+
+**Machine config vs. identity — the call you will get wrong if you skim it.** A path is machine
+config and becomes a placeholder: `/home/alex/Entwicklung/bpp` → `{{BPP_ROOT}}`, and a username
+*inside a filesystem path* (`dev/apittrich/`) → `{{DEV_USER}}`. A username naming a **real person**
+is not machine config and stays literal: MR reviewers (`apittrich` for .NET/backend repos,
+`nangertLipso` for Angular/frontend), "maintained by nangert" attributions, Jira/GitLab handles in
+prose. Blanket-replacing those breaks the reviewer logic. Ambiguous → leave it and say so.
+
+**Every shared skill carries its own `README.md`** naming the placeholders it uses, the prerequisites
+it assumes (authenticated `glab`, `jq`, `psql`, a running local stack, a sibling checkout, VPN, a
+`QODANA_TOKEN`, …), anything still developer-specific after install, and the `install.sh` line.
+`install.sh` skips `README.md` when rendering, so this text costs no tokens at invocation time —
+which is exactly why it must **not** be folded into `SKILL.md`. **A new skill is not ready for the
+shared remote until its README is written.**
+
 ## When to Use
 
 - "sync my skills", "publish this skill", "push my skills to the repo", "mirror my skills"
@@ -63,6 +90,25 @@ For each in-scope skill, compare the live copy to the repo copy:
 For each new/updated skill:
 - Copy the skill directory into canonical **verbatim**.
 - Mirror to the published copy per **SYNC.md's scope** (tracked `.md` only — `skills/**/*.md`). If a skill carries non-`.md` supporting files, SYNC.md's scope governs what reaches the mirror; do not widen it here.
+- **Reverse-render on the way to the mirror** — a `bpp-*` skill goes to the shared `skills/` with every
+  machine path turned back into a placeholder. Then **verify by rendering back** and diffing against the
+  live skill:
+  ```bash
+  NAME=bpp-create-mr                                    # the skill being synced
+  K=/home/alex/Entwicklung/lipso/agentic-coding-knowledge
+  set -a; . "$K/personal-workflows/apittrich/paths.env"; set +a
+  sed -e "s|{{BPP_ROOT}}|$BPP_ROOT|g" -e "s|{{BROKERNET_ROOT}}|$BROKERNET_ROOT|g" \
+      -e "s|{{DEV_USER}}|$BPP_DEV_USER|g" -e "s|{{WORKFLOWS_DIR}}|$WORKFLOWS_DIR|g" \
+      -e "s|{{KNOWLEDGE_DIR}}|$KNOWLEDGE_DIR|g" "$K/skills/$NAME/SKILL.md" \
+    | diff - "$HOME/.claude/skills/$NAME/SKILL.md"
+  ```
+  Only `~`/`$HOME` vs the literal `/home/alex/...` may differ. A placeholder that renders to the wrong
+  path is worse than the hardcoded value it replaced. Then confirm nothing leaked:
+  `grep -rn '/home/' "$K/skills/"` must be empty.
+- **New shared skill** → write its `skills/<name>/README.md` in the same change. A skill reaching the
+  shared remote without one is incomplete.
+- **Personal skill** (`gs-*`, `lipsum-stundenliste`, `sync-my-skills`) → mirror copy goes to
+  `personal-workflows/apittrich/skills/<name>/`, literal paths, no placeholders, no README.
 - **Secret scan** every copied file before staging — grep for obvious credentials:
   ```bash
   grep -rInE '(BEGIN [A-Z ]*PRIVATE KEY|glpat-|ghp_|xox[baprs]-|AKIA[0-9A-Z]{16}|password\s*[:=]|secret\s*[:=]|api[_-]?key\s*[:=]|Bearer [A-Za-z0-9._-]{20,})' <copied-skill-dir>
@@ -74,12 +120,25 @@ For each new/updated skill:
 Stage only the synced skill paths — never `git add -A` (unrelated dirty files must stay out):
 
 ```bash
-git -C <canonical> add skills/<name>/ ...
-git -C <canonical> commit -m "chore(skills): sync <names> from personal skills"
-
-git -C <mirror-repo> add <mirror-skills-path>/<name>/ ...
-git -C <mirror-repo> commit -m "chore(skills): sync <names> from personal skills"
+CANONICAL=/home/alex/Entwicklung/ai-dev-workflows
+git -C "$CANONICAL" add "skills/$NAME/"
+git -C "$CANONICAL" commit -m "chore(skills): sync $NAME from personal skills"
 ```
+
+The mirror ships through review, so branch off `origin/main` **first** — never commit the mirror on `main`:
+
+```bash
+TOPIC=sync-my-skills-contract           # short kebab topic for the branch
+MIRROR=/home/alex/Entwicklung/lipso/agentic-coding-knowledge
+
+git -C "$MIRROR" fetch -q origin
+git -C "$MIRROR" switch -c "docs/$TOPIC" origin/main
+git -C "$MIRROR" add "personal-workflows/apittrich/skills/$NAME/"   # or skills/$NAME/ for a shared one
+git -C "$MIRROR" commit -m "docs(skills): sync $NAME from personal skills"
+```
+
+`switch -c <b> origin/main` sets the upstream to `origin/main`, so a bare `git push` would target
+`main`. Always push explicitly by refspec (step 7).
 
 Commit trailer on both:
 ```
@@ -88,12 +147,28 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
 
 ### 7. Push both remotes (standing approval)
 
-SYNC.md grants standing approval to auto-push both remotes — no need to ask. **Plain pushes only, never `--force`:**
+SYNC.md grants standing approval to push the canonical remote and to push the mirror's `docs/*`
+branch — **not** to merge the MR. **Plain pushes only, never `--force`:**
 
 ```bash
-git -C <canonical> push
-git -C <mirror-repo> push
+git -C "$CANONICAL" push                                  # canonical: straight to main
+
+# Mirror: explicit refspec. `switch -c` set the upstream to origin/main, so a bare
+# `git push` here would target main.
+git -C "$MIRROR" push -u origin "HEAD:refs/heads/docs/$TOPIC"
 ```
+
+Then open the MR against `main` and stop. `glab mr create` is unreliable here; use the API:
+
+```bash
+P=lipso%2Finternal%2Fagentic-coding-knowledge
+IID=$(glab api --method POST "/projects/$P/merge_requests" \
+  -f source_branch="docs/$TOPIC" -f target_branch=main -f title="$TITLE" \
+  --raw-field "description=$DESC" | jq -r .iid)   # -f description=@file posts the literal path
+glab mr update "$IID" --reviewer apittrich -R lipso/internal/agentic-coding-knowledge
+```
+
+**Never merge the MR.**
 
 ### 8. Verify + report
 
@@ -114,10 +189,12 @@ Report: `new: […]`, `updated: […]`, `unchanged: […]`, `skipped (repo newer
 | Skills path | discover via `find … -type d -name skills`, don't hardcode |
 | Diff | live `/home/alex/.claude/skills/<name>` vs repo copy → new/updated/unchanged |
 | Drift | repo copy newer → STOP, don't overwrite |
-| Copy | verbatim to canonical; mirror per SYNC.md scope (tracked `.md`) |
+| Copy | **canonical = verbatim literal**; **mirror = reverse-rendered to `{{…}}`** + per-skill `README.md` |
+| Placeholder check | render mirror copy back with `paths.env`, diff vs live; `grep -rn '/home/' skills/` empty |
+| Personal skills | canonical `skills/`, mirror `personal-workflows/apittrich/skills/` — never shared `skills/` |
 | Secrets | grep copied files; read each hit; real credential → STOP (documented patterns are fine) |
 | Commit | explicit `git add <paths>`, Co-Authored-By trailer |
-| Push | plain `git push` both remotes (standing approval); never `--force` |
+| Push | canonical: plain `git push` to `main`. Mirror: `docs/*` branch → `push -u origin HEAD:refs/heads/docs/<topic>` → MR. Never `--force`, never merge |
 
 ## Common Mistakes
 
@@ -128,12 +205,19 @@ Report: `new: […]`, `updated: […]`, `unchanged: […]`, `skipped (repo newer
 - **Overwriting a newer repo copy** → repo→local drift means someone changed the repo; STOP and report, don't clobber.
 - **Committing secrets** → scan copied files first; a skill may have accreted a token/key.
 - **Syncing only the canonical side** → SYNC.md requires the mirror too; both must move together.
+- **Pushing literal `/home/<you>/...` paths into the mirror's shared `skills/`** → `install.sh` renders placeholders, so a hardcoded path silently installs your machine's layout on someone else's. Reverse-render, then render back and diff.
+- **Blanket-replacing every username with `{{DEV_USER}}`** → reviewer names and "maintained by" attributions are real people, not machine config; replacing them breaks the reviewer logic.
+- **Committing the mirror on `main` / bare `git push` on a `docs/*` branch** → the branch's upstream is `origin/main`, so a bare push lands on `main`. Branch off `origin/main` and push by explicit refspec.
+- **A new shared skill without its `README.md`** → the installing developer has no way to know its placeholders or prerequisites. Write it in the same change.
+- **Putting setup text inside `SKILL.md`** → `install.sh` renders `SKILL.md` into the runtime, so it costs tokens on every invocation. It belongs in the sibling `README.md`, which `install.sh` skips.
 - **`--force`** → never, on either remote.
 
 ## Red Flags — STOP
 
 - **SYNC.md missing** → STOP; you can't know the mirror rule or push approval.
 - About to `git push --force` on either remote → STOP.
+- About to push, commit, or merge directly on the mirror's `main` → STOP; mirror changes ship as a `docs/*` branch + MR, and you never merge it.
+- A `{{PLACEHOLDER}}` about to reach the **canonical** repo, or a literal `/home/...` path about to reach the mirror's shared `skills/` → STOP; you have the two contracts swapped.
 - About to `git add -A` / commit with unrelated dirty files staged → STOP; explicit paths only.
 - Repo copy is **newer** than the local skill → STOP; report drift, do not overwrite.
 - A secret-scan hit that, on reading the line, is a **real credential value** (not a documented pattern/placeholder/regex) → STOP; sync nothing until it's cleared.
