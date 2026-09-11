@@ -220,8 +220,8 @@ Verify both, then confirm. If `git pull` is not a fast-forward, report it rather
 - **Skipping the non-Migrations diff check** → a changed tracked `appsettings.json` silently
   repoints the migrator at a different database.
 - **Counting `.Designer.cs` as migrations** → doubles every count. Filter them.
-- **Using the `brokernet/<repo>` namespace** → it is `lipso/clients/brokernet/<repo>`; older skills
-  still carry the stale path.
+- **Using the `brokernet/<repo>` namespace** → it is `lipso/clients/brokernet/<repo>`; the other
+  skills were corrected on 2026-09-11.
 - **Touching a worktree** → this skill moves the main checkout only.
 - **Running DbMigrator** → never. Out of scope, always.
 

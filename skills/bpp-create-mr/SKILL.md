@@ -37,7 +37,7 @@ BPP repos carry **two** remotes: `origin` → the repo itself, and `glab-base` �
 
 ```bash
 REPO=$(git remote get-url origin | sed -E 's#.*/brokernet/([^/]+?)(\.git)?$#\1#')   # e.g. bpp-backend
-PROJ="brokernet/${REPO}"
+PROJ="lipso/clients/brokernet/${REPO}"
 ```
 
 ## Workflow
@@ -49,7 +49,7 @@ glab auth status >/dev/null 2>&1 || { echo "FAIL — glab not authenticated"; ex
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 || { echo "FAIL — not a git repo"; exit 1; }
 ```
 
-Resolve `REPO` / `PROJ` as above. If `origin` does not point at `brokernet/*`, STOP and ask.
+Resolve `REPO` / `PROJ` as above. If `origin` does not point at `lipso/clients/brokernet/*`, STOP and ask.
 
 ### 2. Branch resolution
 
@@ -226,7 +226,7 @@ If no `.sln`, run each `*.Tests.csproj` with the same `--filter`. Capture pass/f
 - A new endpoint / `I*Service` method / `*DtoMapper` / `ValidationAttribute` in the diff has no matching test and no named user waiver → STOP, do not push the MR (write the test or get the waiver).
 - Justifying a skipped test with "too simple", "trivial", "e2e later", or "the stack isn't up" → STOP, write the test or get a named waiver.
 - Downgrading missing coverage to an MR-description note instead of a test → STOP.
-- `origin` is not `brokernet/*`, or resolves to `bpp-shared` → STOP, ask the user.
+- `origin` is not `lipso/clients/brokernet/*`, or resolves to `bpp-shared` → STOP, ask the user.
 - About to create an MR without pinning `-R` → STOP.
 - Clean tree with nothing ahead of `origin/development` → STOP, nothing to MR.
 - About to `git push --force` or run e2e/integration tests → STOP (e2e is a separate, user-triggered run).

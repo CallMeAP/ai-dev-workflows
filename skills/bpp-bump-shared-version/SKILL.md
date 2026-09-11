@@ -7,9 +7,9 @@ description: Use when bumping the BPP.Shared.NET package version across all BPP 
 
 ## Overview
 
-Single-command bulk update of the `<BppSharedVersion>` property in every BPP .NET consumer repo's `Directory.Build.props`, sourced from the latest `-development+*` package in the GitLab registry of `brokernet/bpp-shared`.
+Single-command bulk update of the `<BppSharedVersion>` property in every BPP .NET consumer repo's `Directory.Build.props`, sourced from the latest `-development+*` package in the GitLab registry of `lipso/clients/brokernet/bpp-shared`.
 
-**The GitLab group is the source of truth for the consumer list** — a machine-local `find` over `~/Entwicklung/bpp/` misses consumers that aren't cloned on this machine (real precedent: `bpp-agent` existed only in GitLab and was silently missed by local-only discovery). Discovery therefore queries the `brokernet/` group via `glab` (same pattern as bpp-promote-dev-to-staging), then:
+**The GitLab group is the source of truth for the consumer list** — a machine-local `find` over `~/Entwicklung/bpp/` misses consumers that aren't cloned on this machine (real precedent: `bpp-agent` existed only in GitLab and was silently missed by local-only discovery). Discovery therefore queries the `lipso/clients/brokernet/` group via `glab` (same pattern as bpp-promote-dev-to-staging), then:
 
 - **Cloned repos** → local flow: pull, rewrite, commit, push (keeps local checkouts current).
 - **Not-cloned repos** → GitLab API commit directly on `development` (no repo is ever missed).
@@ -30,7 +30,7 @@ Conservative on edge cases: skip + report rather than auto-fix.
 | Commit message | `chore: bump bpp-shared to {version}` (identical for local and API commits) |
 | Push remote | `origin` |
 | Channel | latest version with `-development+*` suffix |
-| Repo list | GitLab group `brokernet/`, projects matching `^bpp-`, excluding `bpp-shared` and `bpp-cca-connector-internal` |
+| Repo list | GitLab group `lipso/clients/brokernet/`, projects matching `^bpp-`, excluding `bpp-shared` and `bpp-cca-connector-internal` |
 | Consumer test | repo has a root-level `BPP.*/Directory.Build.props` on `development` containing `<BppSharedVersion>` (folder name varies — e.g. `BPP.DocumentAnalysis`, `BPP.Agent.NET`) |
 | Local clone path | `~/Entwicklung/bpp/{repo}` |
 
@@ -80,7 +80,7 @@ echo "Latest bpp-shared (development): $LATEST"
 
 ### 2. Discover consumer repos in GitLab (authoritative)
 
-List `bpp-*` projects in the `brokernet/` group, then probe each repo's root tree on `development` for a `BPP.*/Directory.Build.props` containing `<BppSharedVersion>`. Record the props path and current remote version per consumer.
+List `bpp-*` projects in the `lipso/clients/brokernet/` group, then probe each repo's root tree on `development` for a `BPP.*/Directory.Build.props` containing `<BppSharedVersion>`. Record the props path and current remote version per consumer.
 
 ```bash
 declare -A PROPSPATH REMOTEVER

@@ -7,7 +7,7 @@ description: Use when promoting a stage branch across BPP GitLab repositories �
 
 ## Overview
 
-Bulk-create promotion MRs across all BPP repos in the `brokernet/` GitLab group via `glab`. Two supported directions with fixed conventions (table below). Skips repos with no content diffs and repos that already have an open promotion MR for the direction. Always shows a preview and waits for explicit user confirmation before creating any MR.
+Bulk-create promotion MRs across all BPP repos in the `lipso/clients/brokernet/` GitLab group via `glab`. Two supported directions with fixed conventions (table below). Skips repos with no content diffs and repos that already have an open promotion MR for the direction. Always shows a preview and waits for explicit user confirmation before creating any MR.
 
 ## Direction conventions (non-negotiable)
 
@@ -28,7 +28,7 @@ Single arrow `->` with spaces, exact casing. The staging→main label is `main-d
 
 ## Repo filter
 
-Filtered repos in `brokernet/` group:
+Filtered repos in `lipso/clients/brokernet/` group:
 - `^bpp-.*` (e.g. `bpp-backend`, `bpp-auth`, `bpp-stella`)
 - `^brokernet-.*-ui$` (e.g. `brokernet-cockpit-ui`, `brokernet-onboarding-ui`)
 
@@ -42,7 +42,7 @@ Exclude everything else (ops scripts, infra, archived).
 ### Always-include extras (do NOT match the filter / live in a subgroup)
 
 These are explicitly added on every run regardless of the filter:
-- `brokernet-document-cms` — in `brokernet/` group but has no `-ui$` suffix → filter misses it.
+- `brokernet-document-cms` — in `lipso/clients/brokernet/` group but has no `-ui$` suffix → filter misses it.
 - `callidus-bvs-ui` — in the `lipso/clients/brokernet/callidus/` **subgroup**, so the group listing never returns it; needs the encoded path `lipso%2Fclients%2Fbrokernet%2Fcallidus%2Fcallidus-bvs-ui`.
 - `servo-ui` — in the `lipso/clients/brokernet/servo/` **subgroup**; encoded path `lipso%2Fclients%2Fbrokernet%2Fservo%2Fservo-ui`.
 
@@ -74,7 +74,7 @@ done < <(grep -E '^\|[^|]+\| *https://gitlab.com/' "$WORK/repos.md")
 unset 'ENC[bpp-cca-connector-internal]' 'ENC[bpp-audit-reports]'
 ```
 
-- Every list repo missing from `ENC` is **added** (encoded path derived from the link — this also handles subgroups like `brokernet/servo/...`). The branch probe then decides naturally whether it participates ("no staging branch" stays an expected outcome).
+- Every list repo missing from `ENC` is **added** (encoded path derived from the link — this also handles subgroups like `lipso/clients/brokernet/servo/...`). The branch probe then decides naturally whether it participates ("no staging branch" stays an expected outcome).
 - If the fetch fails or parses to zero rows, **say so loudly in the preview** ("cross-check skipped — list unreachable") and continue with filter+extras; never silently pretend the check ran.
 - Repos discovered by the filter but absent from the list are fine (list may lag) — report them informationally.
 
@@ -139,7 +139,7 @@ Build a `name → encoded-project-path` map. Filtered repos get `lipso%2Fclients
 ```bash
 declare -A ENC
 
-# Filtered repos from the brokernet/ group
+# Filtered repos from the lipso/clients/brokernet/ group
 while read -r repo; do
   ENC[$repo]="lipso%2Fclients%2Fbrokernet%2F${repo}"
 done < <(glab api "/groups/lipso%2Fclients%2Fbrokernet/projects?per_page=100&simple=true" \
