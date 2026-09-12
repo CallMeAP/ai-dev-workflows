@@ -73,6 +73,7 @@ Discovery, classification, and removal are one script:
 set -uo pipefail
 BASE=/home/alex/Entwicklung/bpp
 MODE="${1:-plan}"
+IDLE_DAYS="${IDLE_DAYS:-7}"   # a .claude/worktrees candidate must be untouched this long before it is even classified
 
 # ── 1. Collect candidate worktree paths ──────────────────────────────────────
 declare -A SEEN=()
@@ -80,7 +81,8 @@ CANDS=()
 add_cand() {
   local p="$1"; [ -z "$p" ] && return
   case "$p" in "$BASE"/*) ;; *) return;; esac      # must live under BASE (skips /tmp scratchpad worktrees)
-  case "$p" in */.claude/*) return;; esac          # Claude Code-managed worktrees — never touch, CC prunes them
+  case "$p" in */.claude/worktrees/*) ;;           # Claude Code-managed: IN scope, but gated by the idle check below
+                */.claude/*) return;; esac          # any other .claude/ internals — never a worktree, skip
   case "$p" in *bpp-cca-connector-internal*) return;; esac   # temporary internal repo, slated for removal/merge — excluded from automated sweeps (substring keeps `bpp-cca-connector` in scope)
   [ -n "${SEEN[$p]:-}" ] && return; SEEN[$p]=1; CANDS+=("$p")
 }
@@ -107,6 +109,20 @@ for W in "${CANDS[@]}"; do
   if ! git -C "$W" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     RESULTS+=("KEEP	$W	?	?	orphan/unreadable worktree dir — inspect manually"); continue
   fi
+  # ── Claude Code worktrees: only consider ones no agent has touched in IDLE_DAYS ──
+  # A live agent's worktree is either dirty (caught below) or freshly written (caught here).
+  # Locked worktrees are never candidates. Both guards must pass before the normal rules apply.
+  case "$W" in */.claude/worktrees/*)
+    if git -C "$W" worktree list --porcelain 2>/dev/null | grep -q '^locked'; then
+      RESULTS+=("KEEP	$W	?	?	Claude Code worktree is LOCKED — an agent may be using it"); continue
+    fi
+    newest=$(find "$W" -type f -not -path '*/.git/*' -not -path '*/bin/*' -not -path '*/obj/*' \
+               -newermt "-${IDLE_DAYS} days" -print -quit 2>/dev/null)
+    if [ -n "$newest" ]; then
+      RESULTS+=("KEEP	$W	?	?	Claude Code worktree touched within ${IDLE_DAYS}d — assume an agent is working in it"); continue
+    fi
+    ;;
+  esac
   branch=$(git -C "$W" rev-parse --abbrev-ref HEAD 2>/dev/null)
   url=$(git -C "$W" remote get-url origin 2>/dev/null)
   repo=$(printf '%s' "$url" | sed -E 's#^.*gitlab\.com[:/]##; s#\.git$##; s#^.*/##')
@@ -200,7 +216,7 @@ exit 0
 - **Treating a squash merge as unmerged** → squash-merged branch tips are NOT ancestors of dev (`ahead>0`), so the ancestor check says "unmerged". Cross-check the GitLab MR state; a merged MR with local commits still-outside-dev is **CONFIRM**, never auto-REMOVE (its commits could also be genuine post-merge work). Settle it with patch-identity (`git cherry`) + a two-dot diff over the touched files — **never a three-dot diff**, which reports every squash/rebase merge as unsafe.
 - **`git worktree remove --force`** → strips uncommitted/untracked work silently. Never use `--force`; plain `remove` refuses on a dirty/locked worktree, which is the desired safety.
 - **`git branch -D`** → force-deletes unmerged branches, orphaning commits. Only ever `git branch -d`; if it refuses (squash merge), retain the branch and report it.
-- **Removing Claude Code worktrees** → paths under `**/.claude/worktrees/*` are managed (and auto-pruned) by Claude Code; excluding `*/.claude/*` prevents yanking a worktree out from under a running agent. The `/tmp/**/scratchpad/*` worktrees are out of scope too (not under BASE).
+- **Removing a Claude Code worktree an agent is still using** → `**/.claude/worktrees/*` ARE in scope (they are often the biggest pocket on disk — measured 2026-09-12: 2.2 GB in bpp-backend alone, all three stale since 2026-08-14), but ONLY after two extra guards pass: the worktree is not `locked`, and nothing outside `.git`/`bin`/`obj` has been written in the last `IDLE_DAYS` (default 7, override with `IDLE_DAYS=n`). A live agent trips one or the other. All the normal rules still apply on top — dirty, unmerged, detached are still KEEP. Claude Code prunes these itself in principle; in practice it leaves them for months. The `/tmp/**/scratchpad/*` worktrees stay out of scope (not under BASE).
 - **Deleting the branch before the worktree** → a branch checked out in a worktree can't be `-d`'d; remove the worktree (then `prune`) first, then delete the branch from the **main** checkout (`$mainwt`), not from inside the now-gone worktree.
 - **Trusting the plan at apply time** → other agents commit between plan and apply; apply mode re-checks clean + merge state per row and skips anything that changed.
 - **`git status --porcelain` "clean" ignores staged/untracked?** → it does not: it reports staged, modified, and `??` untracked alike. Any non-empty output ⇒ KEEP.
