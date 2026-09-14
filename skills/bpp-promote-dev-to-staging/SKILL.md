@@ -26,57 +26,40 @@ Single arrow `->` with spaces, exact casing. The staging→main label is `main-d
 - `glab` authenticated against gitlab.com — verify with `glab auth status`
 - `jq` available
 
-## Repo filter
+## Repo discovery — delegated to `bpp-project-index`
 
-Filtered repos in `lipso/clients/brokernet/` group:
-- `^bpp-.*` (e.g. `bpp-backend`, `bpp-auth`, `bpp-stella`)
-- `^brokernet-.*-ui$` (e.g. `brokernet-cockpit-ui`, `brokernet-onboarding-ui`)
+**This skill no longer derives the repo set.** `bpp-project-index` owns the group listing, the
+`bpp/repos.md` cross-check, the subgroup-encoded paths and the always-exclude list, and publishes them
+as `~/.claude/bpp-fleet/manifest.tsv`. Invoke it first (read-only refresh, ~7 s), then filter.
 
-Exclude everything else (ops scripts, infra, archived).
+The promotion candidate set is:
 
-### Always-exclude (matches the filter, but must NOT be promoted)
+> `state=active`, tags ∌ `internal-temp,generated-output`, and
+> `class ∈ {backend, frontend, docs}` **or** (`class=unlisted` and name matches `^bpp-|^brokernet-.*-ui$`)
 
-- `bpp-cca-connector-internal` — temporary internal repo, slated for removal/merge — excluded from automated sweeps. Exact-name exclusion; `bpp-cca-connector` is a separate, real repo and stays in. It matches `^bpp-` **and** may appear in `repos.md`, so it is dropped in two places: the group-listing filter (step 1) and an `unset` after the cross-check below — otherwise the cross-check re-adds it.
-- `bpp-audit-reports` — generated output of the `bpp-daily-audit` skill (reports, escalations, finding ledger). It has a single `main` branch and no product code, so it is never promoted. Dropped in the same two places as above.
+Verified 2026-09-14: this reproduces the old filter + extras + cross-check set **exactly** — 35 repos,
+zero drift in either direction.
 
-### Always-include extras (do NOT match the filter / live in a subgroup)
+Everything below is still true; it just lives in the index now, once, instead of here and in three other
+skills:
 
-These are explicitly added on every run regardless of the filter:
-- `brokernet-document-cms` — in `lipso/clients/brokernet/` group but has no `-ui$` suffix → filter misses it.
-- `callidus-bvs-ui` — in the `lipso/clients/brokernet/callidus/` **subgroup**, so the group listing never returns it; needs the encoded path `lipso%2Fclients%2Fbrokernet%2Fcallidus%2Fcallidus-bvs-ui`.
-- `servo-ui` — in the `lipso/clients/brokernet/servo/` **subgroup**; encoded path `lipso%2Fclients%2Fbrokernet%2Fservo%2Fservo-ui`.
-
-Because one extra lives in a subgroup, the encoded project path can't be derived as `lipso%2Fclients%2Fbrokernet%2F${repo}` for every repo. The workflow therefore builds a per-repo `ENC[repo]` → encoded-path map and uses `${ENC[$repo]}` everywhere instead of hardcoding `lipso%2Fclients%2Fbrokernet%2F${repo}`.
-
-### Authoritative cross-check: bpp/repos.md (MANDATORY)
-
-The central BPP repo list lives in the internal knowledge repo:
-`https://gitlab.com/lipso/internal/agentic-coding-knowledge/-/blob/main/bpp/repos.md`
-
-After building `ENC`, fetch it and cross-check so no repo gets missed (real precedent 2026-08-14: the filter+extras missed `brokernet-app`, `brokernet-fiab-connector`, `brokernet-file-scanner`, `brokernet-varias-sign`, `servo-hw-connector`, `docling-sidecar`):
-
-```bash
-glab api "projects/lipso%2Finternal%2Fagentic-coding-knowledge/repository/files/bpp%2Frepos.md/raw?ref=main" > "$WORK/repos.md"
-# rows: "| repo-name | https://gitlab.com/<path> | description |" (Backend + Frontend tables)
-while IFS='|' read -r _ name link _; do
-  name=$(echo "$name" | xargs); link=$(echo "$link" | xargs)
-  [[ "$link" == https://gitlab.com/* ]] || continue
-  path=${link#https://gitlab.com/}
-  if [ -z "${ENC[$name]:-}" ]; then
-    ENC[$name]=$(printf %s "$path" | sed 's#/#%2F#g')
-    echo "ADDED-FROM-LIST $name ($path)"
-  fi
-done < <(grep -E '^\|[^|]+\| *https://gitlab.com/' "$WORK/repos.md")
-
-# always-exclude (the cross-check would re-add them):
-#   bpp-cca-connector-internal — temporary internal repo, slated for removal/merge
-#   bpp-audit-reports          — generated audit output, single main branch, never promoted
-unset 'ENC[bpp-cca-connector-internal]' 'ENC[bpp-audit-reports]'
-```
-
-- Every list repo missing from `ENC` is **added** (encoded path derived from the link — this also handles subgroups like `lipso/clients/brokernet/servo/...`). The branch probe then decides naturally whether it participates ("no staging branch" stays an expected outcome).
-- If the fetch fails or parses to zero rows, **say so loudly in the preview** ("cross-check skipped — list unreachable") and continue with filter+extras; never silently pretend the check ran.
-- Repos discovered by the filter but absent from the list are fine (list may lag) — report them informationally.
+- **`bpp-cca-connector-internal`** (tag `internal-temp`) — temporary internal repo, slated for
+  removal/merge, excluded from automated sweeps. Exact-name exclusion: `bpp-cca-connector` is a separate,
+  real repo and stays in.
+- **`bpp-audit-reports`** (tag `generated-output`) — generated output of the `bpp-daily-audit` skill
+  (reports, escalations, finding ledger). Single `main` branch, no product code, never promoted.
+- **`brokernet-document-cms`, `callidus-bvs-ui`, `servo-ui`** — the former "always-include extras". The
+  first has no `-ui$` suffix so the name filter misses it; the other two live in **subgroups**
+  (`callidus/`, `servo/`) and a group listing without `include_subgroups=true` returns neither
+  (verified 2026-09-14: 57 projects, zero of them). They are ordinary manifest rows now.
+- **The `bpp/repos.md` cross-check is still mandatory** — the index does it on every refresh. It is what
+  keeps `brokernet-fiab-connector`, `brokernet-file-scanner`, `brokernet-varias-sign`,
+  `servo-hw-connector` and `docling-sidecar` in the set (2026-08-14 precedent: six repos silently
+  missed without it).
+- **The `class=unlisted` clause is load-bearing** — it is what keeps `bpp-cypress` and `bpp-db-migrator`
+  in the sweep while `repos.md` still omits them.
+- **Encoded paths come from the manifest's `enc` column.** Never rebuild them as
+  `lipso%2Fclients%2Fbrokernet%2F${repo}` — wrong for every subgroup repo.
 
 ## MR defaults (non-negotiable)
 
@@ -134,7 +117,38 @@ The preview (step 4) must mark which repos will receive a bump so the user confi
 
 ### 1. Discover repos
 
-Build a `name → encoded-project-path` map. Filtered repos get `lipso%2Fclients%2Fbrokernet%2F${repo}`; the always-include extras are added explicitly (two with subgroup-encoded paths). Every later step keys off `${ENC[$repo]}`.
+Invoke `bpp-project-index` first, then build the `name → encoded-project-path` map from its manifest.
+Every later step keys off `${ENC[$repo]}`.
+
+```bash
+MANIFEST=~/.claude/bpp-fleet/manifest.tsv
+
+declare -A ENC
+while IFS=$'\t' read -r repo enc; do
+  ENC[$repo]="$enc"
+done < <(awk -F'\t' '!/^#/ && $6=="active" && $5!~/internal-temp|generated-output/ \
+  && ($4=="backend" || $4=="frontend" || $4=="docs" || ($4=="unlisted" && $1 ~ /^bpp-|^brokernet-.*-ui$/)) \
+  {print $1 "\t" $3}' "$MANIFEST")
+
+REPOS=("${!ENC[@]}")
+echo "${#REPOS[@]} repos — $(grep -m1 '^#generated' "$MANIFEST") $(grep -m1 '^#source' "$MANIFEST")"
+[ ${#REPOS[@]} -gt 20 ] || { echo "FAIL — only ${#REPOS[@]} repos; the manifest is truncated or stale" >&2; exit 1; }
+```
+
+- **Sanity gate, not decoration:** the set has been 34–35 repos all year. A sudden small set means a
+  truncated manifest, not a shrinking fleet — abort rather than promote a subset.
+- **Check the manifest header.** Older than 24 h, or `#source` says `gitlab=unreachable`? Refresh the
+  index before creating MRs, or state it in the preview. A promotion wave built on a stale fleet list
+  silently skips a repo that was added since.
+- **If the manifest is missing and the index cannot run** (glab down), use the legacy inline discovery
+  below and **say so loudly in the preview** — never promote from a silently-truncated set.
+
+<details>
+<summary>Fallback — legacy inline discovery (only when the manifest is unavailable)</summary>
+
+Filtered repos in the `lipso/clients/brokernet/` group: `^bpp-.*` and `^brokernet-.*-ui$`; plus the
+three always-include extras; then the `bpp/repos.md` cross-check; then the two always-excludes (the
+cross-check re-adds them otherwise).
 
 ```bash
 declare -A ENC
@@ -152,6 +166,19 @@ ENC[servo-ui]="lipso%2Fclients%2Fbrokernet%2Fservo%2Fservo-ui"
 
 REPOS=("${!ENC[@]}")
 ```
+
+```bash
+glab api "projects/lipso%2Finternal%2Fagentic-coding-knowledge/repository/files/bpp%2Frepos.md/raw?ref=main" > "$WORK/repos.md"
+while IFS='|' read -r _ name link _; do
+  name=$(echo "$name" | xargs); link=$(echo "$link" | xargs)
+  [[ "$link" == https://gitlab.com/* ]] || continue
+  path=${link#https://gitlab.com/}
+  [ -z "${ENC[$name]:-}" ] && ENC[$name]=$(printf %s "$path" | sed 's#/#%2F#g')
+done < <(grep -E '^\|[^|]+\| *https://gitlab.com/' "$WORK/repos.md")
+unset 'ENC[bpp-cca-connector-internal]' 'ENC[bpp-audit-reports]'
+```
+
+</details>
 
 ### 2. Probe branches explicitly, then compare (FAIL LOUDLY, but separate "no branch" from "no diffs")
 
@@ -300,12 +327,12 @@ Final summary: created MRs (with URLs), reused open MRs, skipped repos (no diffs
 - **Forgetting the UI patch-version bump** → the six UI repos (callidus-bvs / servo / cockpit / hotel / onboarding / doci-dashboard) need the `package.json` patch bump committed on the source branch BEFORE the MR; document-cms and backends don't.
 - **Bumping `brokernet-app` like a UI repo** → its version lives in 16 files across Gradle / Xcode / npm / Angular envs, not one `package.json`. Never bump it here; it has its own skill ([stella-bump-version-staging-mr](https://gitlab.com/lipso/internal/agentic-coding-knowledge/-/blob/main/personal-workflows/nangert/skills/stella-bump-version-staging-mr/SKILL.md)). Default in a promotion wave is MR-only.
 - **Double-bumping on re-run** → always apply the idempotency guard (source vs target version differ = already bumped).
-- **Missing servo-ui / callidus-bvs-ui** → both live in subgroups; the group listing without `include_subgroups` never returns them — they come from the always-include extras.
-- **Skipping the bpp/repos.md cross-check** → the filter+extras provably drift (2026-08-14: six repos missed, e.g. `brokernet-app`, `servo-hw-connector`). Always fetch the list and add its missing repos before probing; if unreachable, flag it in the preview instead of silently proceeding.
+- **Missing servo-ui / callidus-bvs-ui** → both live in subgroups; a group listing without `include_subgroups=true` never returns them (verified 2026-09-14: 57 projects, zero of them). They reach this skill as ordinary `bpp-project-index` manifest rows with subgroup-encoded `enc` values — never rebuild an encoded path from the repo name.
+- **Rebuilding the repo set here instead of reading the manifest** → the filter+extras provably drift from `bpp/repos.md` in both directions (2026-08-14: six repos missed, e.g. `brokernet-app`, `servo-hw-connector`; 2026-09-14: `bpp-cypress` and `bpp-db-migrator` in the group but not in the list). `bpp-project-index` does the union on every refresh — read it. If the manifest is stale or `#source` says `gitlab=unreachable`, flag it in the preview instead of silently proceeding.
 
 ## Red flags — STOP
 
 - About to call POST `/merge_requests` before showing preview → STOP, show preview first.
 - Compare API errored on a repo whose branches both exist → do NOT silently skip; abort with error.
 - About to label a staging→main MR `staging-deployment` (or vice versa) → STOP, check the direction table.
-- Considering creating an MR for a repo not matching the filter AND not in the always-include extras list → STOP, exclude it.
+- Considering creating an MR for a repo the manifest filter did not return → STOP, exclude it. Fix the classification in `bpp/repos.md` via `bpp-project-index`, never by special-casing a repo here.

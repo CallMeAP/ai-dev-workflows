@@ -77,16 +77,18 @@ means nothing degraded — say so explicitly rather than omitting it.>
   tell afterwards is what produced the wrong dismissal of 2026-09-09.
 - **A reviewer response that could not be parsed is a degradation, never "no findings".** Name the
   repo and the lens, and say whether the findings were recovered from prose.
-- If `bpp/repos.md` was unreachable, the report says the repo cross-check was skipped and the repo
-  set may be incomplete.
+- **The fleet list's provenance is always stated.** Copy the manifest's `#generated` and `#source`
+  lines into the degradations block whenever `#source` is not `gitlab=ok reposmd=ok`, or the manifest
+  is older than 24 h: "fleet list from a cached manifest of <timestamp>; repo set may be incomplete".
 - **A shared standards file that could not be fetched is a degradation, never a silent skip.** Name
   the file, the rule id it disabled, and how many repos of that kind went unchecked as a result. The
   run is still complete — those rules are additive, not the checklist (`rules-fetch.md` vs
   `shared-standards-fetch.md`) — but "0 findings" from a rule that never ran overstates coverage.
 - **The reverse delta is reported too.** Any audited repo the authoritative `bpp/repos.md` does not
-  name is listed as "in the group but not in `repos.md`: …" — the run found a gap in the list of
-  record, and it stays visible until someone fixes the list upstream. Measured 2026-09-09: three such
-  repos, two of them committed to that day (`references/discovery.md` §A1).
+  name — the manifest's `class=unlisted` rows — is listed as "in the group but not in `repos.md`: …",
+  and it stays visible until someone fixes the list upstream with `/bpp-project-index --write` (a user
+  action; this pipeline never writes to that repo). Measured 2026-09-09: three such repos, two of them
+  committed to that day; 2026-09-14: `bpp-cypress` and `bpp-db-migrator` (`references/discovery.md` §A1).
 
 ## Status file and notification
 

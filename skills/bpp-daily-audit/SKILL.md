@@ -160,11 +160,11 @@ report and queued first next run.
 
 - **Trusting `jq '.commits | length'` to detect a missing branch** — `null | length` is `0` in jq, so
   a missing branch reads as "no new commits". Probe branches explicitly first (`references/discovery.md`).
-- **Building the repo set from `project_index.md`** — its GitLab-only section is stale. The
-  authoritative repo list is **`bpp/repos.md`** in the knowledge repo; the repo set is that list
-  **unioned** with the GitLab group filter, because both drift (measured 2026-09-09: 5 repos only the
-  list has, 3 only the group has — two of those three committed that same day). Never one alone.
-  See `references/discovery.md` §A1.
+- **Deriving the repo set here** — discovery is delegated to **`bpp-project-index`**, which unions the
+  GitLab group listing with `bpp/repos.md` and publishes `~/.claude/bpp-fleet/manifest.tsv`. Both inputs
+  drift (measured 2026-09-09: 5 repos only the list has, 3 only the group has — two of those three
+  committed that same day; 2026-09-14: `bpp-cypress` and `bpp-db-migrator` still unlisted). Never one
+  alone, and never a second copy of the union logic in this skill. See `references/discovery.md` §A1.
 - **Auditing `bpp-audit-reports`** — self-audit loop. It is on the always-exclude list.
 - **Concluding "X was not changed" from a compare payload** — compare output is truncated on large
   ranges. Treat counts as a lower bound; read the raw file when it matters.

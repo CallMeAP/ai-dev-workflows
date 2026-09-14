@@ -20,6 +20,11 @@ human decides. Many `.wt-*` folders belong to **other agents working right now**
 - "clean up merged worktrees", "remove the stale `.wt-*` folders", "prune finished worktrees", "delete merged worktree branches"
 - After a batch of feature branches merged, to clear their worktrees + local branches in one pass
 
+**Discovery here is deliberately filesystem-driven, not `bpp-project-index`-driven.** The unit of work is
+a *worktree*, which exists only on disk and in `git worktree list` — no GitLab listing knows about it, so
+a manifest-driven loop could only ever be less complete. The one fleet fact it borrows is the
+`bpp-cca-connector-internal` exclusion (the index's `internal-temp` policy tag); the rest stays local.
+
 ## When NOT to Use
 
 - Removing a **single** known worktree → just `git worktree remove <path>` yourself

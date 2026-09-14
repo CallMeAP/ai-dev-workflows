@@ -9,7 +9,7 @@ description: Use when bumping the BPP.Shared.NET package version across all BPP 
 
 Single-command bulk update of the `<BppSharedVersion>` property in every BPP .NET consumer repo's `Directory.Build.props`, sourced from the **newest package by `created_at`** in the GitLab registry of `lipso/clients/brokernet/bpp-shared`.
 
-**The GitLab group is the source of truth for the consumer list** — a machine-local `find` over `~/Entwicklung/bpp/` misses consumers that aren't cloned on this machine (real precedent: `bpp-agent` existed only in GitLab and was silently missed by local-only discovery). Discovery therefore queries the `lipso/clients/brokernet/` group via `glab` (same pattern as bpp-promote-dev-to-staging), then:
+**The repo list comes from `bpp-project-index`, never from a machine-local `find`** — a `find` over `~/Entwicklung/bpp/` misses consumers that aren't cloned on this machine (real precedent: `bpp-agent` existed only in GitLab and was silently missed by local-only discovery). The index publishes the GitLab-side fleet, the `bpp/repos.md` cross-check and the local-checkout map as `~/.claude/bpp-fleet/manifest.tsv`; this skill filters that to `^bpp-` and then decides consumership itself (the `<BppSharedVersion>` probe below — that part is this skill's own and stays here). Then:
 
 - **Cloned repos** → local flow: pull, rewrite, commit, push (keeps local checkouts current).
 - **Not-cloned repos** → GitLab API commit directly on `development` (no repo is ever missed).
@@ -30,9 +30,9 @@ Conservative on edge cases: skip + report rather than auto-fix.
 | Commit message | `chore: bump bpp-shared to {version}` (identical for local and API commits) |
 | Push remote | `origin` |
 | Channel | newest package by `created_at` — **no suffix filter** (see step 1) |
-| Repo list | GitLab group `lipso/clients/brokernet/`, projects matching `^bpp-`, excluding `bpp-shared` and `bpp-cca-connector-internal` |
+| Repo list | `bpp-project-index` manifest: `state=active`, name matches `^bpp-`, tags ∌ `shared-source` (`bpp-shared`) and `internal-temp` (`bpp-cca-connector-internal`). Verified 2026-09-14 to reproduce the old group-listing set exactly — 24 repos. |
 | Consumer test | repo has a root-level `BPP.*/Directory.Build.props` on `development` containing `<BppSharedVersion>` (folder name varies — e.g. `BPP.DocumentAnalysis`, `BPP.Agent.NET`) |
-| Local clone path | `~/Entwicklung/bpp/{repo}` |
+| Local clone path | the manifest's `local_path` column (keyed on the `origin` URL, so a renamed folder is still found), `-` = no clone |
 
 ## Skip rules
 
@@ -53,7 +53,7 @@ Skipped repos do NOT abort the run. Continue to the next repo.
 The bump commit only ever touches `Directory.Build.props` — an unrelated local change must not block it. When a local clone is dirty on unrelated files, or a **targeted bump** ("bump bpp-file") hits a checkout that is dirty and/or on another branch: never stash, never switch, never touch the working tree. Instead commit via a throwaway detached worktree based on origin/development:
 
 ```bash
-repo_dir=~/Entwicklung/bpp/<repo>
+repo_dir="${LOCALPATH[$repo]}"        # manifest local_path — never a guessed ~/Entwicklung/bpp/<repo>
 W=$(mktemp -d)/wt-bump
 git -C "$repo_dir" fetch -q origin development
 git -C "$repo_dir" worktree add "$W" --detach origin/development
@@ -105,14 +105,19 @@ version while the run reports success. The only safe selector is recency plus th
 List `bpp-*` projects in the `lipso/clients/brokernet/` group, then probe each repo's root tree on `development` for a `BPP.*/Directory.Build.props` containing `<BppSharedVersion>`. Record the props path and current remote version per consumer.
 
 ```bash
-declare -A PROPSPATH REMOTEVER
+declare -A PROPSPATH REMOTEVER ENC LOCALPATH
 declare -a CONSUMERS NONCONSUMERS UNVERIFIED
 
-mapfile -t ALLREPOS < <(glab api "/groups/lipso%2Fclients%2Fbrokernet/projects?per_page=100&simple=true" \
-  | jq -r '.[] | select(.path | test("^bpp-")) | .path' | grep -vxE 'bpp-shared|bpp-cca-connector-internal' | sort)
+# Repo list + encoded paths + local checkouts: all from the bpp-project-index manifest.
+MANIFEST=~/.claude/bpp-fleet/manifest.tsv
+while IFS=$'\t' read -r repo enc lp; do
+  ENC[$repo]="$enc"; LOCALPATH[$repo]="$lp"; ALLREPOS+=("$repo")
+done < <(awk -F'\t' '!/^#/ && $6=="active" && $1 ~ /^bpp-/ && $5!~/shared-source|internal-temp/ \
+  {print $1 "\t" $3 "\t" $7}' "$MANIFEST" | LC_ALL=C sort)
+[ ${#ALLREPOS[@]} -gt 15 ] || { echo "FAIL — only ${#ALLREPOS[@]} repos; manifest stale or truncated" >&2; exit 1; }
 
 for repo in "${ALLREPOS[@]}"; do
-  enc="lipso%2Fclients%2Fbrokernet%2F${repo}"
+  enc="${ENC[$repo]}"
   tree=$(glab api "/projects/${enc}/repository/tree?ref=development&per_page=100" 2>/dev/null)
   if ! echo "$tree" | jq -e 'type=="array"' >/dev/null 2>&1; then
     UNVERIFIED+=("$repo"); continue
@@ -142,13 +147,18 @@ Non-consumers (no props / no `<BppSharedVersion>`) are expected: Java services (
 ```bash
 declare -a LOCAL_REPOS REMOTE_ONLY
 for repo in "${CONSUMERS[@]}"; do
-  if [ -e ~/Entwicklung/bpp/"$repo"/.git ]; then
+  if [ "${LOCALPATH[$repo]}" != "-" ] && [ -e "${LOCALPATH[$repo]}/.git" ]; then
     LOCAL_REPOS+=("$repo")
   else
     REMOTE_ONLY+=("$repo")
   fi
 done
 ```
+
+`local_path` is the manifest's, not a guessed `~/Entwicklung/bpp/{repo}` — it is keyed on the checkout's
+`origin` URL, so a repo whose folder was never renamed after a GitLab rename is still found. Guessing the
+path would classify it `REMOTE_ONLY` and API-commit behind a checkout that exists, which the red flags
+below forbid.
 
 ### 4. Local per-repo loop (cloned consumers)
 
@@ -157,7 +167,7 @@ For each repo in `LOCAL_REPOS`, in sequence:
 ```bash
 declare -a UPDATED UPDATED_API UPTODATE SKIPPED
 for repo in "${LOCAL_REPOS[@]}"; do
-  repo_dir=~/Entwicklung/bpp/"$repo"
+  repo_dir="${LOCALPATH[$repo]}"
   props="${repo_dir}/${PROPSPATH[$repo]}"
 
   # (1) cleanliness + branch
@@ -293,7 +303,7 @@ UNVERIFIED — could not inspect, possible missed consumers (N):
   original selector; it broke silently on 2026-09-11 when bpp-shared stopped suffixing its packages, quietly
   handing back the second-newest version. Select by recency + package name only, and parse the commit from
   the `+` build metadata (`SHA=${LATEST##*+}`). The same applies to any future scheme change.
-- **Local-only `find` discovery** → misses consumers that aren't cloned on this machine (`bpp-agent` precedent). The GitLab group listing is the authoritative repo set; local `find` is not a substitute.
+- **Local-only `find` discovery** → misses consumers that aren't cloned on this machine (`bpp-agent` precedent). The `bpp-project-index` manifest is the authoritative repo set; a local `find` is not a substitute. Equally: do not rebuild the group listing here — the index already unions it with `bpp/repos.md`.
 - **API-bumping a repo that has a local clone** → never. Local clone present = local flow (or detached-worktree fallback) only; an API commit would silently diverge the user's checkout.
 - **Letting an unrelated dirty file block a bump** → the bump touches only `Directory.Build.props`; use the detached-worktree fallback instead of skipping (skip only when the props file itself is dirty).
 - **Silently dropping repos whose tree/props fetch failed** → report them under `UNVERIFIED` in the summary; they are exactly the "incomplete bump" risk this design exists to prevent.
@@ -317,7 +327,7 @@ UNVERIFIED — could not inspect, possible missed consumers (N):
 - About to push without a successful `pull --ff-only` → STOP. Skip the repo.
 - `LATEST` is empty or `null` → STOP. Abort the whole run; do not continue with a blank version.
 - `LATEST` is not the top row of the registry listing → STOP. A filter is dropping the newest package; fix the selector before bumping anything.
-- About to POST an API commit for a repo that exists under `~/Entwicklung/bpp/` → STOP. Local clones use the local flow only.
+- About to POST an API commit for a repo whose manifest `local_path` is not `-` → STOP. Local clones use the local flow only.
 - About to POST an API commit whose content is empty, unchanged, or missing `LATEST` → STOP. The rewrite failed; skip the repo.
 - About to commit a change to a file that does not contain `<BppSharedVersion>` → STOP. The discovery filter failed; do not write.
 - About to use `git push --force` → STOP. Never force-push from this skill.

@@ -4,92 +4,78 @@
 
 Working dir for the run: `WORK=$(mktemp -d)`. Run id: `RUN_ID=$(date +%Y-%m-%d-%H%M)`.
 
-## A1. Repo map
+## A1. Repo map — from `bpp-project-index`, not derived here
 
-Identical discovery to `bpp-promote-dev-to-staging` — that logic is proven; do not invent a new one.
+**Discovery is delegated.** `bpp-project-index` owns the group listing, the `bpp/repos.md` cross-check,
+the subgroup-encoded paths and the always-exclude list, and publishes them as
+`~/.claude/bpp-fleet/manifest.tsv`. Invoke it at the top of Phase A (read-only refresh, ~7 s), then
+filter. Do not rebuild any of it here — two copies of this logic is how the fleet set drifts.
 
-```bash
-declare -A ENC
-
-# filtered repos in the brokernet group
-while read -r repo; do
-  ENC[$repo]="lipso%2Fclients%2Fbrokernet%2F${repo}"
-done < <(glab api "/groups/lipso%2Fclients%2Fbrokernet/projects?per_page=100&simple=true" \
-  | jq -r '.[] | select(.path | test("^(bpp-|brokernet-.*-ui$)")) | .path')
-
-# always-include extras (filter misses them / live in subgroups)
-ENC[brokernet-document-cms]="lipso%2Fclients%2Fbrokernet%2Fbrokernet-document-cms"
-ENC[callidus-bvs-ui]="lipso%2Fclients%2Fbrokernet%2Fcallidus%2Fcallidus-bvs-ui"
-ENC[servo-ui]="lipso%2Fclients%2Fbrokernet%2Fservo%2Fservo-ui"
-```
-
-### `bpp/repos.md` — the authoritative repo list, cross-checked against the group filter
-
-`bpp/repos.md` in the knowledge repo is **the fleet's repo list of record** — the only human-curated
-inventory of what belongs to BPP / Brokernet. It is fetched on every run and everything it names is
-audited.
-
-It is **not** used as the *sole* source, and that is deliberate: the drift runs in **both**
-directions, measured 2026-09-09 on a live fleet listing.
-
-| Direction | Count | Repos |
-|---|---|---|
-| in `repos.md`, missed by filter + extras | 5 | `brokernet-fiab-connector`, `brokernet-file-scanner`, `brokernet-varias-sign`, `docling-sidecar`, `servo-hw-connector` |
-| in the group, **missing from `repos.md`** | 3 | `bpp-arag-connector`, `bpp-external-mail-connector`, `bpp-partner-api-guide` |
-
-The three `repos.md` does not list are not dormant: **`bpp-arag-connector` and
-`bpp-external-mail-connector` both had commits on 2026-09-09**, making them among the most active
-repos in the fleet. Dropping the group filter would silently un-audit them — the exact failure this
-pipeline cannot detect afterwards. Keep the union.
-
-(The filter also surfaces `bpp-audit-reports` and `bpp-shared-template`; both are on the
-always-exclude list below and are correctly absent from `repos.md`.)
+The audit's set is: `state=active`, tags ∌ `internal-temp,generated-output,scaffold`, and
+`class ∈ {backend, frontend, docs}` **or** (`class=unlisted` and name matches `^bpp-|^brokernet-.*-ui$`).
+Verified 2026-09-14 to reproduce the previous filter + extras + cross-check + always-exclude set
+**exactly** — 34 repos, zero drift.
 
 ```bash
-glab api "projects/lipso%2Finternal%2Fagentic-coding-knowledge/repository/files/bpp%2Frepos.md/raw?ref=main" > "$WORK/repos.md"
-rows=0
-: > "$WORK/reposmd-names.txt"
-while IFS='|' read -r _ name link _; do
-  name=$(echo "$name" | xargs); link=$(echo "$link" | xargs)
-  [[ "$link" == https://gitlab.com/* ]] || continue
-  rows=$((rows+1)); echo "$name" >> "$WORK/reposmd-names.txt"
-  path=${link#https://gitlab.com/}
-  [ -z "${ENC[$name]:-}" ] && ENC[$name]=$(printf %s "$path" | sed 's#/#%2F#g')
-done < <(grep -E '^\|[^|]+\| *https://gitlab.com/' "$WORK/repos.md")
+MANIFEST=~/.claude/bpp-fleet/manifest.tsv
+declare -A ENC LOCALPATH
+while IFS=$'\t' read -r repo enc lp; do
+  ENC[$repo]="$enc"; LOCALPATH[$repo]="$lp"
+done < <(awk -F'\t' '!/^#/ && $6=="active" && $5!~/internal-temp|generated-output|scaffold/ \
+  && ($4=="backend" || $4=="frontend" || $4=="docs" || ($4=="unlisted" && $1 ~ /^bpp-|^brokernet-.*-ui$/)) \
+  {print $1 "\t" $3 "\t" $7}' "$MANIFEST")
 
-# report the reverse delta so repos.md's staleness is visible and someone fixes it upstream
-for r in "${!ENC[@]}"; do
-  grep -qx "$r" "$WORK/reposmd-names.txt" || echo "NOT IN repos.md: $r"
-done
+[ ${#ENC[@]} -gt 20 ] || { echo "FATAL: only ${#ENC[@]} repos in the fleet set"; exit 1; }
+grep -m1 '^#source' "$MANIFEST"   # goes in the report verbatim
 ```
 
-**Its links are on the current namespace.** Every row reads
-`https://gitlab.com/lipso/clients/brokernet/<repo>` (subgroup rows
-`.../brokernet/servo/servo-ui`, `.../brokernet/callidus/callidus-bvs-ui`). All 34 links were
-modernized on 2026-09-11 and each was confirmed against `/projects/<encoded>` at its new path, so
-the GitLab redirect from the old `brokernet/` namespace is **no longer load-bearing** here.
+**A truncated repo set is the one degradation this pipeline cannot detect afterwards** — an un-audited
+repo looks exactly like a clean one. Hence the hard floor, and hence the `#source`/`#generated` lines go
+into the report on every run.
 
-The derivation itself is unchanged and still mandatory: take the encoded path from the `Link`
-column, never from the repo name — subgroups (`servo/`, `callidus/`) still exist, so
-`lipso%2Fclients%2Fbrokernet%2F${repo}` remains wrong for `servo-ui`, `servo-hw-connector` and
-`callidus-bvs-ui`.
+### Why the union still matters (the index does it, the report still names it)
 
-If the fetch fails or `rows` is 0, **say so loudly in the report** ("repo cross-check skipped — list
-unreachable") and continue with filter + extras. Never silently pretend the check ran. The reverse
-delta goes in the report too, as "in the group but not in `repos.md`: …" — a run that discovers a
-repo the list of record does not name has found a gap in the list, and saying nothing lets it rot.
+Both inputs drift, in both directions. Measured on live listings:
 
-### Always-exclude
+| Direction | When | Count | Repos |
+|---|---|---|---|
+| in `repos.md`, missed by a name filter + extras | 2026-09-09 | 5 | `brokernet-fiab-connector`, `brokernet-file-scanner`, `brokernet-varias-sign`, `docling-sidecar`, `servo-hw-connector` |
+| in the group, **missing from `repos.md`** | 2026-09-09 | 3 | `bpp-arag-connector`, `bpp-external-mail-connector`, `bpp-partner-api-guide` (all three since added to the list) |
+| in the group, **missing from `repos.md`** | 2026-09-14 | 2 active product repos | `bpp-cypress`, `bpp-db-migrator` |
 
-```bash
-for x in bpp-cca-connector-internal bpp-shared-template bpp-audit-reports; do unset "ENC[$x]"; done
-```
+`bpp-arag-connector` and `bpp-external-mail-connector` both had commits on 2026-09-09, making them among
+the most active repos in the fleet while the list of record did not name them. That is why the
+`class=unlisted` clause is in the filter: dropping it un-audits exactly those repos.
 
-- `bpp-cca-connector-internal` — temporary internal repo, excluded from all automated sweeps.
-- `bpp-shared-template` — scaffolding, no product code.
-- `bpp-audit-reports` — the run's own output repo; auditing it is a self-audit loop.
+**Report the reverse delta every run.** The index prints it; carry it into the report as "in the group
+but not in `repos.md`: …". A run that discovers a repo the list of record does not name has found a gap
+in the list, and saying nothing lets it rot. Fixing it is `/bpp-project-index --write`, a user action —
+**the audit never writes to `agentic-coding-knowledge`** (non-negotiable; that repo is read-only to this
+pipeline).
 
-The exclusions run **after** the cross-check, or the cross-check re-adds them.
+### Encoded paths
+
+Always `${ENC[$repo]}` from the manifest, never `lipso%2Fclients%2Fbrokernet%2F${repo}` — subgroups
+(`servo/`, `callidus/`) make the derived form wrong for `servo-ui`, `servo-hw-connector` and
+`callidus-bvs-ui`. All 34 `repos.md` links were modernized to the current namespace on 2026-09-11 and
+confirmed against `/projects/<encoded>`, so the old `brokernet/` redirect is no longer load-bearing.
+
+### Always-exclude (owned by the index as policy tags)
+
+- `bpp-cca-connector-internal` (`internal-temp`) — temporary internal repo, excluded from all sweeps.
+- `bpp-shared-template` (`scaffold`) — scaffolding, no product code.
+- `bpp-audit-reports` (`generated-output`) — this run's own output repo; auditing it is a self-audit loop.
+
+The tags are labels, not a filter: the promotion sweep deliberately keeps `scaffold`. The exclusion is
+applied by the `awk` above, after the union — never before it, or the cross-check re-adds them.
+
+### Degraded
+
+If the manifest's `#source` says `gitlab=unreachable`, or the manifest is older than 24 h, the run
+**continues on the last good manifest** and the report names it as a degradation
+("fleet list from a cached manifest of <timestamp>"). If there is no manifest at all, that is a
+`rules.md`-class abort: a repo set of unknown completeness is not a lighter audit, it is an unreported
+one.
 
 ## A2. Branch probe, then compare
 
@@ -329,7 +315,7 @@ fetch_shared "angular/CLAUDE.md" "$WORK/shared-angular-claudemd.md" \
 - **Read-only, and never written to.** The audit's own outputs go to `bpp-audit-reports`. That
   checkout is a user working tree with unrelated dirty files — read it through
   `git show origin/main:`, never `cat`, never `pull`, never a branch switch (non-negotiable #5).
-- **`bpp/repos.md` is already fetched in §A1.** Do not fetch it twice.
+- **`bpp/repos.md` is handled by `bpp-project-index` in §A1** — its rows become the manifest's `class` column. Do not fetch it again here.
 - **`personal-workflows/**` is out of scope** — individual developers' own setups, never fleet
   standards. Never fetched, never passed to a lens, never cited by a finding.
 - **Unreachable degrades, it does not abort** — unlike `rules.md`. The rule is *skipped* for the run
@@ -353,8 +339,12 @@ git -C "$LOCAL" fetch --quiet origin
 git -C "$LOCAL" show "origin/${br}:${path}"
 ```
 
-For a repo with no local checkout (resolve paths via `project_index.md`, lookup only — never trigger
-its refresh):
+A repo's checkout is `${LOCALPATH[$repo]}` from the manifest (`-` = not cloned). Never guess
+`~/Entwicklung/bpp/<repo>`: the path is keyed on the checkout's `origin` URL, and two repos on this
+machine sit in folders that do not match their name (`bpp-stella-ui` → `brokernet-app`,
+`brokernet-file-scanner` → `scan-backend`).
+
+For a repo with `local_path = -`:
 
 ```bash
 glab api "/projects/${enc}/repository/files/$(printf %s "$path" | jq -sRr @uri)/raw?ref=${sha}"

@@ -24,6 +24,15 @@ Update `development` in all local BPP repos under `~/Entwicklung/bpp/`. Never lo
 
 All directories in `~/Entwicklung/bpp/` that contain `.git`. Known non-repos / excluded: `bpp-to-dos` (not git), `infra`, `*.worktrees` (worktree containers — never pull these), `bpp-cca-connector-internal` (temporary internal repo, slated for removal/merge — excluded from automated sweeps; it sits permanently on a feature branch, so the generic off-branch skip would surface it as a recurring "action needed" line on every run). Exact-name exclusion — `bpp-cca-connector` stays in.
 
+**Why the filesystem scan stays here and is NOT replaced by the `bpp-project-index` manifest:** this
+loop's job is "pull everything checked out on this machine", and for that the filesystem is complete by
+construction. A manifest-driven loop would silently skip a repo that was cloned after the last refresh —
+failing quietly in the one direction that matters. The index still contributes two things:
+
+- the **exclusion rationale** is fleet policy owned by the index (`bpp-cca-connector-internal` carries
+  the `internal-temp` tag there); this list mirrors it, it does not invent it;
+- the **reverse delta** — fleet repos with no checkout at all — comes from the manifest in step 6.
+
 ### 2. Pull loop (safe by construction)
 
 Per repo, in order:
@@ -122,6 +131,25 @@ Skipped (current anyway):
 Skipped (action needed):
   bpp-vera-connector  dirty, 3 behind — incoming touches appsettings.local.json → offer stash-pull-pop
 ```
+
+### 6. Fleet coverage (offline manifest read)
+
+A pull loop can only pull what is cloned. Close the report with what is **not**:
+
+```bash
+MANIFEST=~/.claude/bpp-fleet/manifest.tsv
+if [ -s "$MANIFEST" ]; then
+  missing=$(awk -F'\t' '!/^#/ && $7=="-" && $6=="active" && $4!~/^(infra|unlisted)$/ {print "  " $1}' "$MANIFEST")
+  [ -n "$missing" ] && { echo "Fleet repos with no local checkout (nothing to pull):"; echo "$missing";
+                         echo "  → /bpp-project-index --clone"; }
+  echo "(fleet list: $(grep -m1 '^#generated' "$MANIFEST"))"
+else
+  echo "(no fleet manifest — run /bpp-project-index to see which repos are missing locally)"
+fi
+```
+
+This is a **read of a cached file — no network, no writes.** If the manifest is absent or stale, say so
+and move on; it never blocks or fails the pull run.
 
 ## Common Mistakes
 

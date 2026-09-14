@@ -67,17 +67,23 @@ bpp-cca-connector-internal). Those are **unresolvable** — report them, never g
 
 ### 1. Resolve the stage's shared commit (fleet max, report disagreement)
 
-Read the pin from every `bpp-*` consumer on the target stage. Folder under the repo root varies
-(`BPP.Backend.NET`, `BPP.Push.NET`, `BPP.DocumentAnalysis`, …) — probe root tree dirs matching
-`^BPP\.`, take the first whose props contains `<BppSharedVersion>`.
+Read the pin from every `bpp-*` consumer on the target stage. The checkout list comes from the
+`bpp-project-index` manifest (column 7, `local_path`) — **not** from a `~/Entwicklung/bpp/*/` glob: the
+manifest is keyed on each checkout's `origin` URL, so a repo whose folder name no longer matches the
+GitLab project is still found, and worktree containers / non-repos are already filtered out. Only
+`bpp-shared` itself is excluded (it is the source, not a consumer); `bpp-cca-connector-internal` stays
+**in** — it is one of the repos whose old pins this skill exists to report.
+
+Folder under the repo root varies (`BPP.Backend.NET`, `BPP.Push.NET`, `BPP.DocumentAnalysis`, …) —
+probe root tree dirs matching `^BPP\.`, take the first whose props contains `<BppSharedVersion>`.
 
 ```bash
 STAGE=staging
+MANIFEST=~/.claude/bpp-fleet/manifest.tsv
 declare -A PIN
 NOPIN=()
-for d in ~/Entwicklung/bpp/*/; do
-  r=$(basename "$d"); case "$r" in *worktrees*|infra|bpp-shared) continue;; esac
-  [ -d "$d/.git" ] || continue
+# name TAB local_path for every cloned bpp-* repo except bpp-shared
+while IFS=$'\t' read -r r d; do
   git -C "$d" fetch -q origin "$STAGE" 2>/dev/null || continue
   git -C "$d" rev-parse --verify -q "origin/$STAGE" >/dev/null || continue
   for dir in $(git -C "$d" ls-tree --name-only "origin/$STAGE" | grep '^BPP\.'); do
@@ -89,7 +95,8 @@ for d in ~/Entwicklung/bpp/*/; do
     [ -n "$v" ] && { PIN[$r]="$v"; break; }
   done
   [ -n "${PIN[$r]:-}" ] || NOPIN+=("$r")
-done
+done < <(awk -F'\t' '!/^#/ && $6=="active" && $1 ~ /^bpp-/ && $5!~/shared-source/ && $7!="-" \
+  {print $1 "\t" $7}' "$MANIFEST")
 for r in "${!PIN[@]}"; do printf '%-32s %s\n' "$r" "${PIN[$r]}"; done | sort
 
 # Fail loudly instead of reducing over a silently-truncated set.
