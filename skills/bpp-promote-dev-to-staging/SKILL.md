@@ -34,7 +34,7 @@ as `~/.claude/bpp-fleet/manifest.tsv`. Invoke it first (read-only refresh, ~7 s)
 
 The promotion candidate set is:
 
-> `state=active`, tags ∌ `internal-temp,generated-output`, and
+> `state=active`, tags ∌ `internal-temp,generated-output,excluded-manual`, and
 > `class ∈ {backend, frontend, docs}` **or** (`class=unlisted` and name matches `^bpp-|^brokernet-.*-ui$`)
 
 Verified 2026-09-14: this reproduces the old filter + extras + cross-check set **exactly** — 35 repos,
@@ -46,6 +46,12 @@ skills:
 - **`bpp-cca-connector-internal`** (tag `internal-temp`) — temporary internal repo, slated for
   removal/merge, excluded from automated sweeps. Exact-name exclusion: `bpp-cca-connector` is a separate,
   real repo and stays in.
+- **`servo-backend`** (tag `excluded-manual`) — excluded by user decision 2026-09-18. Its
+  `development`→`staging` diff is 2024 legacy (`development` idle since 2024-12-11, `staging` since
+  2024-05-24) and its `build` job fails on a pre-existing CI defect unrelated to the promotion content:
+  `invalid tag "…/servo-backend/:4.0.0": invalid reference format` — an unset image-name variable. The
+  sweep opened MR !2 from it, which was then closed. **Do not re-open it**; re-including the repo means
+  fixing that CI first. `servo-ui` and `servo-hw-connector` stay in scope.
 - **`bpp-audit-reports`** (tag `generated-output`) — generated output of the `bpp-daily-audit` skill
   (reports, escalations, finding ledger). Single `main` branch, no product code, never promoted.
 - **`brokernet-document-cms`, `callidus-bvs-ui`, `servo-ui`** — the former "always-include extras". The
@@ -126,7 +132,7 @@ MANIFEST=~/.claude/bpp-fleet/manifest.tsv
 declare -A ENC
 while IFS=$'\t' read -r repo enc; do
   ENC[$repo]="$enc"
-done < <(awk -F'\t' '!/^#/ && $6=="active" && $5!~/internal-temp|generated-output/ \
+done < <(awk -F'\t' '!/^#/ && $6=="active" && $5!~/internal-temp|generated-output|excluded-manual/ \
   && ($4=="backend" || $4=="frontend" || $4=="docs" || ($4=="unlisted" && $1 ~ /^bpp-|^brokernet-.*-ui$/)) \
   {print $1 "\t" $3}' "$MANIFEST")
 

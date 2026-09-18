@@ -39,10 +39,17 @@ Other BPP .NET repos likely follow the same pattern. Run discovery to confirm.
 find . -name "*.csproj" \( -path "*Tests*" -o -path "*IntegrationTests*" \) -not -path "*/bin/*" -not -path "*/obj/*"
 
 # Confirm which contain integration tests
-grep -rlnE 'Category\("(Local)?Integration"|Category\(IntegrationTestCategories\.' --include="*.cs" <test-project-dir>
+grep -rlnE 'Category\("(Local)?Integration"|Category\((E2eTestCategories|IntegrationTestCategories)\.' --include="*.cs" <test-project-dir>
 ```
 
-Build the working set: csproj files whose source contains an integration category. CAUTION: bpp-backend module suites tag via the CONSTANT `[Category(IntegrationTestCategories.Integration)]` — a grep for the literal `Category("Integration")` misses all 8 of them (Backoffice/Contract/Customer/GoUser/News/Products/Rahmenvereinbarung/Tenant; proven blind spot 2026-07-13). The `--filter "Category=Integration"` at run time works either way (it matches the resolved value).
+Build the working set: csproj files whose source contains an integration category. CAUTION: most suites tag via a CONSTANT, not a literal, and **there are TWO constant classes** — a grep for only one of them silently classifies whole repos as "no e2e tests".
+
+- **`E2eTestCategories` is the majority and the one bpp-backend uses** — measured 2026-09-18 across the fleet: 959 uses vs 219. All 8 bpp-backend module suites (Backoffice/Contract/Customer/GoUser/News/Products/Rahmenvereinbarung/Tenant) tag `[Category(E2eTestCategories.Integration)]`, as do bpp-auth, bpp-chat, bpp-push, bpp-stella, bpp-file, bpp-cheggnet-connector, bpp-arag-connector, bpp-external-mail-connector and bpp-id-austria-connector. Grepping only `IntegrationTestCategories\.` would have reported **no e2e tests in nine repos plus all of bpp-backend** (proven blind spot 2026-09-18; the earlier 2026-07-13 blind spot was the same bug against the literal).
+- **`IntegrationTestCategories` still exists** (bpp-vera-connector references it alongside the other; the class itself survives in bpp-cca-connector-internal), so keep matching both names.
+
+Note `BPP.Backend.NET.IntegrationTesting.Shared/E2eTestCategories.cs` declares only `Integration` — its own doc says `LocalIntegration` is gone fleet-wide there. Other repos still carry `LocalIntegration`, so the OR-filter below stays required.
+
+The `--filter "Category=Integration"` at run time works with either constant (it matches the resolved value); this is a DISCOVERY-phase trap only.
 
 ### 2. Repo-specific prereq checks
 
@@ -107,7 +114,7 @@ For each discovered project:
 dotnet test <project>.csproj --filter "Category=Integration|Category=LocalIntegration" --logger "console;verbosity=normal" --nologo
 ```
 
-**Both categories, always (blind spot proven 2026-08-14):** bpp-auth, bpp-chat, bpp-push, bpp-stella and bpp-id-austria tag their e2e EXCLUSIVELY as `[Category(IntegrationTestCategories.LocalIntegration)]`; bpp-file and bpp-cheggnet use BOTH categories. A run filtered only on `Category=Integration` reports "No test matches" in those five repos and the fleet summary looks green while ZERO e2e ran. The OR-filter above matches either tag. **Zero-match guard:** if a discovered project reports "No test matches the given testcase filter", that is a filter problem, not "repo has no e2e" — grep `IntegrationTestCategories\.` in the project and fix the filter before classifying.
+**Both categories, always — but the reason has REVERSED (re-measured 2026-09-18).** The 2026-08-14 note said bpp-auth, bpp-chat, bpp-push, bpp-stella and bpp-id-austria tagged their e2e EXCLUSIVELY as `LocalIntegration`. **That is no longer true and the opposite is now the case:** those five, plus bpp-file and bpp-cheggnet-connector, have **zero** `LocalIntegration` attribute usages left and tag everything `[Category(E2eTestCategories.Integration)]` (bpp-auth 16, bpp-chat 8, bpp-push 3, bpp-stella 34, bpp-id-austria 6, bpp-file 20, bpp-cheggnet 5). `E2eTestCategories` does not even declare `LocalIntegration` — its own doc says the split "was never technical, only a second label for the same 'needs a running stack' tests". Keep the OR-filter anyway: it costs nothing, and it defends against a repo re-introducing the tag. Do NOT conclude from the old wording that an `Category=Integration`-only run misses those repos — today it catches all of them. **Zero-match guard:** if a discovered project reports "No test matches the given testcase filter", that is a filter problem, not "repo has no e2e" — grep `(E2eTestCategories|IntegrationTestCategories)\.` in the project and fix the filter before classifying.
 
 Capture: pass/fail counts, names of failed tests, full stack traces.
 
@@ -153,7 +160,7 @@ Leave any test edits unstaged for the user to review.
 
 | Step | Command |
 |---|---|
-| Discover | `grep -rlnE 'Category\("(Local)?Integration"|Category\(IntegrationTestCategories\.' --include="*.cs"` |
+| Discover | `grep -rlnE 'Category\("(Local)?Integration"|Category\((E2eTestCategories|IntegrationTestCategories)\.' --include="*.cs"` — BOTH constant names |
 | Migrations | diff `origin/development` migrations vs `__EFMigrationsHistory`, apply pending, re-check empty |
 | Start stack | invoke `bpp-start-local-stack` skill |
 | Run | `dotnet test X.csproj --filter "Category=Integration|Category=LocalIntegration"` |
@@ -176,7 +183,7 @@ Leave any test edits unstaged for the user to review.
 - **Forcing `[Explicit]` tests to run** — they are opt-in for a reason.
 - **Looping indefinitely** — respect the 3-run cap.
 - **Committing fixes silently** — never. Leave changes for user review.
-- **Grepping only the literal `Category("Integration")`** → misses suites tagged via the `IntegrationTestCategories` constant (all 8 bpp-backend module e2e suites) — they silently get classified unit-only and never run.
+- **Grepping only the literal `Category("Integration")`, or only ONE constant class** → misses suites tagged via a constant. There are two: `E2eTestCategories` (the majority, 959 uses — all 8 bpp-backend module suites plus nine connector/service repos) and `IntegrationTestCategories` (219). Matching only the latter classified nine repos and all of bpp-backend as unit-only in a 2026-09-18 sweep. Always match both names.
 - **Filtering only `Category=Integration` at run time** → five repos (auth, chat, push, stella, id-austria) tag e2e exclusively as `LocalIntegration`; the run prints "No test matches" and the repo false-greens with zero tests executed (proven 2026-08-14 fleet run). Always use the OR-filter and treat any zero-match as a filter bug.
 - **Running every e2e suite at once / back-to-back** (`dotnet test <sln>`) → bursts bpp-auth logins → mass `OneTimeSetUp` 429s that look like a regression but aren't. Space suites ≥60s (see Step 4).
 - **Treating a worktree suite's missing-gitignored-config `OneTimeSetUp` failures as a regression** → gitignored local test-config does not travel into a worktree (tracked files only); copy it from the main checkout first (see Worktree runs). Signatures: stella `FileNotFoundException` (firebase-e2e.local.json), file `MinIO-Passwort fehlt` (appsettings.local.json).

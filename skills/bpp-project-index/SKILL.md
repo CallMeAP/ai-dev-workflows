@@ -98,6 +98,7 @@ and `#extra <name> <path>` for *additional* checkouts of a repo that already has
 | `generated-output` | `bpp-audit-reports` | generated output of `bpp-daily-audit` (reports, escalations, ledger). Single `main` branch, no product code — never promoted, and auditing it is a self-audit loop. |
 | `scaffold` | `bpp-shared-template` | template projects, no product code. Excluded by the audit; the promotion sweep keeps it and reports "no staging branch". |
 | `shared-source` | `bpp-shared` | the source of `BPP.Shared.NET`, not a consumer of it. |
+| `excluded-manual` | `servo-backend` | excluded from every automated sweep by user decision 2026-09-18. Its `development`→`staging` diff is 2024 legacy (dev idle since 2024-12-11, staging since 2024-05-24) and its build job fails on a pre-existing CI defect — `invalid tag "…/servo-backend/:4.0.0": invalid reference format`, an unset image-name variable. A promotion sweep re-opened MR !2 from it; that MR was closed. Re-including it means fixing the repo's CI first. `servo-ui` and `servo-hw-connector` are NOT excluded. |
 
 A tag is a *label*, not a filter. Each consumer excludes the tags that matter to it — the sets differ,
 and flattening them into one boolean would silently change three skills' behaviour.
@@ -106,14 +107,14 @@ and flattening them into one boolean would silently change three skills' behavio
 
 | Skill | Filter | Set size |
 |---|---|---|
-| `bpp-promote-dev-to-staging` | `state=active`, tags ∌ `internal-temp,generated-output`, and `class ∈ {backend,frontend,docs}` **or** (`class=unlisted` and name matches `^bpp-|^brokernet-.*-ui$`) | 35 |
-| `bpp-daily-audit` | same, plus tags ∌ `scaffold` | 34 |
+| `bpp-promote-dev-to-staging` | `state=active`, tags ∌ `internal-temp,generated-output,excluded-manual`, and `class ∈ {backend,frontend,docs}` **or** (`class=unlisted` and name matches `^bpp-|^brokernet-.*-ui$`) | 37 (re-measured 2026-09-18; was 38 before `servo-backend` was excluded — the old "35" dates from 2026-09-14 and the fleet has grown since) |
+| `bpp-daily-audit` | same, plus tags ∌ `scaffold` | 37 — same as promote, not a typo: the only `scaffold` repo (`bpp-shared-template`) is `class=infra` and is already dropped by the class filter |
 | `bpp-bump-shared-version` | `state=active`, name matches `^bpp-`, tags ∌ `shared-source,internal-temp` | 24 |
 
 ```bash
 MANIFEST=~/.claude/bpp-fleet/manifest.tsv
 # promote / audit candidate set → name TAB enc
-awk -F'\t' '!/^#/ && $6=="active" && $5!~/internal-temp|generated-output/ \
+awk -F'\t' '!/^#/ && $6=="active" && $5!~/internal-temp|generated-output|excluded-manual/ \
   && ($4=="backend" || $4=="frontend" || $4=="docs" || ($4=="unlisted" && $1 ~ /^bpp-|^brokernet-.*-ui$/)) \
   {print $1 "\t" $3}' "$MANIFEST"
 ```
@@ -177,6 +178,7 @@ LC_ALL=C sort -o "$WORK/local.tsv" "$WORK/local.tsv"
 policy_tags() {
   case "$1" in
     bpp-cca-connector-internal) echo internal-temp ;;
+    servo-backend)              echo excluded-manual ;;
     bpp-audit-reports)          echo generated-output ;;
     bpp-shared-template)        echo scaffold ;;
     bpp-shared)                 echo shared-source ;;
