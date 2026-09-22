@@ -22,8 +22,7 @@ human decides. Many `.wt-*` folders belong to **other agents working right now**
 
 **Discovery here is deliberately filesystem-driven, not `bpp-project-index`-driven.** The unit of work is
 a *worktree*, which exists only on disk and in `git worktree list` — no GitLab listing knows about it, so
-a manifest-driven loop could only ever be less complete. The one fleet fact it borrows is the
-`bpp-cca-connector-internal` exclusion (the index's `internal-temp` policy tag); the rest stays local.
+a manifest-driven loop could only ever be less complete.
 
 ## When NOT to Use
 
@@ -88,7 +87,6 @@ add_cand() {
   case "$p" in "$BASE"/*) ;; *) return;; esac      # must live under BASE (skips /tmp scratchpad worktrees)
   case "$p" in */.claude/worktrees/*) ;;           # Claude Code-managed: IN scope, but gated by the idle check below
                 */.claude/*) return;; esac          # any other .claude/ internals — never a worktree, skip
-  case "$p" in *bpp-cca-connector-internal*) return;; esac   # temporary internal repo, slated for removal/merge — excluded from automated sweeps (substring keeps `bpp-cca-connector` in scope)
   [ -n "${SEEN[$p]:-}" ] && return; SEEN[$p]=1; CANDS+=("$p")
 }
 # (a) stray .wt-* dirs directly under BASE (catches dirs whose worktree registration was pruned)

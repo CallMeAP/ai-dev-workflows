@@ -60,8 +60,7 @@ sha=${version##*+}          # everything after the last '+' — works for both s
 [ "$sha" = "$version" ] && { echo "no +sha metadata in '$version'"; }   # pre-metadata pin → STOP
 ```
 
-Some very old pins carry no `+sha` at all (e.g. `2026.8.16-development` in
-bpp-cca-connector-internal). Those are **unresolvable** — report them, never guess a commit.
+Some very old pins carry no `+sha` at all (e.g. `2026.8.16-development`). Those are **unresolvable** — report them, never guess a commit.
 
 ## Workflow
 
@@ -71,8 +70,7 @@ Read the pin from every `bpp-*` consumer on the target stage. The checkout list 
 `bpp-project-index` manifest (column 7, `local_path`) — **not** from a `~/Entwicklung/bpp/*/` glob: the
 manifest is keyed on each checkout's `origin` URL, so a repo whose folder name no longer matches the
 GitLab project is still found, and worktree containers / non-repos are already filtered out. Only
-`bpp-shared` itself is excluded (it is the source, not a consumer); `bpp-cca-connector-internal` stays
-**in** — it is one of the repos whose old pins this skill exists to report.
+`bpp-shared` itself is excluded (it is the source, not a consumer).
 
 Folder under the repo root varies (`BPP.Backend.NET`, `BPP.Push.NET`, `BPP.DocumentAnalysis`, …) —
 probe root tree dirs matching `^BPP\.`, take the first whose props contains `<BppSharedVersion>`.

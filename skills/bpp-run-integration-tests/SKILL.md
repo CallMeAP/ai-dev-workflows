@@ -1,6 +1,6 @@
 ---
 name: bpp-run-integration-tests
-description: Use when user wants to run end-to-end / integration tests in a BPP .NET repo and auto-heal failures — phrases like "run integration tests", "run e2e tests", "are integration tests green", "fix failing integration tests", "check integration tests". Discovers test projects, starts the local stack via bpp-start-local-stack, runs `dotnet test --filter "Category=Integration|Category=LocalIntegration"`, and on failure investigates recent commits in cwd + bpp-shared before stopping for user input. Always skips bpp-document-analysis (aka bpp-doci), bpp-agent and bpp-cca-connector-internal entirely (no unit, no e2e).
+description: Use when user wants to run end-to-end / integration tests in a BPP .NET repo and auto-heal failures — phrases like "run integration tests", "run e2e tests", "are integration tests green", "fix failing integration tests", "check integration tests". Discovers test projects, starts the local stack via bpp-start-local-stack, runs `dotnet test --filter "Category=Integration|Category=LocalIntegration"`, and on failure investigates recent commits in cwd + bpp-shared before stopping for user input. Always skips bpp-document-analysis (aka bpp-doci) and bpp-agent entirely (no unit, no e2e).
 ---
 
 # bpp-run-integration-tests
@@ -17,7 +17,7 @@ Auto-discovers integration tests in a BPP .NET repo (NUnit + WebApplicationFacto
 
 ## Excluded repos (standing user directive, non-negotiable)
 
-**ALWAYS skip `bpp-document-analysis` (aka "bpp-doci"), `bpp-agent` and `bpp-cca-connector-internal` — no unit tests, no integration/e2e tests**, whether cwd is that repo or a fleet-wide sweep includes it. `bpp-cca-connector-internal` is a temporary internal repo, slated for removal/merge — excluded from automated sweeps; the exclusion is by exact name, `bpp-cca-connector` is a separate real repo and stays in scope. Resolve repo names/paths via the `bpp-project-index` skill. If cwd IS one of these repos, report the standing exclusion and stop instead of running anything. In fleet summaries, list them as `SKIPPED (excluded by user directive)` — never as green or missing.
+**ALWAYS skip `bpp-document-analysis` (aka "bpp-doci") and `bpp-agent` — no unit tests, no integration/e2e tests**, whether cwd is that repo or a fleet-wide sweep includes it. Resolve repo names/paths via the `bpp-project-index` skill. If cwd IS one of these repos, report the standing exclusion and stop instead of running anything. In fleet summaries, list them as `SKIPPED (excluded by user directive)` — never as green or missing.
 
 ## Conventions Discovered
 
@@ -45,7 +45,7 @@ grep -rlnE 'Category\("(Local)?Integration"|Category\((E2eTestCategories|Integra
 Build the working set: csproj files whose source contains an integration category. CAUTION: most suites tag via a CONSTANT, not a literal, and **there are TWO constant classes** — a grep for only one of them silently classifies whole repos as "no e2e tests".
 
 - **`E2eTestCategories` is the majority and the one bpp-backend uses** — measured 2026-09-18 across the fleet: 959 uses vs 219. All 8 bpp-backend module suites (Backoffice/Contract/Customer/GoUser/News/Products/Rahmenvereinbarung/Tenant) tag `[Category(E2eTestCategories.Integration)]`, as do bpp-auth, bpp-chat, bpp-push, bpp-stella, bpp-file, bpp-cheggnet-connector, bpp-arag-connector, bpp-external-mail-connector and bpp-id-austria-connector. Grepping only `IntegrationTestCategories\.` would have reported **no e2e tests in nine repos plus all of bpp-backend** (proven blind spot 2026-09-18; the earlier 2026-07-13 blind spot was the same bug against the literal).
-- **`IntegrationTestCategories` still exists** (bpp-vera-connector references it alongside the other; the class itself survives in bpp-cca-connector-internal), so keep matching both names.
+- **`IntegrationTestCategories` still exists** (bpp-vera-connector references it alongside the other), so keep matching both names.
 
 Note `BPP.Backend.NET.IntegrationTesting.Shared/E2eTestCategories.cs` declares only `Integration` — its own doc says `LocalIntegration` is gone fleet-wide there. Other repos still carry `LocalIntegration`, so the OR-filter below stays required.
 
@@ -177,7 +177,7 @@ Leave any test edits unstaged for the user to review.
 
 ## Common Mistakes
 
-- **Running anything in bpp-document-analysis (bpp-doci), bpp-agent or bpp-cca-connector-internal** → standing user exclusion, unit AND e2e. Skip + report, never run.
+- **Running anything in bpp-document-analysis (bpp-doci) or bpp-agent** → standing user exclusion, unit AND e2e. Skip + report, never run.
 - **Running the suite against a stale schema** → every suite goes red for the wrong reason and looks like a mass regression. Run the migration pre-check first.
 - **Auto-fixing tests to make them green** when production regressed → masks the real bug. Always classify the failure first.
 - **Forcing `[Explicit]` tests to run** — they are opt-in for a reason.

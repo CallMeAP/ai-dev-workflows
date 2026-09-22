@@ -11,7 +11,7 @@ the subgroup-encoded paths and the always-exclude list, and publishes them as
 `~/.claude/bpp-fleet/manifest.tsv`. Invoke it at the top of Phase A (read-only refresh, ~7 s), then
 filter. Do not rebuild any of it here — two copies of this logic is how the fleet set drifts.
 
-The audit's set is: `state=active`, tags ∌ `internal-temp,generated-output,scaffold`, and
+The audit's set is: `state=active`, tags ∌ `generated-output,scaffold`, and
 `class ∈ {backend, frontend, docs}` **or** (`class=unlisted` and name matches `^bpp-|^brokernet-.*-ui$`).
 Verified 2026-09-14 to reproduce the previous filter + extras + cross-check + always-exclude set
 **exactly** — 34 repos, zero drift.
@@ -21,7 +21,7 @@ MANIFEST=~/.claude/bpp-fleet/manifest.tsv
 declare -A ENC LOCALPATH
 while IFS=$'\t' read -r repo enc lp; do
   ENC[$repo]="$enc"; LOCALPATH[$repo]="$lp"
-done < <(awk -F'\t' '!/^#/ && $6=="active" && $5!~/internal-temp|generated-output|scaffold/ \
+done < <(awk -F'\t' '!/^#/ && $6=="active" && $5!~/generated-output|scaffold/ \
   && ($4=="backend" || $4=="frontend" || $4=="docs" || ($4=="unlisted" && $1 ~ /^bpp-|^brokernet-.*-ui$/)) \
   {print $1 "\t" $3 "\t" $7}' "$MANIFEST")
 
@@ -62,7 +62,6 @@ confirmed against `/projects/<encoded>`, so the old `brokernet/` redirect is no 
 
 ### Always-exclude (owned by the index as policy tags)
 
-- `bpp-cca-connector-internal` (`internal-temp`) — temporary internal repo, excluded from all sweeps.
 - `bpp-shared-template` (`scaffold`) — scaffolding, no product code.
 - `bpp-audit-reports` (`generated-output`) — this run's own output repo; auditing it is a self-audit loop.
 

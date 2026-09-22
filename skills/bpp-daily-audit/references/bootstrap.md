@@ -63,8 +63,7 @@ Existing group labels for reference: `devops`, `main-deployment`, `qodana`, `sta
 ## 3. Exclude the reports repo from promotion sweeps
 
 `bpp-audit-reports` matches `^bpp-` and will otherwise appear in every
-`bpp-promote-dev-to-staging` preview. Add it to that skill's always-exclude list next to
-`bpp-cca-connector-internal`.
+`bpp-promote-dev-to-staging` preview. Add it to that skill's always-exclude list.
 
 `bpp-bump-shared-version` needs no change — it only discovers `bpp-*` repos whose
 `BPP.*/Directory.Build.props` contains `<BppSharedVersion>`, which a reports repo has not.

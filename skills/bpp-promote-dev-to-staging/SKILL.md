@@ -34,7 +34,7 @@ as `~/.claude/bpp-fleet/manifest.tsv`. Invoke it first (read-only refresh, ~7 s)
 
 The promotion candidate set is:
 
-> `state=active`, tags ∌ `internal-temp,generated-output,excluded-manual`, and
+> `state=active`, tags ∌ `generated-output,excluded-manual`, and
 > `class ∈ {backend, frontend, docs}` **or** (`class=unlisted` and name matches `^bpp-|^brokernet-.*-ui$`)
 
 Verified 2026-09-14: this reproduces the old filter + extras + cross-check set **exactly** — 35 repos,
@@ -43,9 +43,6 @@ zero drift in either direction.
 Everything below is still true; it just lives in the index now, once, instead of here and in three other
 skills:
 
-- **`bpp-cca-connector-internal`** (tag `internal-temp`) — temporary internal repo, slated for
-  removal/merge, excluded from automated sweeps. Exact-name exclusion: `bpp-cca-connector` is a separate,
-  real repo and stays in.
 - **`servo-backend`** (tag `excluded-manual`) — excluded by user decision 2026-09-18. Its
   `development`→`staging` diff is 2024 legacy (`development` idle since 2024-12-11, `staging` since
   2024-05-24) and its `build` job fails on a pre-existing CI defect unrelated to the promotion content:
@@ -132,7 +129,7 @@ MANIFEST=~/.claude/bpp-fleet/manifest.tsv
 declare -A ENC
 while IFS=$'\t' read -r repo enc; do
   ENC[$repo]="$enc"
-done < <(awk -F'\t' '!/^#/ && $6=="active" && $5!~/internal-temp|generated-output|excluded-manual/ \
+done < <(awk -F'\t' '!/^#/ && $6=="active" && $5!~/generated-output|excluded-manual/ \
   && ($4=="backend" || $4=="frontend" || $4=="docs" || ($4=="unlisted" && $1 ~ /^bpp-|^brokernet-.*-ui$/)) \
   {print $1 "\t" $3}' "$MANIFEST")
 
@@ -163,7 +160,7 @@ declare -A ENC
 while read -r repo; do
   ENC[$repo]="lipso%2Fclients%2Fbrokernet%2F${repo}"
 done < <(glab api "/groups/lipso%2Fclients%2Fbrokernet/projects?per_page=100&simple=true" \
-  | jq -r '.[] | select((.path | test("^(bpp-|brokernet-.*-ui$)")) and (.path | IN("bpp-cca-connector-internal", "bpp-audit-reports") | not)) | .path')
+  | jq -r '.[] | select((.path | test("^(bpp-|brokernet-.*-ui$)")) and (.path | IN("bpp-audit-reports") | not)) | .path')
 
 # Always-include extras (filter misses them / subgroup)
 ENC[brokernet-document-cms]="lipso%2Fclients%2Fbrokernet%2Fbrokernet-document-cms"
@@ -181,7 +178,7 @@ while IFS='|' read -r _ name link _; do
   path=${link#https://gitlab.com/}
   [ -z "${ENC[$name]:-}" ] && ENC[$name]=$(printf %s "$path" | sed 's#/#%2F#g')
 done < <(grep -E '^\|[^|]+\| *https://gitlab.com/' "$WORK/repos.md")
-unset 'ENC[bpp-cca-connector-internal]' 'ENC[bpp-audit-reports]'
+unset 'ENC[bpp-audit-reports]'
 ```
 
 </details>

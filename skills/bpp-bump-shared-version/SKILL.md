@@ -30,7 +30,7 @@ Conservative on edge cases: skip + report rather than auto-fix.
 | Commit message | `chore: bump bpp-shared to {version}` (identical for local and API commits) |
 | Push remote | `origin` |
 | Channel | newest package by `created_at` — **no suffix filter** (see step 1) |
-| Repo list | `bpp-project-index` manifest: `state=active`, name matches `^bpp-`, tags ∌ `shared-source` (`bpp-shared`) and `internal-temp` (`bpp-cca-connector-internal`). Verified 2026-09-14 to reproduce the old group-listing set exactly — 24 repos. |
+| Repo list | `bpp-project-index` manifest: `state=active`, name matches `^bpp-`, tags ∌ `shared-source` (`bpp-shared`). Verified 2026-09-14 to reproduce the old group-listing set exactly. |
 | Consumer test | repo has a root-level `BPP.*/Directory.Build.props` on `development` containing `<BppSharedVersion>` (folder name varies — e.g. `BPP.DocumentAnalysis`, `BPP.Agent.NET`) |
 | Local clone path | the manifest's `local_path` column (keyed on the `origin` URL, so a renamed folder is still found), `-` = no clone |
 
@@ -112,7 +112,7 @@ declare -a CONSUMERS NONCONSUMERS UNVERIFIED
 MANIFEST=~/.claude/bpp-fleet/manifest.tsv
 while IFS=$'\t' read -r repo enc lp; do
   ENC[$repo]="$enc"; LOCALPATH[$repo]="$lp"; ALLREPOS+=("$repo")
-done < <(awk -F'\t' '!/^#/ && $6=="active" && $1 ~ /^bpp-/ && $5!~/shared-source|internal-temp/ \
+done < <(awk -F'\t' '!/^#/ && $6=="active" && $1 ~ /^bpp-/ && $5!~/shared-source/ \
   {print $1 "\t" $3 "\t" $7}' "$MANIFEST" | LC_ALL=C sort)
 [ ${#ALLREPOS[@]} -gt 15 ] || { echo "FAIL — only ${#ALLREPOS[@]} repos; manifest stale or truncated" >&2; exit 1; }
 
@@ -314,7 +314,6 @@ UNVERIFIED — could not inspect, possible missed consumers (N):
 - **Rewriting without a sanity check on the API path** → the rewritten content must differ from the original AND contain `LATEST`, otherwise skip. Never POST a no-op or corrupted file.
 - **Using `--force` on push** → never. Plain `git push origin development` only.
 - **Including `bpp-shared` itself** → it's the source, not a consumer. Excluded from the repo list.
-- **Including `bpp-cca-connector-internal`** → temporary internal repo, slated for removal/merge; excluded from automated sweeps even though it carries a `<BppSharedVersion>`. The exclusion is an exact-name match (`grep -vxE`) — `bpp-cca-connector` is a separate, real consumer and stays in.
 - **Running repos in parallel** → keep sequential. Per-repo output must be readable; any conflict needs a clear single-repo error.
 - **Skipping the downgrade guard** → applies to BOTH paths (local and API). If the current version is newer than `LATEST`, blindly rewriting would be a regression. Skip with `newer-local` / `newer-remote`.
 - **Trusting the discovery snapshot on the API path** → re-fetch the raw props at bump time; the version read during discovery may be stale by the time the commit is made.

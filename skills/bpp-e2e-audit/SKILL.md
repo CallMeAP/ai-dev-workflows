@@ -26,7 +26,7 @@ The argument is a **repo** (`bpp-backend`), a **module within a repo** (`GoUser`
 
 1. Resolve every repo path via the **`bpp-project-index`** skill: `local_path` in `~/.claude/bpp-fleet/manifest.tsv` (keyed on the checkout's `origin` URL, so a folder whose name no longer matches the GitLab project is still resolved), falling back to its human index at `/home/alex/Entwicklung/bpp/bpp-backend/dev/apittrich/project_index.md` for purpose and legacy modules. **Never guess a path.**
 2. A repo that appears only in the index's **GitLab-only** section has no local checkout → **report it as not-audited** (needs a clone); never invent a path for it.
-3. `all` = every locally-checked-out BPP .NET repo with controllers. Skip `bpp-document-analysis`, `bpp-agent` and `bpp-cca-connector-internal` (standing exclusion, same as `bpp-run-integration-tests`; the last one is a temporary internal repo, slated for removal/merge — excluded by exact name, `bpp-cca-connector` stays in scope).
+3. `all` = every locally-checked-out BPP .NET repo with controllers. Skip `bpp-document-analysis` and `bpp-agent` (standing exclusion, same as `bpp-run-integration-tests`).
 4. **Fetch before auditing** — `git -C <repo> fetch -q origin development`. Auditing a stale checkout produces a false matrix (endpoints added on `development` look missing/covered wrongly).
 
 ## Steps
