@@ -76,22 +76,26 @@ skills:
 | Description | short generated change summary (see "MR change summary" below) |
 | Assignee / Reviewer | none |
 
-## UI version bump (extra step for UI repos)
+## Version bump (extra step for the repos in the bump table)
 
-**UI repos need a version bump on the source branch BEFORE the promotion MR is created.** Rule (user directive 2026-08-06): **raise the PATCH version when promoting** — applies to BOTH directions. Reference commit: brokernet-hotel-ui `83b8bc87` ("raise version for staging", `package.json` version line change; that instance happened to be a major bump — the standing rule is patch).
+**The repos in the table below need a version bump on the source branch BEFORE the promotion MR is created.** Rule (user directive 2026-08-06): **raise the PATCH version when promoting** — applies to BOTH directions. Reference commit: brokernet-hotel-ui `83b8bc87` ("raise version for staging", `package.json` version line change; that instance happened to be a major bump — the standing rule is patch).
 
-Affected UI repos (exactly these six):
+Affected repos (exactly these eight):
 
-| Repo | package.json |
-|------|--------------|
-| `callidus-bvs-ui` | root `package.json` |
-| `servo-ui` | root `package.json` |
-| `brokernet-cockpit-ui` | root `package.json` |
-| `brokernet-hotel-ui` | root `package.json` |
-| `brokernet-onboarding-ui` | root `package.json` |
-| `bpp-document-analysis-dashboard` | root `package.json` |
+| Repo | Version file | Version anchor |
+|------|--------------|----------------|
+| `callidus-bvs-ui` | root `package.json` | `.version` |
+| `servo-ui` | root `package.json` | `.version` |
+| `brokernet-cockpit-ui` | root `package.json` | `.version` |
+| `brokernet-hotel-ui` | root `package.json` | `.version` |
+| `brokernet-onboarding-ui` | root `package.json` | `.version` |
+| `bpp-document-analysis-dashboard` | root `package.json` | `.version` |
+| `brokernet-document-cms` | root `package.json` | `.version` |
+| `brokernet-varias-sign` | root `pom.xml` | the project `<version>` — the first one **after** `</parent>`. The first `<version>` in the file is the spring-boot parent (`2.7.2`); never touch it. |
 
-`brokernet-document-cms` and the `bpp-*` backends do NOT get a bump — MR only.
+Why `brokernet-document-cms` and `brokernet-varias-sign` are in: their image build refuses to overwrite an existing tag — `main with tag 4.2.2-SNAPSHOT already exists!` / `main with tag 11.0.0 already exists!` — so an un-bumped promotion merges but **skips deploy**. Happened on both `main` pipelines in the 2026-08-14 and 2026-09-25 waves.
+
+The `bpp-*` backends do NOT get a bump — MR only.
 
 ### `brokernet-app` (go-stella) — do NOT bump it from this skill
 
@@ -107,11 +111,13 @@ Rules when a promotion wave includes `brokernet-app`:
 - Note that skill targets **`development` -> `staging`** and the `staging-deployment` **label** (not a git tag). For `staging` -> `main` it does not apply — bump handling there is out of its scope; ask the user.
 - Also note it is written for BSD `sed -i ''`; on this Linux box that invocation fails. Read it as the source of truth for *which files and which anchors*, not for verbatim commands.
 
-Mechanics, per UI repo that will get an MR:
+Mechanics, per affected repo that will get an MR:
 
-1. **Idempotency guard** — read `.version` from `package.json` on BOTH branches (`/repository/files/package.json/raw?ref=<branch>`). If source-branch version ≠ target-branch version, the bump already happened (e.g. re-run, or a manual bump) → skip the bump, create the MR only.
-2. Bump the patch component: `X.Y.Z[-SUFFIX]` → `X.Y.(Z+1)[-SUFFIX]` (keep any `-SNAPSHOT`-style suffix verbatim).
-3. Commit it on the **source branch** with the direction's bump message, via the GitLab commits API (update action on `package.json`) — or via a local clean checkout already on the source branch if one exists (then push plain; report so other checkouts get pulled). Never force-push.
+1. **Idempotency guard** — read the version (per the table's anchor) on BOTH branches (`/repository/files/<file>/raw?ref=<branch>`). If source-branch version ≠ target-branch version, the bump already happened (e.g. re-run, or a manual bump) → skip the bump, create the MR only.
+   - `package.json`: `jq -r .version`
+   - `pom.xml`: `sed -n '/<\/parent>/,$p' | grep -m1 -oP '(?<=<version>)[^<]+'`
+2. Bump the patch component: `X.Y.Z[-SUFFIX]` → `X.Y.(Z+1)[-SUFFIX]` (keep any `-SNAPSHOT`-style suffix verbatim). Change **only that one line**; diff old vs new before committing — exactly one line may differ, and the trailing newline must survive.
+3. Commit it on the **source branch** with the direction's bump message, via the GitLab commits API (update action on the version file) — or via a local clean checkout already on the source branch if one exists (then push plain; report so other checkouts get pulled). Never force-push.
 4. Then create the promotion MR as usual — the bump commit rides in it.
 
 The preview (step 4) must mark which repos will receive a bump so the user confirms both actions with one "go".
@@ -286,7 +292,7 @@ Omit empty categories. Pass it via `-f description="$DESC"` on the POST. If the 
 
 Only for repos with `NDIFFS[$repo] > 0` AND no existing open MR.
 
-**UI repos first get the patch-version bump** (see "UI version bump" section above — guard, bump, commit on `$SRC`), then the MR:
+**Repos in the bump table first get the patch-version bump** (see "Version bump" section above — guard, bump, commit on `$SRC`), then the MR:
 
 ```bash
 for repo in "${REPOS[@]}"; do
@@ -327,7 +333,8 @@ Final summary: created MRs (with URLs), reused open MRs, skipped repos (no diffs
 - **Skipping preview** → never bulk-write across 13+ repos without explicit user confirmation.
 - **Omitting the change-summary description** → every created MR carries the short added/updated/fixed/removed summary; empty descriptions are no longer allowed.
 - **Adding assignee / reviewer** → defaults only; only override if user explicitly asks.
-- **Forgetting the UI patch-version bump** → the six UI repos (callidus-bvs / servo / cockpit / hotel / onboarding / doci-dashboard) need the `package.json` patch bump committed on the source branch BEFORE the MR; document-cms and backends don't.
+- **Forgetting the patch-version bump** → the eight repos in the bump table (six UIs + document-cms + varias-sign) need the patch bump committed on the source branch BEFORE the MR; backends don't. Missing it on document-cms / varias-sign does not fail the MR — it fails the **target** pipeline with `<stage> with tag <version> already exists!` and silently skips deploy.
+- **Bumping the spring-boot parent in `brokernet-varias-sign/pom.xml`** → the first `<version>` in the file is the parent; the project version is the first one after `</parent>`.
 - **Bumping `brokernet-app` like a UI repo** → its version lives in 16 files across Gradle / Xcode / npm / Angular envs, not one `package.json`. Never bump it here; it has its own skill ([stella-bump-version-staging-mr](https://gitlab.com/lipso/internal/agentic-coding-knowledge/-/blob/main/personal-workflows/nangert/skills/stella-bump-version-staging-mr/SKILL.md)). Default in a promotion wave is MR-only.
 - **Double-bumping on re-run** → always apply the idempotency guard (source vs target version differ = already bumped).
 - **Missing servo-ui / callidus-bvs-ui** → both live in subgroups; a group listing without `include_subgroups=true` never returns them (verified 2026-09-14: 57 projects, zero of them). They reach this skill as ordinary `bpp-project-index` manifest rows with subgroup-encoded `enc` values — never rebuild an encoded path from the repo name.
