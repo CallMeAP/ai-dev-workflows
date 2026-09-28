@@ -122,6 +122,24 @@ Mechanics, per affected repo that will get an MR:
 
 The preview (step 4) must mark which repos will receive a bump so the user confirms both actions with one "go".
 
+### `brokernet-cockpit-ui` bump → `ui_configs` reminder (user directive 2026-09-28)
+
+The Cockpit's `package.json` version must match the `ui_configs` row with `ui_type = 'cockpit'` in **each stage's DB** (lowercase: `ui_type` is the native PG enum `bpp_ui_type`). That row drives the Cockpit's forced reset: bpp-backend serves it via `GET /api/public-frontend-migration` with `-SNAPSHOT` stripped, and with both flags true a change clears browser storage and logs out every user of that stage. Agents have no stage-DB access, so this skill never runs the SQL. It only hands the user the statements.
+
+Whenever this skill bumps `brokernet-cockpit-ui` from `OLD` to `NEW`, the report (step 7) MUST include, for the user to run:
+
+```sql
+-- <SRC> DB: run once the bump commit is deployed on <SRC>
+UPDATE ui_configs SET version_number = '<NEW>', updated_at = now()
+ WHERE ui_type = 'cockpit' AND is_soft_deleted = false;  -- native PG enum bpp_ui_type, lowercase labels
+-- <TGT> DB: run once this promotion MR is merged and deployed on <TGT>
+UPDATE ui_configs SET version_number = '<NEW>', updated_at = now()
+ WHERE ui_type = 'cockpit' AND is_soft_deleted = false;  -- native PG enum bpp_ui_type, lowercase labels
+```
+
+- Use the literal `package.json` value, `-SNAPSHOT` included.
+- Before that stage's DbMigrator has applied the `ui_configs` migration, the table doesn't exist yet. Say so instead of printing SQL that will fail.
+
 ## Workflow
 
 ### 1. Discover repos
@@ -317,7 +335,7 @@ done
 
 ### 7. Report
 
-Final summary: created MRs (with URLs), reused open MRs, skipped repos (no diffs / degenerate / no branch). Note: `detailed_merge_status` stays `checking` for a while after bulk creation and `has_conflicts:false` is NOT authoritative while checking — report mergeability as un-computed rather than clean.
+Final summary: created MRs (with URLs), reused open MRs, skipped repos (no diffs / degenerate / no branch). If `brokernet-cockpit-ui` was bumped, include the two `ui_configs` UPDATE statements from the version-bump section. Note: `detailed_merge_status` stays `checking` for a while after bulk creation and `has_conflicts:false` is NOT authoritative while checking — report mergeability as un-computed rather than clean.
 
 ## Common mistakes
 
@@ -336,6 +354,7 @@ Final summary: created MRs (with URLs), reused open MRs, skipped repos (no diffs
 - **Forgetting the patch-version bump** → the eight repos in the bump table (six UIs + document-cms + varias-sign) need the patch bump committed on the source branch BEFORE the MR; backends don't. Missing it on document-cms / varias-sign does not fail the MR — it fails the **target** pipeline with `<stage> with tag <version> already exists!` and silently skips deploy.
 - **Bumping the spring-boot parent in `brokernet-varias-sign/pom.xml`** → the first `<version>` in the file is the parent; the project version is the first one after `</parent>`.
 - **Bumping `brokernet-app` like a UI repo** → its version lives in 16 files across Gradle / Xcode / npm / Angular envs, not one `package.json`. Never bump it here; it has its own skill ([stella-bump-version-staging-mr](https://gitlab.com/lipso/internal/agentic-coding-knowledge/-/blob/main/personal-workflows/nangert/skills/stella-bump-version-staging-mr/SKILL.md)). Default in a promotion wave is MR-only.
+- **Bumping `brokernet-cockpit-ui` without handing over the `ui_configs` SQL** → the stage DB keeps the old version and the Cockpit's forced reset never fires for that release. Always print both per-stage UPDATEs.
 - **Double-bumping on re-run** → always apply the idempotency guard (source vs target version differ = already bumped).
 - **Missing servo-ui / callidus-bvs-ui** → both live in subgroups; a group listing without `include_subgroups=true` never returns them (verified 2026-09-14: 57 projects, zero of them). They reach this skill as ordinary `bpp-project-index` manifest rows with subgroup-encoded `enc` values — never rebuild an encoded path from the repo name.
 - **Rebuilding the repo set here instead of reading the manifest** → the filter+extras provably drift from `bpp/repos.md` in both directions (2026-08-14: six repos missed, e.g. `brokernet-app`, `servo-hw-connector`; 2026-09-14: `bpp-cypress` and `bpp-db-migrator` in the group but not in the list). `bpp-project-index` does the union on every refresh — read it. If the manifest is stale or `#source` says `gitlab=unreachable`, flag it in the preview instead of silently proceeding.
