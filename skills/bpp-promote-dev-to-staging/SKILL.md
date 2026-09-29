@@ -126,7 +126,7 @@ The preview (step 4) must mark which repos will receive a bump so the user confi
 
 The Cockpit's `package.json` version must match the `ui_configs` row with `ui_type = 'cockpit'` in **each stage's DB** (lowercase: `ui_type` is the native PG enum `bpp_ui_type`). That row drives the Cockpit's forced reset: bpp-backend serves it via `GET /api/public-frontend-migration` with `-SNAPSHOT` stripped, and with both flags true a change clears browser storage and logs out every user of that stage. Agents have no stage-DB access, so this skill never runs the SQL. It only hands the user the statements.
 
-Whenever this skill bumps `brokernet-cockpit-ui` from `OLD` to `NEW`, the report (step 7) MUST include, for the user to run:
+Whenever a `brokernet-cockpit-ui` promotion changes the `package.json` version from `OLD` (on `$TGT`) to `NEW` (on `$SRC`), the report (step 7) MUST include the statements below for the user to run on each stage DB after the release. This applies both when this run bumped the version and when `$SRC` already carried the bump (idempotency skip, reused open MR), so compare the `package.json` of `$SRC` against `$TGT` instead of relying on "did I bump":
 
 ```sql
 -- <SRC> DB: run once the bump commit is deployed on <SRC>
@@ -335,7 +335,7 @@ done
 
 ### 7. Report
 
-Final summary: created MRs (with URLs), reused open MRs, skipped repos (no diffs / degenerate / no branch). If `brokernet-cockpit-ui` was bumped, include the two `ui_configs` UPDATE statements from the version-bump section. Note: `detailed_merge_status` stays `checking` for a while after bulk creation and `has_conflicts:false` is NOT authoritative while checking — report mergeability as un-computed rather than clean.
+Final summary: created MRs (with URLs), reused open MRs, skipped repos (no diffs / degenerate / no branch). If the `brokernet-cockpit-ui` promotion changes its `package.json` version (bumped by this run or already on `$SRC`), include the two `ui_configs` UPDATE statements from the version-bump section. Note: `detailed_merge_status` stays `checking` for a while after bulk creation and `has_conflicts:false` is NOT authoritative while checking — report mergeability as un-computed rather than clean.
 
 ## Common mistakes
 
@@ -354,7 +354,7 @@ Final summary: created MRs (with URLs), reused open MRs, skipped repos (no diffs
 - **Forgetting the patch-version bump** → the eight repos in the bump table (six UIs + document-cms + varias-sign) need the patch bump committed on the source branch BEFORE the MR; backends don't. Missing it on document-cms / varias-sign does not fail the MR — it fails the **target** pipeline with `<stage> with tag <version> already exists!` and silently skips deploy.
 - **Bumping the spring-boot parent in `brokernet-varias-sign/pom.xml`** → the first `<version>` in the file is the parent; the project version is the first one after `</parent>`.
 - **Bumping `brokernet-app` like a UI repo** → its version lives in 16 files across Gradle / Xcode / npm / Angular envs, not one `package.json`. Never bump it here; it has its own skill ([stella-bump-version-staging-mr](https://gitlab.com/lipso/internal/agentic-coding-knowledge/-/blob/main/personal-workflows/nangert/skills/stella-bump-version-staging-mr/SKILL.md)). Default in a promotion wave is MR-only.
-- **Bumping `brokernet-cockpit-ui` without handing over the `ui_configs` SQL** → the stage DB keeps the old version and the Cockpit's forced reset never fires for that release. Always print both per-stage UPDATEs.
+- **Bumping `brokernet-cockpit-ui` without handing over the `ui_configs` SQL** → the stage DB keeps the old version and the Cockpit's forced reset never fires for that release. Always print both per-stage UPDATEs, also when the version change was already on `$SRC` and this run bumped nothing.
 - **Double-bumping on re-run** → always apply the idempotency guard (source vs target version differ = already bumped).
 - **Missing servo-ui / callidus-bvs-ui** → both live in subgroups; a group listing without `include_subgroups=true` never returns them (verified 2026-09-14: 57 projects, zero of them). They reach this skill as ordinary `bpp-project-index` manifest rows with subgroup-encoded `enc` values — never rebuild an encoded path from the repo name.
 - **Rebuilding the repo set here instead of reading the manifest** → the filter+extras provably drift from `bpp/repos.md` in both directions (2026-08-14: six repos missed, e.g. `brokernet-app`, `servo-hw-connector`; 2026-09-14: `bpp-cypress` and `bpp-db-migrator` in the group but not in the list). `bpp-project-index` does the union on every refresh — read it. If the manifest is stale or `#source` says `gitlab=unreachable`, flag it in the preview instead of silently proceeding.
