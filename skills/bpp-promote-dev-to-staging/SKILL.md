@@ -337,6 +337,12 @@ done
 
 Final summary: created MRs (with URLs), reused open MRs, skipped repos (no diffs / degenerate / no branch). If the `brokernet-cockpit-ui` promotion changes its `package.json` version (bumped by this run or already on `$SRC`), include the two `ui_configs` UPDATE statements from the version-bump section. Note: `detailed_merge_status` stays `checking` for a while after bulk creation and `has_conflicts:false` is NOT authoritative while checking — report mergeability as un-computed rather than clean.
 
+The report's last line is always the group-wide list of open MRs for this direction:
+
+```bash
+echo "Open $TITLE MRs: https://gitlab.com/groups/lipso/clients/brokernet/-/merge_requests/?sort=created_date&state=opened&label_name%5B%5D=${LABEL}&first_page_size=100"
+```
+
 ## Common mistakes
 
 - **Creating MRs without diff check** → GitLab returns "no commits between branches"; always compare first.
