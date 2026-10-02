@@ -80,10 +80,11 @@ skills:
 
 **The repos in the table below need a version bump on the source branch BEFORE the promotion MR is created.** Rule (user directive 2026-08-06): **raise the PATCH version when promoting** — applies to BOTH directions. Reference commit: brokernet-hotel-ui `83b8bc87` ("raise version for staging", `package.json` version line change; that instance happened to be a major bump — the standing rule is patch).
 
-Affected repos (exactly these eight):
+Affected repos (exactly these nine):
 
 | Repo | Version file | Version anchor |
 |------|--------------|----------------|
+| `bpp-stella-ui` | `projects/bpp-stella-web/package.json` **+** its workspace entry in the root `package-lock.json` | `.version` — see the `bpp-stella-ui` subsection; never the app or common |
 | `callidus-bvs-ui` | root `package.json` | `.version` |
 | `servo-ui` | root `package.json` | `.version` |
 | `brokernet-cockpit-ui` | root `package.json` | `.version` |
@@ -97,17 +98,36 @@ Why `brokernet-document-cms` and `brokernet-varias-sign` are in: their image bui
 
 The `bpp-*` backends do NOT get a bump — MR only.
 
-### `brokernet-app` (go-stella) — do NOT bump it from this skill
+### `bpp-stella-ui` (formerly `brokernet-app`, go-stella) — bump the web project only
 
-`brokernet-app` looks like a UI repo but its version does **not** live in one `package.json`. It sits in **16 files across 4 ecosystems** (Gradle `versionName`, Xcode `MARKETING_VERSION`, npm, and 12 Angular `src/environments/*` files). A naive root-`package.json` bump leaves the app reporting inconsistent versions across platforms, and a global search-replace on the pbxproj corrupts the 2 `MARKETING_VERSION` lines that belong to a separate Xcode extension target with its own release cadence.
+An npm-workspaces monorepo (`projects/*`): `bpp-stella-app` (the mobile app), `bpp-stella-web` (the Kundenportal), `bpp-stella-common`. The repo root `package.json` is `0.0.0` and never changes.
 
-It has its own dedicated skill, maintained by nangert, which handles all 16 files with a hard verification gate:
+**`bpp-stella-web` IS bumped** (user decision 2026-10-02) — same patch rule and idempotency guard as the other rows, read from `projects/bpp-stella-web/package.json` on both branches. Its staging/main web image is tagged with that version. Exactly two lines change, one per file: the `version` in `projects/bpp-stella-web/package.json`, and the `"projects/bpp-stella-web"` workspace entry in the root `package-lock.json` (present on development/staging/main, verified 2026-10-02). Patch the lock with an anchored `sed`, never `npm version -w` (it runs a full install and rewrites unrelated lock entries). The lock is ~1.4 MB, which is too big for a `-f content=` argument (`Argument list too long`), so commit both files in ONE commit as JSON on stdin (`$OLD`/`$NEW` from the guard and patch rule under "Mechanics", `$BUMP_MSG` = the direction table's bump commit msg):
+
+```bash
+P=${ENC[bpp-stella-ui]}
+glab api "/projects/$P/repository/files/projects%2Fbpp-stella-web%2Fpackage.json/raw?ref=$SRC" > web.json
+glab api "/projects/$P/repository/files/package-lock.json/raw?ref=$SRC" > lock.json
+cp web.json web.orig; cp lock.json lock.orig
+sed -i "s/^  \"version\": \"$OLD\",$/  \"version\": \"$NEW\",/" web.json
+sed -i "/^    \"projects\/bpp-stella-web\": {$/,+2 s/^      \"version\": \"$OLD\",$/      \"version\": \"$NEW\",/" lock.json
+diff web.orig web.json; diff lock.orig lock.json      # exactly one changed line each, else STOP
+jq -n --arg b "$SRC" --arg m "$BUMP_MSG" --rawfile w web.json --rawfile l lock.json \
+  '{branch:$b, commit_message:$m, actions:[
+     {action:"update", file_path:"projects/bpp-stella-web/package.json", content:$w},
+     {action:"update", file_path:"package-lock.json", content:$l}]}' \
+  | glab api --method POST "/projects/$P/repository/commits" -H 'Content-Type: application/json' --input -
+```
+
+**`bpp-stella-app` and `bpp-stella-common` are NEVER bumped here.** That rules out their `package.json`, their lock entries and every `environment*` file. The app version does **not** live in one `package.json`. It sits in **16 files across 4 ecosystems** (Gradle `versionName`, Xcode `MARKETING_VERSION`, npm, and 12 Angular `src/environments/*` files). A naive bump leaves the app reporting inconsistent versions across platforms, and a global search-replace on the pbxproj corrupts the 2 `MARKETING_VERSION` lines that belong to a separate Xcode extension target with its own release cadence.
+
+The app has its own dedicated skill, maintained by nangert, which handles all 16 files with a hard verification gate:
 <https://gitlab.com/lipso/internal/agentic-coding-knowledge/-/blob/main/personal-workflows/nangert/skills/stella-bump-version-staging-mr/SKILL.md>
 
-Rules when a promotion wave includes `brokernet-app`:
-- **Never** bump its version from this skill — not `package.json`, not any environment file.
+Rules when a promotion wave includes `bpp-stella-ui`:
+- **Never** bump the app's version from this skill. The `bpp-stella-web` bump above is the only version change this skill makes in the repo.
 - If the wave needs a go-stella release bump, hand that off to `stella-bump-version-staging-mr` (or the user) **first**, then create the promotion MR here so the bump commit rides in it.
-- If no bump is wanted, promote `brokernet-app` MR-only like the backends. That is the default.
+- If no app bump is wanted, the app goes MR-only, riding along with the web bump. That is the default.
 - Note that skill targets **`development` -> `staging`** and the `staging-deployment` **label** (not a git tag). For `staging` -> `main` it does not apply — bump handling there is out of its scope; ask the user.
 - Also note it is written for BSD `sed -i ''`; on this Linux box that invocation fails. Read it as the source of truth for *which files and which anchors*, not for verbatim commands.
 
@@ -122,22 +142,41 @@ Mechanics, per affected repo that will get an MR:
 
 The preview (step 4) must mark which repos will receive a bump so the user confirms both actions with one "go".
 
-### `brokernet-cockpit-ui` bump → `ui_configs` reminder (user directive 2026-09-28)
+### `ui_configs` SQL per stage DB — cockpit, kundenportal, stella (user directives 2026-09-28, 2026-10-02)
 
-The Cockpit's `package.json` version must match the `ui_configs` row with `ui_type = 'cockpit'` in **each stage's DB** (lowercase: `ui_type` is the native PG enum `bpp_ui_type`). That row drives the Cockpit's forced reset: bpp-backend serves it via `GET /api/public-frontend-migration` with `-SNAPSHOT` stripped, and with both flags true a change clears browser storage and logs out every user of that stage. Agents have no stage-DB access, so this skill never runs the SQL. It only hands the user the statements.
+`ui_configs` holds one active row per `ui_type` in **each stage's DB**. `ui_type` is the native PG enum `bpp_ui_type`, so the labels are lowercase: `'cockpit'`, `'kundenportal'`, `'stella'`. Each row's `version_number` drives that UI's forced reset or update. Agents have no stage-DB access, so this skill never runs the SQL. It only hands the user the statements.
 
-Whenever a `brokernet-cockpit-ui` promotion changes the `package.json` version from `OLD` (on `$TGT`) to `NEW` (on `$SRC`), the report (step 7) MUST include the statements below for the user to run on each stage DB after the release. This applies both when this run bumped the version and when `$SRC` already carried the bump (idempotency skip, reused open MR), so compare the `package.json` of `$SRC` against `$TGT` instead of relying on "did I bump":
+For each `ui_type`, read the version on `$SRC` and on `$TGT`, and print a statement only when the two differ. Whether this run bumped it or `$SRC` already carried the bump (idempotency skip, reused open MR) doesn't matter, so never rely on "did I bump".
+
+| `ui_type` | Version source | Value in the SQL | Stage DBs | Run it when |
+|---|---|---|---|---|
+| `cockpit` | `brokernet-cockpit-ui` root `package.json` | literal, `-SNAPSHOT` included | `$TGT`, and `$SRC` (the bump deploys there too) | that stage runs the new build |
+| `kundenportal` | `bpp-stella-ui` `projects/bpp-stella-web/package.json` | literal, `-SNAPSHOT` included | `$TGT`, and `$SRC`. A `development` `$SRC` is **optional**: dev images are sha-tagged, so print it as "only if a reset is wanted on dev" | **after** the new web image is live on that stage |
+| `stella` | `bpp-stella-ui` `environment.appVersion` (see below), cross-checked against `projects/bpp-stella-app/package.json` | plain `major.minor.patch`, any `-SNAPSHOT` stripped | `$TGT` only. This skill never bumps the app | **after** the build is live in App Store **and** Play Store |
+
+Statement shape, one per `ui_type` and stage DB:
 
 ```sql
--- <SRC> DB: run once the bump commit is deployed on <SRC>
-UPDATE ui_configs SET version_number = '<NEW>', updated_at = now()
- WHERE ui_type = 'cockpit' AND is_soft_deleted = false;  -- native PG enum bpp_ui_type, lowercase labels
--- <TGT> DB: run once this promotion MR is merged and deployed on <TGT>
-UPDATE ui_configs SET version_number = '<NEW>', updated_at = now()
- WHERE ui_type = 'cockpit' AND is_soft_deleted = false;  -- native PG enum bpp_ui_type, lowercase labels
+UPDATE ui_configs SET version_number = '<v>', updated_at = now() WHERE ui_type = '<type>' AND is_soft_deleted = false;
 ```
 
-- Use the literal `package.json` value, `-SNAPSHOT` included.
+**`stella` needs a prominent warning.** Print it verbatim above the statement: "run only AFTER the build is live in App Store + Play Store; a higher major/minor locks users onto the /update page; a patch-only raise does nothing".
+
+**The `stella` value comes from `environment.appVersion`, not package.json, because the app compares `environment.appVersion`.** Read it from every file in `projects/bpp-stella-app/src/environments/` except `environment.local-network.ts`. That file is stale at `1.5.0` on purpose (an emulator config against `localhost:8080`) and is unmaintained, per `stella-bump-version-staging-mr`. The app version counts as changed when package.json or appVersion differs between `$SRC` and `$TGT`. If the env files disagree among themselves, or with package.json on the same branch, print BOTH values and a mismatch warning instead of a statement. Never guess. (On 2026-10-02 development and staging had package.json `1.33.1` against appVersion `1.33.0`.)
+
+```bash
+P=${ENC[bpp-stella-ui]}
+for br in "$SRC" "$TGT"; do
+  pkg=$(glab api "/projects/$P/repository/files/projects%2Fbpp-stella-app%2Fpackage.json/raw?ref=$br" | jq -r .version)
+  env=$(glab api "/projects/$P/repository/tree?path=projects/bpp-stella-app/src/environments&ref=$br&per_page=100" \
+    | jq -r '.[].name | select(startswith("environment") and . != "environment.local-network.ts")' \
+    | while read -r f; do glab api "/projects/$P/repository/files/projects%2Fbpp-stella-app%2Fsrc%2Fenvironments%2F$f/raw?ref=$br" \
+        | grep -oP "appVersion:\s*'\K[^']+"; done | sort -u | paste -sd,)
+  echo "$br pkg=$pkg appVersion=$env"   # one appVersion value AND == ${pkg%%-*}, else mismatch warning
+done
+```
+
+- If an UPDATE reports `UPDATE 0`, the row is missing on that stage. The fix is bpp-backend's `BPP.Backend.NET.Sql/InsertSql/01-seed-ui-configs-<stage>.sql`, which creates only missing rows. Say so in the report.
 - Before that stage's DbMigrator has applied the `ui_configs` migration, the table doesn't exist yet. Say so instead of printing SQL that will fail.
 
 ## Workflow
@@ -335,7 +374,21 @@ done
 
 ### 7. Report
 
-Final summary: created MRs (with URLs), reused open MRs, skipped repos (no diffs / degenerate / no branch). If the `brokernet-cockpit-ui` promotion changes its `package.json` version (bumped by this run or already on `$SRC`), include the two `ui_configs` UPDATE statements from the version-bump section. Note: `detailed_merge_status` stays `checking` for a while after bulk creation and `has_conflicts:false` is NOT authoritative while checking — report mergeability as un-computed rather than clean.
+Final summary: created MRs (with URLs), reused open MRs, skipped repos (no diffs / degenerate / no branch). Then a **"ui_configs SQL"** block, built per the `ui_configs` section: statements grouped **per stage DB**, `$TGT` first. Each group lists only the `ui_type`s whose version changes in this promotion, along with that row's "run it when" condition and the `stella` warning. If nothing changes, the block reads `ui_configs SQL: none (cockpit/kundenportal/stella unchanged)`. The statements are handed to the user only, never run. Example for development → staging:
+
+```
+ui_configs SQL (hand to the user, never run):
+-- staging DB
+UPDATE ui_configs SET version_number = '16.0.73-SNAPSHOT', updated_at = now() WHERE ui_type = 'cockpit' AND is_soft_deleted = false;
+-- after the new bpp-stella-web image is live on staging:
+UPDATE ui_configs SET version_number = '0.1.2-SNAPSHOT', updated_at = now() WHERE ui_type = 'kundenportal' AND is_soft_deleted = false;
+-- development DB
+UPDATE ui_configs SET version_number = '16.0.73-SNAPSHOT', updated_at = now() WHERE ui_type = 'cockpit' AND is_soft_deleted = false;
+-- optional, only if a reset is wanted on dev:
+UPDATE ui_configs SET version_number = '0.1.2-SNAPSHOT', updated_at = now() WHERE ui_type = 'kundenportal' AND is_soft_deleted = false;
+```
+
+Note: `detailed_merge_status` stays `checking` for a while after bulk creation and `has_conflicts:false` is NOT authoritative while checking — report mergeability as un-computed rather than clean.
 
 The report's last line is always the group-wide list of open MRs for this direction:
 
@@ -357,10 +410,12 @@ echo "Open $TITLE MRs: https://gitlab.com/groups/lipso/clients/brokernet/-/merge
 - **Skipping preview** → never bulk-write across 13+ repos without explicit user confirmation.
 - **Omitting the change-summary description** → every created MR carries the short added/updated/fixed/removed summary; empty descriptions are no longer allowed.
 - **Adding assignee / reviewer** → defaults only; only override if user explicitly asks.
-- **Forgetting the patch-version bump** → the eight repos in the bump table (six UIs + document-cms + varias-sign) need the patch bump committed on the source branch BEFORE the MR; backends don't. Missing it on document-cms / varias-sign does not fail the MR — it fails the **target** pipeline with `<stage> with tag <version> already exists!` and silently skips deploy.
+- **Forgetting the patch-version bump** → the nine repos in the bump table (six UIs + stella-web + document-cms + varias-sign) need the patch bump committed on the source branch BEFORE the MR; backends don't. Missing it on document-cms / varias-sign does not fail the MR — it fails the **target** pipeline with `<stage> with tag <version> already exists!` and silently skips deploy.
 - **Bumping the spring-boot parent in `brokernet-varias-sign/pom.xml`** → the first `<version>` in the file is the parent; the project version is the first one after `</parent>`.
-- **Bumping `brokernet-app` like a UI repo** → its version lives in 16 files across Gradle / Xcode / npm / Angular envs, not one `package.json`. Never bump it here; it has its own skill ([stella-bump-version-staging-mr](https://gitlab.com/lipso/internal/agentic-coding-knowledge/-/blob/main/personal-workflows/nangert/skills/stella-bump-version-staging-mr/SKILL.md)). Default in a promotion wave is MR-only.
-- **Bumping `brokernet-cockpit-ui` without handing over the `ui_configs` SQL** → the stage DB keeps the old version and the Cockpit's forced reset never fires for that release. Always print both per-stage UPDATEs, also when the version change was already on `$SRC` and this run bumped nothing.
+- **Bumping the go-stella app in `bpp-stella-ui`** → the app version lives in 16 files across Gradle / Xcode / npm / Angular envs, not one `package.json`. Never bump `bpp-stella-app` or `bpp-stella-common` here; the app has its own skill ([stella-bump-version-staging-mr](https://gitlab.com/lipso/internal/agentic-coding-knowledge/-/blob/main/personal-workflows/nangert/skills/stella-bump-version-staging-mr/SKILL.md)). Only `projects/bpp-stella-web/package.json` and its lock entry are bumped.
+- **Forgetting the `bpp-stella-web` lock entry, or bumping it with `npm version -w`** → either the lock and package.json disagree, or ~90 unrelated lock lines change. Use the anchored `sed`; exactly two lines may differ.
+- **Promoting a version change without handing over the `ui_configs` SQL** → the stage DB keeps the old version and the forced reset never fires for that release (cockpit, kundenportal). Always print the per-stage UPDATEs, also when the version change was already on `$SRC` and this run bumped nothing.
+- **Taking the `stella` value from package.json, or printing it without the store warning** → the app compares `environment.appVersion`, and a premature major/minor raise locks every user onto `/update` with nothing to install. On a package.json/appVersion mismatch, print both values and no statement.
 - **Double-bumping on re-run** → always apply the idempotency guard (source vs target version differ = already bumped).
 - **Missing servo-ui / callidus-bvs-ui** → both live in subgroups; a group listing without `include_subgroups=true` never returns them (verified 2026-09-14: 57 projects, zero of them). They reach this skill as ordinary `bpp-project-index` manifest rows with subgroup-encoded `enc` values — never rebuild an encoded path from the repo name.
 - **Rebuilding the repo set here instead of reading the manifest** → the filter+extras provably drift from `bpp/repos.md` in both directions (2026-08-14: six repos missed, e.g. `brokernet-app`, `servo-hw-connector`; 2026-09-14: `bpp-cypress` and `bpp-db-migrator` in the group but not in the list). `bpp-project-index` does the union on every refresh — read it. If the manifest is stale or `#source` says `gitlab=unreachable`, flag it in the preview instead of silently proceeding.
