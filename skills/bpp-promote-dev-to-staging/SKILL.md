@@ -146,27 +146,36 @@ The preview (step 4) must mark which repos will receive a bump so the user confi
 
 `ui_configs` holds one active row per `ui_type` in **each stage's DB**. `ui_type` is the native PG enum `bpp_ui_type`, so the labels are lowercase: `'cockpit'`, `'kundenportal'`, `'stella'`. Each row's `version_number` drives that UI's forced reset or update. Agents have no stage-DB access, so this skill never runs the SQL. It only hands the user the statements.
 
-For each `ui_type`, read the version on `$SRC` and on `$TGT`, and print a statement only when the two differ. Whether this run bumped it or `$SRC` already carried the bump (idempotency skip, reused open MR) doesn't matter, so never rely on "did I bump".
+**Every run prints all three stage DBs** — `development`, `staging` and `main`, whatever the direction — with a statement for each of the three `ui_type`s in each group. The value is the **post-promotion** state of that stage's branch: read `origin/development`, `origin/staging` and `origin/main` **after** step 6 (so this run's bump commits on `$SRC` are included), then give `$TGT` the `$SRC` value the promotion brings. Mark every line:
 
-| `ui_type` | Version source | Value in the SQL | Stage DBs | Run it when |
-|---|---|---|---|---|
-| `cockpit` | `brokernet-cockpit-ui` root `package.json` | literal, `-SNAPSHOT` included | `$TGT`, and `$SRC` (the bump deploys there too) | that stage runs the new build |
-| `kundenportal` | `bpp-stella-ui` `projects/bpp-stella-web/package.json` | literal, `-SNAPSHOT` included | `$TGT`, and `$SRC`. A `development` `$SRC` is **optional**: dev images are sha-tagged, so print it as "only if a reset is wanted on dev" | **after** the new web image is live on that stage |
-| `stella` | `bpp-stella-ui` `environment.appVersion` (see below), cross-checked against `projects/bpp-stella-app/package.json` | plain `major.minor.patch`, any `-SNAPSHOT` stripped | `$TGT` only. This skill never bumps the app | **after** the build is live in App Store **and** Play Store |
+- **`changed by this promotion`**:
+  - on `$TGT`, when its pre-promotion value differs from `$SRC`'s;
+  - on `$SRC`, only when this run committed the bump there.
+- **`unchanged (no-op if already set)`**: everything else, including the stage that this direction does not touch.
 
-Statement shape, one per `ui_type` and stage DB:
+| `ui_type` | Version source (per stage branch) | Value in the SQL | Qualifier |
+|---|---|---|---|
+| `cockpit` | `brokernet-cockpit-ui` root `package.json` | literal, `-SNAPSHOT` included | run once that stage runs the new build |
+| `kundenportal` | `bpp-stella-ui` `projects/bpp-stella-web/package.json` | literal, `-SNAPSHOT` included | run **after** the new web image is live on that stage. **development DB: optional**, "only if a reset is wanted on dev" (dev images are sha-tagged) |
+| `stella` | `bpp-stella-ui` `environment.appVersion` (see below), cross-checked against `projects/bpp-stella-app/package.json` | plain `major.minor.patch`, any `-SNAPSHOT` stripped | the store warning below; never bumped by this skill |
+
+Statement shape, one per `ui_type` and stage DB. The audit columns follow bpp-backend's `01-seed-ui-configs-*.sql` convention:
 
 ```sql
-UPDATE ui_configs SET version_number = '<v>', updated_at = now() WHERE ui_type = '<type>' AND is_soft_deleted = false;
+UPDATE ui_configs SET version_number = '<v>', updated_at = now(), updated_by_name = 'release', updated_by_type = 'system' WHERE ui_type = '<type>' AND is_soft_deleted = false;
 ```
 
 **`stella` needs a prominent warning.** Print it verbatim above the statement: "run only AFTER the build is live in App Store + Play Store; a higher major/minor locks users onto the /update page; a patch-only raise does nothing".
 
-**The `stella` value comes from `environment.appVersion`, not package.json, because the app compares `environment.appVersion`.** Read it from every file in `projects/bpp-stella-app/src/environments/` except `environment.local-network.ts`. That file is stale at `1.5.0` on purpose (an emulator config against `localhost:8080`) and is unmaintained, per `stella-bump-version-staging-mr`. The app version counts as changed when package.json or appVersion differs between `$SRC` and `$TGT`. If the env files disagree among themselves, or with package.json on the same branch, print BOTH values and a mismatch warning instead of a statement. Never guess. (On 2026-10-02 development and staging had package.json `1.33.1` against appVersion `1.33.0`.)
+**The `stella` value comes from `environment.appVersion`, not package.json, because the app compares `environment.appVersion`.**
+- Read it from every file in `projects/bpp-stella-app/src/environments/` except `environment.local-network.ts`.
+- That file is stale at `1.5.0` on purpose: it is an emulator config against `localhost:8080`, left unmaintained per `stella-bump-version-staging-mr`.
+- If, on a stage branch, the env files disagree among themselves or with package.json, that stage gets BOTH values and the mismatch warning instead of a statement. Never guess.
+- On 2026-10-02, development and staging had package.json `1.33.1` against appVersion `1.33.0`.
 
 ```bash
 P=${ENC[bpp-stella-ui]}
-for br in "$SRC" "$TGT"; do
+for br in development staging main; do
   pkg=$(glab api "/projects/$P/repository/files/projects%2Fbpp-stella-app%2Fpackage.json/raw?ref=$br" | jq -r .version)
   env=$(glab api "/projects/$P/repository/tree?path=projects/bpp-stella-app/src/environments&ref=$br&per_page=100" \
     | jq -r '.[].name | select(startswith("environment") and . != "environment.local-network.ts")' \
@@ -374,18 +383,29 @@ done
 
 ### 7. Report
 
-Final summary: created MRs (with URLs), reused open MRs, skipped repos (no diffs / degenerate / no branch). Then a **"ui_configs SQL"** block, built per the `ui_configs` section: statements grouped **per stage DB**, `$TGT` first. Each group lists only the `ui_type`s whose version changes in this promotion, along with that row's "run it when" condition and the `stella` warning. If nothing changes, the block reads `ui_configs SQL: none (cockpit/kundenportal/stella unchanged)`. The statements are handed to the user only, never run. Example for development → staging:
+Final summary: created MRs (with URLs), reused open MRs, skipped repos (no diffs / degenerate / no branch). Then a **"ui_configs SQL"** block, built per the `ui_configs` section. It always has three groups, `development`, `staging` and `main` in that order, and each group has a line for all three `ui_type`s. Every line carries its marker and qualifier. The statements are handed to the user only, never run. Example: development → staging on 2026-10-02 (cockpit and stella-web bumped by this run):
 
 ```
 ui_configs SQL (hand to the user, never run):
--- staging DB
-UPDATE ui_configs SET version_number = '16.0.73-SNAPSHOT', updated_at = now() WHERE ui_type = 'cockpit' AND is_soft_deleted = false;
--- after the new bpp-stella-web image is live on staging:
-UPDATE ui_configs SET version_number = '0.1.2-SNAPSHOT', updated_at = now() WHERE ui_type = 'kundenportal' AND is_soft_deleted = false;
 -- development DB
-UPDATE ui_configs SET version_number = '16.0.73-SNAPSHOT', updated_at = now() WHERE ui_type = 'cockpit' AND is_soft_deleted = false;
--- optional, only if a reset is wanted on dev:
-UPDATE ui_configs SET version_number = '0.1.2-SNAPSHOT', updated_at = now() WHERE ui_type = 'kundenportal' AND is_soft_deleted = false;
+-- cockpit: changed by this promotion
+UPDATE ui_configs SET version_number = '16.0.75-SNAPSHOT', updated_at = now(), updated_by_name = 'release', updated_by_type = 'system' WHERE ui_type = 'cockpit' AND is_soft_deleted = false;
+-- kundenportal: changed by this promotion; after the new web image is live; optional, only if a reset is wanted on dev
+UPDATE ui_configs SET version_number = '0.1.2-SNAPSHOT', updated_at = now(), updated_by_name = 'release', updated_by_type = 'system' WHERE ui_type = 'kundenportal' AND is_soft_deleted = false;
+-- stella: MISMATCH, no statement. package.json 1.33.1 vs environment.appVersion 1.33.0. run only AFTER the build is live in App Store + Play Store; a higher major/minor locks users onto the /update page; a patch-only raise does nothing
+-- staging DB
+-- cockpit: changed by this promotion
+UPDATE ui_configs SET version_number = '16.0.75-SNAPSHOT', updated_at = now(), updated_by_name = 'release', updated_by_type = 'system' WHERE ui_type = 'cockpit' AND is_soft_deleted = false;
+-- kundenportal: changed by this promotion; after the new web image is live
+UPDATE ui_configs SET version_number = '0.1.2-SNAPSHOT', updated_at = now(), updated_by_name = 'release', updated_by_type = 'system' WHERE ui_type = 'kundenportal' AND is_soft_deleted = false;
+-- stella: MISMATCH, no statement. package.json 1.33.1 vs environment.appVersion 1.33.0. run only AFTER the build is live in App Store + Play Store; a higher major/minor locks users onto the /update page; a patch-only raise does nothing
+-- main DB
+-- cockpit: unchanged (no-op if already set)
+UPDATE ui_configs SET version_number = '16.0.73-SNAPSHOT', updated_at = now(), updated_by_name = 'release', updated_by_type = 'system' WHERE ui_type = 'cockpit' AND is_soft_deleted = false;
+-- kundenportal: unchanged (no-op if already set); after the new web image is live
+UPDATE ui_configs SET version_number = '0.1.0', updated_at = now(), updated_by_name = 'release', updated_by_type = 'system' WHERE ui_type = 'kundenportal' AND is_soft_deleted = false;
+-- stella: unchanged (no-op if already set). run only AFTER the build is live in App Store + Play Store; a higher major/minor locks users onto the /update page; a patch-only raise does nothing
+UPDATE ui_configs SET version_number = '1.33.0', updated_at = now(), updated_by_name = 'release', updated_by_type = 'system' WHERE ui_type = 'stella' AND is_soft_deleted = false;
 ```
 
 Note: `detailed_merge_status` stays `checking` for a while after bulk creation and `has_conflicts:false` is NOT authoritative while checking — report mergeability as un-computed rather than clean.
@@ -414,7 +434,7 @@ echo "Open $TITLE MRs: https://gitlab.com/groups/lipso/clients/brokernet/-/merge
 - **Bumping the spring-boot parent in `brokernet-varias-sign/pom.xml`** → the first `<version>` in the file is the parent; the project version is the first one after `</parent>`.
 - **Bumping the go-stella app in `bpp-stella-ui`** → the app version lives in 16 files across Gradle / Xcode / npm / Angular envs, not one `package.json`. Never bump `bpp-stella-app` or `bpp-stella-common` here; the app has its own skill ([stella-bump-version-staging-mr](https://gitlab.com/lipso/internal/agentic-coding-knowledge/-/blob/main/personal-workflows/nangert/skills/stella-bump-version-staging-mr/SKILL.md)). Only `projects/bpp-stella-web/package.json` and its lock entry are bumped.
 - **Forgetting the `bpp-stella-web` lock entry, or bumping it with `npm version -w`** → either the lock and package.json disagree, or ~90 unrelated lock lines change. Use the anchored `sed`; exactly two lines may differ.
-- **Promoting a version change without handing over the `ui_configs` SQL** → the stage DB keeps the old version and the forced reset never fires for that release (cockpit, kundenportal). Always print the per-stage UPDATEs, also when the version change was already on `$SRC` and this run bumped nothing.
+- **Promoting a version change without handing over the `ui_configs` SQL** → the stage DB keeps the old version and the forced reset never fires for that release (cockpit, kundenportal). Always print all three stage DBs × all three `ui_type`s with their markers, also when this run bumped nothing.
 - **Taking the `stella` value from package.json, or printing it without the store warning** → the app compares `environment.appVersion`, and a premature major/minor raise locks every user onto `/update` with nothing to install. On a package.json/appVersion mismatch, print both values and no statement.
 - **Double-bumping on re-run** → always apply the idempotency guard (source vs target version differ = already bumped).
 - **Missing servo-ui / callidus-bvs-ui** → both live in subgroups; a group listing without `include_subgroups=true` never returns them (verified 2026-09-14: 57 projects, zero of them). They reach this skill as ordinary `bpp-project-index` manifest rows with subgroup-encoded `enc` values — never rebuild an encoded path from the repo name.
