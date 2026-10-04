@@ -28,7 +28,7 @@ Not for: bulk dev→staging promotion (`bpp-promote-dev-to-staging`), running e2
 | Protected branches | `development`, `staging`, `main`, `master` |
 | New branch prefix | `feature/` + kebab slug from the diff |
 | Commit message | auto-generated, conventional (`feat:`/`fix:`/`chore:` …) from the diff |
-| MR title/desc | `glab --fill` (from commit history) |
+| MR title/desc | title = last commit subject, description = commit subjects since `origin/development` |
 | Unit test filter | `Category!=LocalIntegration&Category!=Integration` |
 
 ## The `glab-base` trap (read first)
@@ -68,7 +68,8 @@ BRANCH=$(git rev-parse --abbrev-ref HEAD)
 
 ```bash
 if [ -n "$(git status --porcelain)" ]; then
-  git add -A
+  git status --porcelain                      # review: never stage appsettings.local.json or other local config
+  git add -- "${FILES[@]}"                     # FILES = explicit paths picked from that list, never `git add -A`
   git commit -m "<auto conventional message from the diff>"
 fi
 ```
@@ -115,7 +116,7 @@ A test-file match is a lead, not proof — open it and confirm it actually calls
 
 **4d — Any member without coverage → STOP. Do not push or create the MR yet.** List every uncovered member to the user, then close the gap:
 
-- **Unit gap** → write the `{Class}Tests` / `{Entity}DtoMapperTests` / `{Attribute}Tests` now, `git add -A && git commit`, then continue.
+- **Unit gap** → write the `{Class}Tests` / `{Entity}DtoMapperTests` / `{Attribute}Tests` now, `git add <test files> && git commit`, then continue.
 - **Integration/e2e gap for a new endpoint or flow** → add the test per the **`bpp-add-integration-tests`** skill and commit it. (This skill still does NOT run e2e — it only makes the test EXIST; running it stays with `bpp-run-integration-tests`.)
 - **Explicit user waiver** → only a statement from the user, in this session, to skip coverage for a *named* member counts. Record which member and that the user waived it.
 
@@ -147,24 +148,21 @@ case "$REPO" in                                        # reviewer follows the st
   *) REVIEWER=apittrich ;;
 esac
 
-IID=$(glab api "/projects/$(printf %s "$PROJ" | sed 's#/#%2F#')/merge_requests?state=opened&source_branch=${BRANCH}&target_branch=development" \
+IID=$(glab api "/projects/$(printf %s "$PROJ" | sed 's#/#%2F#g')/merge_requests?state=opened&source_branch=${BRANCH}&target_branch=development" \
   | jq -r '.[0].iid // empty')
 
 if [ -n "$IID" ]; then
   echo "Reusing existing MR !${IID} (push updated it)"
 else
-  glab mr create -R "$PROJ" \
-    --source-branch "$BRANCH" \
-    --target-branch development \
-    --assignee "$ME" \
-    --reviewer "$REVIEWER" \
-    --fill --yes
-  IID=$(glab api "/projects/$(printf %s "$PROJ" | sed 's#/#%2F#')/merge_requests?state=opened&source_branch=${BRANCH}&target_branch=development" \
-    | jq -r '.[0].iid // empty')
+  # `glab mr create` is unreliable in this environment — create through the API.
+  IID=$(glab api --method POST "/projects/$(printf %s "$PROJ" | sed 's#/#%2F#g')/merge_requests" \
+    -f source_branch="$BRANCH" -f target_branch=development \
+    -f title="$(git log -1 --format=%s)" \
+    --raw-field "description=$(git log --format='- %s' origin/development..HEAD)" \
+    | jq -r '.iid // empty')
 fi
 
-# Belt-and-braces: creation-time --reviewer/--assignee flags are silently dropped by glab,
-# so ALWAYS set both fields explicitly afterwards — on the freshly created MR AND the reused one.
+# Set assignee + reviewer explicitly afterwards — on the freshly created MR AND the reused one.
 glab mr update "$IID" -R "$PROJ" --assignee "$ME" --reviewer "$REVIEWER"
 ```
 
@@ -202,13 +200,13 @@ If no `.sln`, run each `*.Tests.csproj` with the same `--filter`. Capture pass/f
 |---|---|
 | Repo from origin | `git remote get-url origin \| sed -E 's#.*/brokernet/##; s#\.git$##'` |
 | New branch | `git switch -c feature/<slug>` |
-| Commit | `git add -A && git commit -m "<msg>"` |
+| Commit | `git add <paths> && git commit -m "<msg>"` (never `appsettings.local.json`) |
 | New endpoints in diff | `git diff origin/development...HEAD -- '*Controller.cs' \| grep -E '^\+.*\[Http'` |
 | New service methods in diff | `git diff origin/development...HEAD -- '*/Services/Interfaces/*' \| grep '^\+.*Task'` |
 | Find a member's coverage | `git grep -n <route-or-method> -- '*Tests*'` |
 | Push | `git push -u origin <branch>` |
 | Existing MR? | `glab api .../merge_requests?state=opened&source_branch=<b>&target_branch=development` |
-| Create MR | `glab mr create -R lipso/clients/brokernet/<repo> -b development --assignee <me> --reviewer <apittrich\|nangertLipso> --fill --yes` |
+| Create MR | `glab api --method POST "/projects/<enc>/merge_requests" -f source_branch=… -f target_branch=development -f title=…` |
 | Set assignee+reviewer (always follow up) | `glab mr update <iid> -R lipso/clients/brokernet/<repo> --assignee <me> --reviewer <apittrich\|nangertLipso>` |
 | Unit tests | `dotnet test <sln> --filter "Category!=LocalIntegration&Category!=Integration"` |
 | Ping | `PushNotification(status="proactive", message="…")` |
@@ -221,7 +219,7 @@ If no `.sln`, run each `*.Tests.csproj` with the same `--filter`. Capture pass/f
 - **Letting `glab` pick `glab-base`** → MR lands in bpp-shared. Always pin `-R lipso/clients/brokernet/<repo>` from `origin`.
 - **MR'ing from a protected branch** → `development→development` is empty / rejected. Auto-create a `feature/*` branch first.
 - **Including integration tests in the gate** → they need the local stack and trip bpp-auth's 429; this skill is unit-only (`Category!=LocalIntegration&Category!=Integration`).
-- **Relying on creation-time `--reviewer`/`--assignee` alone** → glab silently drops these on `glab mr create`, leaving the MR with no assignee/reviewer. Always follow up with `glab mr update <iid> --assignee "$ME" --reviewer "$REVIEWER" -R lipso/clients/brokernet/<repo>` (on new and reused MRs).
+- **Using `glab mr create`** → unreliable here, and it drops `--reviewer`/`--assignee` at creation time. Create via `glab api --method POST …/merge_requests`, then always follow up with `glab mr update <iid> --assignee "$ME" --reviewer "$REVIEWER" -R lipso/clients/brokernet/<repo>` (on new and reused MRs).
 - **Assigning the MR to the reviewer** → the author keeps the assignee slot (they push the fixes and drive it to merge); the other person goes in `--reviewer` only.
 - **Using the backend reviewer on a frontend MR** → Angular repos are reviewed by `nangertLipso`, .NET repos by `apittrich`. Derive it from the repo, don't default blindly.
 - **Duplicating an MR** → query open MRs for the source branch first; a push already updates an existing one.

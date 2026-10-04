@@ -94,9 +94,9 @@ dotnet list <proj> package --include-transitive                       # find the
 1. **`<BppSharedVersion>`** in `BPP.*/Directory.Build.props` — owned by `bpp-bump-shared-version`.
    Never touched here. Also never edit a per-csproj `PackageReference` for `BPP.Shared.NET`; it reads
    the property.
-2. **Every package in the hold matrix** — EF Core family + Npgsql, `Microsoft.AspNetCore.OpenApi` +
-   Swashbuckle, `StackExchange.Redis`, FluentAssertions, AutoMapper, `MockQueryable.Moq`. A hold that
-   *appears* to have dissolved is **reported for a human decision**, never bumped autonomously.
+2. **Every package in `bpp-update-nuget-packages`' hold matrix** — read it there; the list is not
+   repeated here so the two cannot drift. A hold that *appears* to have dissolved is **reported for a
+   human decision**, never bumped autonomously.
 3. **Any major version bump** — reported, never auto-MR'd. Majors flip licences (FluentAssertions 8
    → Xceed commercial, AutoMapper 16 → commercial). "Latest" behind a paywall is not an update.
 4. **TFM / .NET version changes** — out of scope entirely.

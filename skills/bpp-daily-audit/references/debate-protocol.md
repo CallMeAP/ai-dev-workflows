@@ -1,6 +1,6 @@
 # Phase C — Debate
 
-Model **Sonnet 5**, effort **medium**. **Every** finding is debated — this is a deliberate choice,
+Model **`sonnet`**, effort **medium**. **Every** finding is debated — this is a deliberate choice,
 not an oversight, and it is why the reviewer and debate tiers stay off Opus.
 
 ## The debate channel — resume first, fall back second, never terminal

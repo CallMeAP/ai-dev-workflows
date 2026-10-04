@@ -31,7 +31,8 @@ SIGS = [  # first match wins — order matters: bpp-file BEFORE vera-500 (its me
     ("d0005-doctype",   r"D0005|documentType.*not valide"),
     ("bpp-file-500",    r"ConnectorBppFileApiException|unerwarteter Fehler|bpp-file"),
     ("vera-500",        r"Status: 500(?![0-9])"),
-    ("stale-404",       r'"errorCode":"(C0001|P0001|CLAIM0001)"'),
+    ("p0001-oid-change", r'"errorCode":"P0001"'),
+    ("stale-404",       r'"errorCode":"(C0001|CLAIM0001)"'),
     ("vera-401",        r"Status: 401"),
     ("vera-cd0002",     r"CD0002"),
     ("vera-conn-reset", r"Broken pipe|Error while copying content to a stream"),
@@ -55,7 +56,8 @@ Manually read a sample of every `UNMATCHED` entry — new buckets are the whole 
 | `shm-53100` | **OUR infra** | Postgres `/dev/shm` (64MB default) exhausted by parallel-query DSM segments. The EF wrapper `InvalidOperationException … transient failure` is **misleading** — not transient, not app-side. Fix: Portainer `shm_size: 1gb` or `ALTER DATABASE … SET max_parallel_workers_per_gather = 0` (BRO-1033). |
 | `d0005-doctype` | **Boundary (our labels)** | Our hardcoded German documentType vs mandant-configurable VERA catalog (`GET 2.0/document/documentType`, labels truncated at 40 chars). **Fixed 2026-07-16** (vera !69: catalog gate + remaps) → expect 0. If it reappears: new mandant catalog mismatch; the gate's skip error names the rejected label + full catalog. |
 | `vera-500` | **VERA-side** | Empty-body 500s on GETs (customer/contracts, document). Collect endpoint + external ID + timestamp lists for the VERA support report. |
-| `stale-404` | **VERA-side (stale objects)** | C0001/P0001/CLAIM0001 "Object not found" — our stored VERA IDs no longer exist there. Reconciliation topic, not a code bug. |
+| `p0001-oid-change` | **Boundary — our follow-up** | P0001 on a customer OID means VERA changed the OID (merge / re-creation); the customer lives on under a new OID. Our P0001 handling soft-deletes the sync link, which orphans the BPP customer and lets the next sync create a duplicate — list the OIDs, never file them as "stale, ignore". The 2026-07-16 `stale-404` baseline below included P0001: compare the sum of both buckets against it. |
+| `stale-404` | **VERA-side (stale objects)** | C0001/CLAIM0001 "Object not found" — our stored VERA IDs no longer exist there. Reconciliation topic, not a code bug. |
 | `vera-401` | **VERA-side (permissions)** | Mandant permission config; historically a single customer/claim. |
 | `vera-cd0002` | **VERA-side** | VERA's own "unexpected error" on document POST. |
 | `vera-conn-reset` | **Boundary/transient** | Socket drop mid multipart upload (broken pipe). One-offs — monitor, don't chase. |

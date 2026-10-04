@@ -44,13 +44,12 @@ Not for: bumping pins (`bpp-bump-shared-version`), creating promotion MRs
 
 ## Version parsing — do NOT assume `-development`
 
-**The suffix is being removed.** bpp-shared commit `f8c42280` (2026-09-11, Stephan Kast) is
-*"remove stage and release builds. remove missleading development name"*, and the first
-suffix-less package `2026.9.11+f8c42280` was published the same day. Both shapes are live:
+Current packages carry no suffix; older pins (and any historical stage you diff against) may still
+carry `-development` before the `+`:
 
 ```
-2026.9.2-development+28ce29c2    # old scheme, still pinned on staging/main
-2026.9.11+f8c42280               # new scheme
+2026.9.28+b09c735b               # current scheme
+2026.9.2-development+28ce29c2    # older scheme
 ```
 
 **Parse the `+` build metadata only. Never grep for `-development`, never filter on it.**
@@ -225,8 +224,7 @@ Verify both, then confirm. If `git pull` is not a fast-forward, report it rather
 
 ## Common Mistakes
 
-- **Grepping `-development`** → the suffix is being removed (`f8c42280`, 2026-09-11); suffix-less
-  packages already exist. Parse `+` metadata only.
+- **Grepping `-development`** → current pins carry no suffix. Parse `+` metadata only.
 - **Picking the newest pin by version string** → same version, different SHAs is real. Compare by
   `git merge-base --is-ancestor`.
 - **Reading only bpp-backend's pin** → another repo can pin a newer shared. Read all, reduce by
@@ -238,8 +236,7 @@ Verify both, then confirm. If `git pull` is not a fast-forward, report it rather
 - **Skipping the non-Migrations diff check** → a changed tracked `appsettings.json` silently
   repoints the migrator at a different database.
 - **Counting `.Designer.cs` as migrations** → doubles every count. Filter them.
-- **Using the `brokernet/<repo>` namespace** → it is `lipso/clients/brokernet/<repo>`; the other
-  skills were corrected on 2026-09-11.
+- **Using the `brokernet/<repo>` namespace** → it is `lipso/clients/brokernet/<repo>`.
 - **Touching a worktree** → this skill moves the main checkout only.
 - **Running DbMigrator** → never. Out of scope, always.
 

@@ -22,7 +22,8 @@ They are **not** two copies of the same thing. Sending the wrong shape to either
 | Repo | `github.com/CallMeAP/ai-dev-workflows` | `gitlab.com/lipso/internal/agentic-coding-knowledge` |
 | Content | **1:1 literal copy** of the live skill — absolute paths, this machine's username, ready to run | **developer-agnostic**: `{{BPP_ROOT}}`, `{{BROKERNET_ROOT}}`, `{{DEV_USER}}`, `{{WORKFLOWS_DIR}}`, `{{KNOWLEDGE_DIR}}` |
 | Where bpp-* skills go | `skills/<name>/` | `bpp/skills/<name>/` (shared) — **deliberately a different path, do not "fix"** |
-| Where personal skills go (`gs-*`, `lipsum-stundenliste`, `sync-my-skills`) | `skills/<name>/` | `personal-workflows/apittrich/skills/<name>/` — **never** the shared `bpp/skills/` |
+| Where personal skills go (`gs-*`, `lipsum-stundenliste`, `sync-my-skills`, `audit-my-memories`, `bpp-kanban-loop` [obsolete]) | `skills/<name>/` | `personal-workflows/apittrich/skills/<name>/` — **never** the shared `bpp/skills/` |
+| Someone else's skill (`stella-bump-version-staging-mr` — nangert) | `skills/<name>/` | `personal-workflows/<owner>/skills/<name>/` — keep the owner's path and README; name the owner as reviewer on the MR |
 | Per-skill `README.md` | not used | **required** — see below |
 | How it ships | direct `git push` to `main` (standing approval) | **`docs/*` branch + MR**, never a direct push to `main` |
 
@@ -141,7 +142,7 @@ For each new/updated skill:
   `grep -rn '/home/' "$K/bpp/skills/"` must be empty.
 - **New shared skill** → write its `bpp/skills/<name>/README.md` in the same change. A skill reaching the
   shared remote without one is incomplete.
-- **Personal skill** (`gs-*`, `lipsum-stundenliste`, `sync-my-skills`) → mirror copy goes to
+- **Personal skill** (`gs-*`, `lipsum-stundenliste`, `sync-my-skills`, `audit-my-memories`, `bpp-kanban-loop` [obsolete]) → mirror copy goes to
   `personal-workflows/apittrich/skills/<name>/`, literal paths, no placeholders — but **with a
   `README.md` beside it** (see above). Never de-personalise it and never move it into the shared
   `bpp/skills/`.
@@ -181,10 +182,8 @@ git -C "$MIRROR" commit -m "docs(skills): sync $NAME from personal skills"
 `switch -c <b> origin/main` sets the upstream to `origin/main`, so a bare `git push` would target
 `main`. Always push explicitly by refspec (step 7).
 
-Commit trailer on both:
-```
-Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
-```
+Commit trailer on both: the attribution lines Claude Code supplies for the current session. Never
+hard-code a model name — it goes stale with the next model release.
 
 ### 7. Push both remotes (standing approval)
 
@@ -235,7 +234,7 @@ Report: `new: […]`, `updated: […]`, `unchanged: […]`, `skipped (repo newer
 | Personal skills | canonical `skills/`, mirror `personal-workflows/apittrich/skills/` — never shared `bpp/skills/` |
 | Scope | top-level `*.md` + all of `skills/**` incl. support scripts; mirror a skill complete or not at all |
 | Secrets | grep copied files, **support scripts included**; read each hit; real credential → STOP (documented patterns are fine) |
-| Commit | explicit `git add <paths>`, Co-Authored-By trailer |
+| Commit | explicit `git add <paths>`, the session's attribution trailer |
 | Push | canonical: plain `git push` to `main`. Mirror: `docs/*` branch → `push -u origin HEAD:refs/heads/docs/<topic>` → MR. Never `--force`, never merge |
 
 ## Common Mistakes

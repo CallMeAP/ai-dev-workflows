@@ -7,7 +7,7 @@ description: Use when running the READ-ONLY VERA PROD e2e / probe suites in bpp-
 
 ## Overview
 
-Runs bpp-vera-connector's **read-only** integration probes against **LIVE PROD VERA**. Because prod is involved, this skill is a discipline gate: **no prod-VERA test runs until the VERA-write gates are verified OFF, and prod credentials must never be committed.**
+Runs bpp-vera-connector's **read-only** integration probes against **LIVE PROD VERA**. Because prod is involved, this skill is a discipline gate: **no prod-VERA test runs until the VERA-write gates are verified OFF and the user has given an explicit go for this run, and prod credentials must never be committed.** Runs happen only from the main checkout `/home/alex/Entwicklung/bpp/bpp-vera-connector`, never from a worktree.
 
 **REQUIRED SUB-SKILLS:** `bpp-run-integration-tests` (discovery + run mechanics), `bpp-start-local-stack` (Postgres/Redis/bpp-auth the WebApplicationFactory needs), `bpp-connect-local-db` (only if seeding/DB reads are needed).
 
@@ -58,27 +58,22 @@ PY
 
 If output is `REFUSE`, STOP and report. Do not "just run Phase1 anyway".
 
-## Step 2 — Fresh-worktree setup: the mTLS client cert (top failure cause)
+## Step 2 — Main checkout only, and the user's go
 
-The PROD VERA **token endpoint requires an mTLS client certificate** `gobrokernet.p12`, loaded by `ConnectorVeraCertificateHelper` from `App/Certificates/` (copied to build output via `<Content Include="Certificates\**">`). Password comes from `Vera:ClientCertificatePassword` (in `appsettings.local.json`); filename from `Vera:ClientCertificateFileName` (default `gobrokernet.p12`).
+Run every command from the main checkout `/home/alex/Entwicklung/bpp/bpp-vera-connector`. A worktree run is
+not allowed: `GlobalTestSetup` upserts the `VeraDebugTestConsts` credentials into the shared local DB, so a
+worktree's copy overwrites the user's prod credentials there. The main checkout also holds the gitignored
+mTLS client cert `App/Certificates/gobrokernet.p12` the PROD token endpoint requires; without it
+`TryAddClientCertificate` silently skips mTLS and health returns 503 / reads 500.
 
-`.gitignore` ignores `*.p12` / `*.pfx` ("VERA client certificates — never commit"), so **the cert is a LOCAL-only file absent from a fresh git worktree.** If it's missing, `TryAddClientCertificate` silently skips mTLS (debug-logs "kein mTLS") → the PROD token endpoint rejects → **health 503 / reads 500 even though the host is reachable.**
-
-Before running in a worktree, ensure the cert is present; if not, copy it (and the dev `gobrokernet_test.pfx`) from the main checkout — they stay untracked (gitignored); never stage/commit:
-
-```bash
-CERT="BPP.VeraConnector.NET/BPP.VeraConnector.NET.App/Certificates"
-for f in gobrokernet.p12 gobrokernet_test.pfx; do
-  [ -f "$CERT/$f" ] || cp "/home/alex/Entwicklung/bpp/bpp-vera-connector/$CERT/$f" "$CERT/$f"
-done
-git check-ignore "$CERT/gobrokernet.p12"   # confirm it's ignored (won't be staged)
-```
+Before the first `dotnet test`, show the user the preflight output (Step 1) and the exact commands from
+Step 5, and wait for an explicit go for this run. A go covers this run only, not later ones.
 
 ## Step 3 — Credentials never get committed (non-negotiable)
 
 Prod creds live in `VeraDebugTestConsts.cs` (seeded into the local DB) and `appsettings.local.json` (VERA URLs + cert password). **Both are git-tracked and NOT gitignored** — a `git add -A` / `git commit -a` would leak prod creds into history.
 
-- **Never** `git add -A`, `git add .`, or `git commit -a` in this worktree. Only explicit `git add <specific-file>`.
+- **Never** `git add -A`, `git add .`, or `git commit -a` in this checkout. Only explicit `git add <specific-file>`.
 - Before every commit: `git status` + `git diff --cached --name-only`; confirm `appsettings.local.json`, `VeraDebugTestConsts.cs`, and the WAF config file are NOT staged.
 - Never print, log, or echo cred VALUES. Print only booleans / redacted classifications. Hostnames (public prod URL) are OK; username/password/apikey/clientId/clientSecret/userToken/cert-password are NOT.
 - Local config edits made for a run (e.g. flipping a scope toggle, pointing `Vera` at PROD) stay **unstaged** — never revert or commit them either; leave them as-is unless told otherwise.
@@ -87,29 +82,26 @@ Prod creds live in `VeraDebugTestConsts.cs` (seeded into the local DB) and `apps
 
 Always run Phase1 smoke before the full VeraProdReadOnly suite. Phase1 is 16 unauthenticated GET reads (health, search, customer/contract/claim/doc) — it proves the App boots and PROD VERA is reachable **and authenticating (mTLS + token)**, in ~6s when healthy. Only proceed to the full suite once Phase1 is green (or the user green-lights despite failures). Green Phase1 also confirms the cert is in place.
 
-## Step 5 — Run (net9 build recipe)
+## Step 5 — Run
 
-`main` targets **net9**, but the local `apittrich` bpp-shared ProjectReference resolves to a net10 checkout and breaks the build. Temporarily neuter ONLY that condition in the worktree's `BPP.VeraConnector.NET/Directory.Build.props`, run, then `git checkout -- Directory.Build.props` (never commit it):
+bpp-vera-connector (`main` and `development`) and bpp-shared all target **net10**, so the build needs no `Directory.Build.props` change.
 
 ```bash
 # ensure Postgres+Redis (+bpp-auth for authed suites) are up first (bpp-start-local-stack)
 cd BPP.VeraConnector.NET
-python3 -c "p='Directory.Build.props';s=open(p).read();open(p,'w').write(s.replace('/home/alex/Entwicklung/bpp/bpp-shared/BPP.Shared.NET/BPP.Shared.NET/BPP.Shared.NET.csproj','/NEUTERED/x.csproj',1))"
 
 # Phase1 smoke (read-only connectivity) — run FIRST
 dotnet test BPP.VeraConnector.NET.IntegrationTests/BPP.VeraConnector.NET.IntegrationTests.csproj -c Debug --filter "FullyQualifiedName~Phase1_Smoke"
 
 # Full read-only prod probes ([Explicit] => must be named explicitly). Space suites ≥60s (bpp-auth 429 trap); ≤3 runs.
 dotnet test BPP.VeraConnector.NET.IntegrationTests/BPP.VeraConnector.NET.IntegrationTests.csproj -c Debug --filter "Category=VeraProdReadOnly"
-
-git checkout -- Directory.Build.props   # ALWAYS revert; never commit
 ```
 
 `VeraProdReadOnly` probes are `[Explicit]` + inert unless `appsettings.local.json` points VERA at PROD and `ReadTestAnchor:CustomerVeraId` (for anchor-based tests) is set; the discovery probe needs no anchor. Never force `[Explicit]` WRITE tests.
 
 ## Diagnosing failures (read-only, so never a write risk)
 
-- **Health 503 / reads 500, host TCP-reachable** → **FIRST suspect: missing mTLS cert** `gobrokernet.p12` in the worktree `App/Certificates/` (Step 2). Otherwise a VERA token/credential problem. The generic 500 handler masks the inner exception; check the `health` 503 body (`Error` field) or the App server log. If a fresh worktree is red but the main checkout is green, it is almost always the missing local cert.
+- **Health 503 / reads 500, host TCP-reachable** → **FIRST suspect: missing mTLS cert** `gobrokernet.p12` in `App/Certificates/` (Step 2). Otherwise a VERA token/credential problem. The generic 500 handler masks the inner exception; check the `health` 503 body (`Error` field) or the App server log.
 - **Health 503 / reads fail, host NOT reachable (DNS/TCP)** → VPN/network. Connect to the VERA-prod VPN.
 - **`Assert.Ignore` "Vera section points to Dev-Tenant"** → `appsettings.local.json` still on dmz211/uniquare; set the `Vera` section to PROD.
 - **bpp-auth down** → only blocks authenticated suites; Phase1 + the debug-endpoint probes are unauthenticated and still run.
@@ -118,8 +110,8 @@ git checkout -- Directory.Build.props   # ALWAYS revert; never commit
 
 - About to run a prod-VERA test without having printed the two hard-gate flag values → STOP, run the preflight.
 - `EnableWriteAccess` or `VeraWriteTestsEnabled` is `true` → STOP, report, do not run.
-- Fresh worktree red (health 503 / reads 500) but main checkout green → STOP, copy the missing mTLS cert (Step 2), don't chase creds.
-- `git add -A` / `git commit -a` anywhere in this worktree → STOP, use explicit per-file `git add`.
+- About to run from a worktree, or without the user's go for this run → STOP (Step 2).
+- `git add -A` / `git commit -a` anywhere in this checkout → STOP, use explicit per-file `git add`.
 - Pasting or echoing a cred value → STOP, redact.
 
 ## Rationalization table
@@ -129,6 +121,6 @@ git checkout -- Directory.Build.props   # ALWAYS revert; never commit
 | "Write is surely off, just run it" | Surely ≠ verified. Print the two hard-gate flags first. |
 | "VeraSyncTestsEnabled=true means it can write to VERA" | No — sync fixtures write only the LOCAL DB; every VERA-push is gated by `EnableWriteAccess`. Only `EnableWriteAccess` + `VeraWriteTestsEnabled` must be false. |
 | "Phase1 is read-only, skip the preflight" | The preflight is the gate for ANY prod call, Phase1 included. |
-| "Worktree is red, the creds must be wrong" | If main checkout is green, it's the gitignored mTLS cert missing in the worktree — copy it before touching creds. |
+| "A worktree keeps my main checkout clean" | A worktree run overwrites the prod creds in the shared local DB. Main checkout only. |
+| "The user approved the last run" | A go covers one run. Ask again. |
 | "I'll `git add -A`, the creds/certs are only local" | The cred files are tracked; `-A` commits them. Explicit add only. |
-| "Reverting Directory.Build.props later is fine, commit now" | Never commit the neuter. Revert before any commit. |

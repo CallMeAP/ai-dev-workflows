@@ -1,6 +1,6 @@
 # Phase D — Adjudication
 
-Model **Opus 5**, effort **high**. This is the only stage that authorises a write. One adjudicator
+Model **`opus`**, effort **high**. This is the only stage that authorises a write. One adjudicator
 per work item; it receives the debate output, the diff, and the ticket.
 
 ## Output per finding

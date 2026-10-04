@@ -1,9 +1,11 @@
 ---
 name: bpp-kanban-loop
-description: Use when driving the local BPP kanban board at http://127.0.0.1:7777 as a coordinator loop — phrases like "run the kanban loop", "work the kanban board", "start the board loop", "pick up kanban tickets", "/loop the kanban board". Each tick reads the whole board, reconciles `mr_open` cards against GitLab, computes the claimable set under the repo-mutex / bpp-shared-exclusivity / depends_on / MAX_IN_FLIGHT rules, spawns one implementer agent per selected ticket concurrently, and schedules the next wakeup. Implementer agents open an MR and stop — no agent ever merges.
+description: OBSOLETE (retired 2026-10-04) — do not use. Former coordinator loop for the local BPP kanban board at http://127.0.0.1:7777; kept for history only.
 ---
 
 # bpp-kanban-loop
+
+> **OBSOLETE — retired 2026-10-04.** Do not run this skill. It is no longer installed and is kept here for history only.
 
 ## Overview
 

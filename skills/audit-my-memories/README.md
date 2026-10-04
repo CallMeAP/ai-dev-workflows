@@ -41,8 +41,7 @@ a shared skills location, not of this file.
 ## Shell / OS assumptions
 
 Linux + bash, nothing exotic. The Part 2a script is plain `python3` (standard library only —
-`re`, `os`, `glob`). The Part 3/4 secret scans are plain `grep -E`/`grep -P`. `sed -i` (GNU form,
-no `-i ''`) is used for the small in-place redaction edits in Part 4.
+`re`, `os`, `glob`). The Part 3/4 secret scans are plain `grep -E`.
 
 Verified on this machine 2026-09-14: Python 3.12, GNU sed, glab 1.x.
 

@@ -1,6 +1,6 @@
 ---
 name: bpp-bump-shared-version
-description: Use when bumping the BPP.Shared.NET package version across all BPP .NET repos — phrases like "bump bpp-shared", "update shared version", "sync bpp-shared across repos", "release shared package", "pull latest bpp-shared everywhere". Fetches the newest package by `created_at` from the GitLab registry via `glab` (scheme-agnostic — never filters on a `-development` suffix), discovers ALL consumer repos GitLab-side (`bpp-*` repos whose `BPP.*/Directory.Build.props` contains `<BppSharedVersion>`), bumps locally cloned repos via pull→rewrite→commit→push and uncloned repos via a direct GitLab API commit. Unrelated local changes don't block a bump (detached-worktree fallback); skips repos whose props file itself is dirty, off-branch repos (bulk mode), and already-current repos.
+description: Use when bumping the BPP.Shared.NET package version across all BPP .NET repos — phrases like "bump bpp-shared", "update shared version", "sync bpp-shared across repos", "release shared package", "pull latest bpp-shared everywhere". Fetches the newest package by `created_at` from the GitLab registry via `glab` (scheme-agnostic — never filters on a `-development` suffix), discovers ALL consumer repos GitLab-side (`bpp-*` repos whose `BPP.*/Directory.Build.props` contains `<BppSharedVersion>`), bumps locally cloned repos via pull→rewrite→commit→push and uncloned repos via a direct GitLab API commit. Unrelated local changes don't block a bump (that repo is bumped via the API commit instead); skips repos whose props file itself is dirty, off-branch repos (bulk mode), and already-current repos.
 ---
 
 # BPP: Bump bpp-shared version across all .NET repos
@@ -30,7 +30,7 @@ Conservative on edge cases: skip + report rather than auto-fix.
 | Commit message | `chore: bump bpp-shared to {version}` (identical for local and API commits) |
 | Push remote | `origin` |
 | Channel | newest package by `created_at` — **no suffix filter** (see step 1) |
-| Repo list | `bpp-project-index` manifest: `state=active`, name matches `^bpp-`, tags ∌ `shared-source` (`bpp-shared`). Verified 2026-09-14 to reproduce the old group-listing set exactly. |
+| Repo list | `bpp-project-index` manifest: `state=active`, name matches `^bpp-`, tags ∌ `shared-source` (`bpp-shared`) |
 | Consumer test | repo has a root-level `BPP.*/Directory.Build.props` on `development` containing `<BppSharedVersion>` (folder name varies — e.g. `BPP.DocumentAnalysis`, `BPP.Agent.NET`) |
 | Local clone path | the manifest's `local_path` column (keyed on the `origin` URL, so a renamed folder is still found), `-` = no clone |
 
@@ -38,44 +38,28 @@ Conservative on edge cases: skip + report rather than auto-fix.
 
 A repo is **skipped + reported** (never auto-fixed) when:
 
-1. Local clone working tree is dirty **on the props file itself** (`git status --porcelain` lists the repo's `Directory.Build.props`). Dirt on UNRELATED files (e.g. `appsettings.local.json` cred edits) does NOT block — use the detached-worktree fallback below.
-2. Local clone branch is not `development` (bulk flow; a targeted bump may use the worktree fallback instead — see below).
+1. Local clone working tree is dirty **on the props file itself** (`git status --porcelain` lists the repo's `Directory.Build.props`). Dirt on UNRELATED files (e.g. `appsettings.local.json` cred edits) does NOT block — that repo is bumped via the API commit (see below).
+2. Local clone branch is not `development` (bulk flow; a targeted bump may use the API commit instead — see below).
 3. `git pull --ff-only origin development` fails (e.g. diverged history).
 4. Local (or remote, for API-path repos) `<BppSharedVersion>` already equals fetched `LATEST` → reported as `up-to-date`.
 5. **Downgrade guard**: current version is *newer* than `LATEST` (semver-style compare on the bare `YYYY.M.D` portion — build metadata and any pre-release suffix stripped, see `ver_date` in step 1). Reported as `skipped (newer-local)` / `skipped (newer-remote)`.
-6. **A repo with a local clone is NEVER bumped via API** — if its local flow skips, it stays skipped (API commit behind the user's back would make their checkout diverge). The detached-worktree fallback is the sanctioned alternative: it commits via git on origin/development without touching the checkout.
+6. **A clean local clone on `development` always takes the local flow**, never the API. The API commit is used for a local clone only when its tree is dirty on unrelated files, or for a targeted bump the user asked for by name; the checkout is left untouched and ends up 1 commit behind `origin/development` (a later `git pull --ff-only` catches it up, because the props file itself is clean).
 7. Discovery could not inspect a repo (tree/props fetch failed, e.g. missing `development` branch) → reported under **Unverified** — these are potential missed consumers; the run continues but the summary must call them out.
 
 Skipped repos do NOT abort the run. Continue to the next repo.
 
-## Detached-worktree fallback (unrelated-dirty / targeted bump)
+## API commit for a dirty or off-branch local clone
 
-The bump commit only ever touches `Directory.Build.props` — an unrelated local change must not block it. When a local clone is dirty on unrelated files, or a **targeted bump** ("bump bpp-file") hits a checkout that is dirty and/or on another branch: never stash, never switch, never touch the working tree. Instead commit via a throwaway detached worktree based on origin/development:
-
-```bash
-repo_dir="${LOCALPATH[$repo]}"        # manifest local_path — never a guessed ~/Entwicklung/bpp/<repo>
-W=$(mktemp -d)/wt-bump
-git -C "$repo_dir" fetch -q origin development
-git -C "$repo_dir" worktree add "$W" --detach origin/development
-# Portable in-place rewrite: GNU `sed -i` and BSD `sed -i ''` take incompatible
-# arguments, so write to a temp file and move. Then prove the rewrite took --
-# a silent no-op must never reach a commit.
-P="$W/<props-path>"
-sed "s|<BppSharedVersion>[^<]*</BppSharedVersion>|<BppSharedVersion>${LATEST}</BppSharedVersion>|" \
-  "$P" > "$P.tmp" && mv "$P.tmp" "$P"
-grep -q "<BppSharedVersion>${LATEST}</BppSharedVersion>" "$P" \
-  || { echo "FAIL - rewrite did not take in $P" >&2; exit 1; }
-git -C "$W" add <props-path>
-git -C "$W" commit -m "chore: bump bpp-shared to ${LATEST}"
-git -C "$W" push origin HEAD:development
-git -C "$repo_dir" worktree remove "$W"
-```
-
-Apply the same up-to-date + downgrade guards on the worktree's props content first. In the BULK flow, use this automatically for dirty-but-unrelated repos on `development`; off-branch repos stay skip+report in bulk (branch state may signal in-progress work) but MAY be bumped this way when the user asks for that repo explicitly. Note the checkout does not receive the commit — report `(checkout not updated — worktree push)` so the user knows their local clone is now 1 behind.
+The bump commit only ever touches `Directory.Build.props`, so an unrelated local change must not block it.
+When a local clone on `development` is dirty on unrelated files, it joins `API_LOCAL` and is bumped by the
+step 5 API loop — never stash, never switch, never touch the working tree. Off-branch repos stay
+skip+report in bulk (branch state may signal in-progress work), but MAY be bumped through the API when the
+user asks for that repo explicitly. Report such repos as `(checkout not updated — API commit)` so the user
+knows their local clone is now 1 behind.
 
 ## Workflow
 
-### 1. Fetch latest -development version
+### 1. Fetch the newest BPP.Shared.NET version
 
 ```bash
 # Newest package by created_at. NEVER filter on a version-naming suffix.
@@ -94,15 +78,14 @@ ver_date() { local v=${1%%+*}; echo "${v%%-*}"; }
 echo "Latest bpp-shared: $LATEST (commit $SHA, date $(ver_date "$LATEST"))"
 ```
 
-**Do not filter on `-development` (or any other suffix).** bpp-shared dropped the stage/release build
-names on 2026-09-11 (`f8c42280` — *"remove stage and release builds. remove missleading development
-name"*), so the newest package carries **no suffix at all**. A `test("-development\\+")` filter does not
-fail on that — it silently returns the second-newest package and the whole fleet gets bumped to a stale
-version while the run reports success. The only safe selector is recency plus the package name.
+**Do not filter on `-development` (or any other suffix).** Current packages carry no suffix
+(`2026.9.28+b09c735b`). A suffix filter does not fail on that — it silently returns an older package
+and the whole fleet gets bumped to a stale version while the run reports success. The only safe
+selector is recency plus the package name.
 
 ### 2. Discover consumer repos in GitLab (authoritative)
 
-List `bpp-*` projects in the `lipso/clients/brokernet/` group, then probe each repo's root tree on `development` for a `BPP.*/Directory.Build.props` containing `<BppSharedVersion>`. Record the props path and current remote version per consumer.
+Take the `bpp-*` repo list from the `bpp-project-index` manifest, then probe each repo's root tree on `development` for a `BPP.*/Directory.Build.props` containing `<BppSharedVersion>`. Record the props path and current remote version per consumer.
 
 ```bash
 declare -A PROPSPATH REMOTEVER ENC LOCALPATH
@@ -145,7 +128,7 @@ Non-consumers (no props / no `<BppSharedVersion>`) are expected: Java services (
 ### 3. Split consumers: local clone vs remote-only
 
 ```bash
-declare -a LOCAL_REPOS REMOTE_ONLY
+declare -a LOCAL_REPOS REMOTE_ONLY API_LOCAL
 for repo in "${CONSUMERS[@]}"; do
   if [ "${LOCALPATH[$repo]}" != "-" ] && [ -e "${LOCALPATH[$repo]}/.git" ]; then
     LOCAL_REPOS+=("$repo")
@@ -170,14 +153,17 @@ for repo in "${LOCAL_REPOS[@]}"; do
   repo_dir="${LOCALPATH[$repo]}"
   props="${repo_dir}/${PROPSPATH[$repo]}"
 
-  # (1) cleanliness + branch
+  # (1) branch + cleanliness
   cd "$repo_dir" || { SKIPPED+=("$repo: cd-failed"); continue; }
-  if [ -n "$(git status --porcelain)" ]; then
-    SKIPPED+=("$repo: dirty"); continue
-  fi
   branch=$(git rev-parse --abbrev-ref HEAD)
   if [ "$branch" != "development" ]; then
     SKIPPED+=("$repo: on-branch-$branch"); continue
+  fi
+  if [ -n "$(git status --porcelain -- "${PROPSPATH[$repo]}")" ]; then
+    SKIPPED+=("$repo: props-dirty"); continue
+  fi
+  if [ -n "$(git status --porcelain)" ]; then
+    API_LOCAL+=("$repo"); continue      # unrelated dirt → step 5 API commit, checkout untouched
   fi
 
   # (2) pull
@@ -223,11 +209,11 @@ done
 
 ### 5. Remote-only per-repo loop (API commit)
 
-For consumers with no local clone, commit the rewritten props file directly on `development` via the GitLab commits API. Re-fetch the raw file at bump time (the discovery snapshot may be stale), apply the same up-to-date + downgrade guards, and sanity-check the rewritten content before POSTing.
+For consumers with no local clone — and the dirty local clones collected in `API_LOCAL` — commit the rewritten props file directly on `development` via the GitLab commits API. Re-fetch the raw file at bump time (the discovery snapshot may be stale), apply the same up-to-date + downgrade guards, and sanity-check the rewritten content before POSTing.
 
 ```bash
-for repo in "${REMOTE_ONLY[@]}"; do
-  enc="lipso%2Fclients%2Fbrokernet%2F${repo}"
+for repo in "${REMOTE_ONLY[@]}" "${API_LOCAL[@]}"; do
+  enc="${ENC[$repo]}"                   # manifest enc — never rebuilt from the name (subgroups)
   props_rel="${PROPSPATH[$repo]}"
   props_enc="${props_rel//\//%2F}"
 
@@ -264,7 +250,11 @@ for repo in "${REMOTE_ONLY[@]}"; do
     '{branch:"development", commit_message:$msg, actions:[{action:"update", file_path:$path, content:$content}]}')
   if echo "$payload" | glab api --method POST "/projects/${enc}/repository/commits" \
        -H 'Content-Type: application/json' --input - >/dev/null 2>&1; then
-    UPDATED_API+=("$repo: $current → $LATEST (API commit, no local clone)")
+    if [ "${LOCALPATH[$repo]}" != "-" ]; then
+      UPDATED_API+=("$repo: $current → $LATEST (checkout not updated — API commit)")
+    else
+      UPDATED_API+=("$repo: $current → $LATEST (API commit, no local clone)")
+    fi
   else
     SKIPPED+=("$repo: api-commit-failed")
   fi
@@ -277,18 +267,18 @@ Print all groups; `Unverified` and `Skipped` entries get one line each so the us
 
 ```
 Updated via local push (N):
-  bpp-backend       2026.5.4-development+5cc45b16 → 2026.7.3-development+6af1b772
+  bpp-backend       2026.9.28+b09c735b → 2026.10.2+5536167b
   bpp-auth          ...
 
-Updated via API commit — no local clone (N):
-  bpp-agent         2026.5.4-development+5cc45b16 → 2026.7.3-development+6af1b772
+Updated via API commit — no local clone, or a dirty one (N):
+  bpp-agent         2026.9.28+b09c735b → 2026.10.2+5536167b
 
 Up-to-date (N):
   bpp-stella
   ...
 
 Skipped (N):
-  bpp-chat          dirty
+  bpp-chat          props-dirty
   bpp-file          on-branch-feature/foo
 
 Non-consumers (N): bpp-mail, bpp-js-report-connector, bpp-agent-ui, ...
@@ -299,13 +289,11 @@ UNVERIFIED — could not inspect, possible missed consumers (N):
 
 ## Common mistakes
 
-- **Filtering the registry on a version-naming suffix** → `select(.version | test("-development\\+"))` was the
-  original selector; it broke silently on 2026-09-11 when bpp-shared stopped suffixing its packages, quietly
-  handing back the second-newest version. Select by recency + package name only, and parse the commit from
-  the `+` build metadata (`SHA=${LATEST##*+}`). The same applies to any future scheme change.
+- **Filtering the registry on a version-naming suffix** → silently hands back an older package. Select by
+  recency + package name only, and parse the commit from the `+` build metadata (`SHA=${LATEST##*+}`).
 - **Local-only `find` discovery** → misses consumers that aren't cloned on this machine (`bpp-agent` precedent). The `bpp-project-index` manifest is the authoritative repo set; a local `find` is not a substitute. Equally: do not rebuild the group listing here — the index already unions it with `bpp/repos.md`.
-- **API-bumping a repo that has a local clone** → never. Local clone present = local flow (or detached-worktree fallback) only; an API commit would silently diverge the user's checkout.
-- **Letting an unrelated dirty file block a bump** → the bump touches only `Directory.Build.props`; use the detached-worktree fallback instead of skipping (skip only when the props file itself is dirty).
+- **API-bumping a clean local clone** → never. A clean checkout on `development` takes the local flow; the API path is for uncloned repos, unrelated-dirty clones, and repos the user names explicitly.
+- **Letting an unrelated dirty file block a bump** → the bump touches only `Directory.Build.props`; bump that repo through the API instead of skipping (skip only when the props file itself is dirty).
 - **Silently dropping repos whose tree/props fetch failed** → report them under `UNVERIFIED` in the summary; they are exactly the "incomplete bump" risk this design exists to prevent.
 - **Pushing on top of stale state** → always `git pull --ff-only` first; if it fails, skip the repo.
 - **Auto-stashing dirty changes** → never. Skip + notify; the user owns their working tree.

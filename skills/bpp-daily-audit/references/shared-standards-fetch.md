@@ -85,9 +85,10 @@ This is deliberately the *opposite* of `rules.md`, and the difference is not arb
   useful partial state. The knowledge repo is a **separate GitLab project**; it being down says
   nothing about whether this run can finish. Aborting a whole fleet audit on it would trade full
   coverage for zero coverage.
-- **Consistency inside this one repo.** `bpp/repos.md` comes from the *same* project and already
-  degrades loudly (`discovery.md` §A1: "say so loudly in the report … and continue"). Two files from
-  one repo with opposite failure policies is how someone later copies the wrong one.
+- **Consistency with the fleet list.** `bpp/repos.md` comes from the *same* project; it reaches the
+  audit through `bpp-project-index`'s manifest, and a stale or GitLab-less manifest degrades loudly
+  (`discovery.md` §A1 → Degraded). Two inputs from one repo with opposite failure policies is how
+  someone later copies the wrong one.
 
 The skip is a **skip, not a clean result** — `rules-fetch.md`'s standing doctrine: a rule that did
 not run is never reported as "0 findings".

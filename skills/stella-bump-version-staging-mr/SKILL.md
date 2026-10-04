@@ -1,6 +1,6 @@
 ---
 name: stella-bump-version-staging-mr
-description: Use when the user asks to bump go-stella's app version (minor or patch) and ship the bump to staging in the bpp-stella-ui (formerly brokernet-app) GitLab repo. Triggered by phrases like "raise the version", "bump version", "release a new version to staging", "create staging deployment MR", "cut a staging release", "bump and create staging MR", "increase version and open MR to staging". Do NOT use for prod releases — those use the `prod-deployment` label and a different process. Do NOT use for one-off file edits or staging MRs that aren't a release bump.
+description: Use when the user asks to bump go-stella's app version (minor or patch) and ship the bump to staging in the bpp-stella-ui (formerly brokernet-app) GitLab repo. Triggered by phrases like "raise the version", "bump version", "release a new version to staging", "create staging deployment MR", "cut a staging release", "bump and create staging MR", "increase version and open MR to staging". Do NOT use for prod releases — those go `staging` → `main` with the `main-deployment` label (`bpp-promote-dev-to-staging`). Do NOT use for one-off file edits or staging MRs that aren't a release bump.
 ---
 
 # Bump go-stella version + open staging-deployment MR
@@ -12,7 +12,7 @@ description: Use when the user asks to bump go-stella's app version (minor or pa
 - The repo is `gitlab.com/lipso/clients/brokernet/bpp-stella-ui` (renamed from `brokernet-app` on 2026-09-01), target staging branch `staging`, source `development`.
 
 Do NOT use for:
-- Prod release (different label `prod-deployment`, different review path).
+- Prod release (`staging` → `main`, label `main-deployment`, handled by `bpp-promote-dev-to-staging`).
 - A version-only edit without releasing (just edit by hand if you really need that).
 - A staging MR that ISN'T a release bump (use a normal MR flow).
 
@@ -52,8 +52,8 @@ Ask once, then proceed:
 - **Bump type** — `minor` or `patch`. Refuse `major` and ask the user to confirm — major bumps usually have a release plan.
 - **Optional explicit new version** — if the user provides one (e.g. "bump to 1.23.0"), use it as-is and skip auto-compute.
 
-Recent release history (`1.29.1 → 1.30.0 → 1.31.0 → 1.32.0`) is **minor**-cadenced; if the user says "bump"
-without a type, confirm rather than guessing.
+Releases are usually **minor**; if the user says "bump" without a type, confirm rather than guessing
+(`git log --oneline --grep "bump version to"` shows the recent cadence).
 
 ## Procedure
 
@@ -177,7 +177,7 @@ Cross-check against the previous bump when in doubt:
 
 ### 5. Commit and push
 
-The user's invocation of this skill is the per-action approval the global GitLab rule requires. If anything in the diff looks unexpected (extra files, non-version lines), STOP and ask.
+The user's invocation of this skill is the approval to commit and push. If anything in the diff looks unexpected (extra files, non-version lines), STOP and ask.
 
 ```bash
 git add -u
@@ -188,7 +188,7 @@ git push origin development        # detached worktree: git push origin HEAD:dev
 ### 6. Create the staging MR
 
 `staging-deployment` is a GitLab MR **label** (id 49482385, color `#0068B4`), NOT a git tag. Title pattern
-matches recent history (`development -> staging`).
+matches recent history (`Development -> Staging`, exact casing).
 
 `glab mr create` is broken in this environment — use the API directly:
 
@@ -197,7 +197,7 @@ PROJ="lipso%2Fclients%2Fbrokernet%2Fbpp-stella-ui"
 glab api --method POST "/projects/$PROJ/merge_requests" \
   -f source_branch=development \
   -f target_branch=staging \
-  -f title="development -> staging" \
+  -f title="Development -> Staging" \
   -f description="Release v$NEW" \
   -f labels="staging-deployment" \
   --jq '.iid, .web_url'
@@ -236,7 +236,7 @@ The `web_url` from step 6 is the result. Paste it back to the user.
 - **NEVER replace `MARKETING_VERSION` without anchoring on the OLD version** — the iOS extension lines at `1.0.16` must stay untouched.
 - **NEVER touch `projects/bpp-stella-app/src/environments/environment.local-network.ts`** — it's stale on purpose.
 - **NEVER use BSD `sed -i ''`** — this environment is GNU sed.
-- **NEVER force-push `development`** (global rule).
+- **NEVER force-push `development`** — it is a shared branch.
 - **NEVER switch a main checkout's branch** — use a detached worktree.
 - **NEVER push a major version bump through this skill.** If the user says `major`, STOP and confirm.
 - **NEVER assume `staging-deployment` is a git tag.** It's a GitLab MR label. Do not run `git tag staging-deployment`.
@@ -277,6 +277,6 @@ git push origin HEAD:development
 PROJ="lipso%2Fclients%2Fbrokernet%2Fbpp-stella-ui"
 glab api --method POST "/projects/$PROJ/merge_requests" \
   -f source_branch=development -f target_branch=staging \
-  -f title="development -> staging" -f description="Release v$NEW" \
+  -f title="Development -> Staging" -f description="Release v$NEW" \
   -f labels="staging-deployment" --jq '.web_url'   # ← paste this back to the user
 ```

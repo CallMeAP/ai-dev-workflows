@@ -44,24 +44,13 @@ For each controller also record: the class-level `[Route(...)]`/route prefix, `[
 
 ### Categories — always match BOTH, or you will invent work
 
-`Integration` and `LocalIntegration` are **synonyms**. bpp-backend's own `IntegrationTestCategories`
-documents `Integration` as *"Tests, die gegen laufende Companion-Services ausgefuehrt werden
-duerfen"* — exactly what `LocalIntegration` means elsewhere. Which name a repo uses is history, not
-meaning.
-
-Auditing on one name only is not a cosmetic error here. **Five repos tag their e2e exclusively as
-`LocalIntegration`** — bpp-auth (17 files), bpp-chat (9), bpp-push (4), bpp-stella (32),
-bpp-id-austria-connector (7); bpp-file, bpp-cheggnet and bpp-vera use both. Audit those five for
-`Category("Integration")` alone and every endpoint reports `GAP`, so this skill — which *writes the
-missing tests* — duplicates suites that already exist. A false negative that costs work, not just a
-wrong report.
-
-Two blind spots, both proven, both apply here:
-
-| Trap | Proven | Effect |
-|---|---|---|
-| Constant tagging `[Category(IntegrationTestCategories.Integration)]` | 2026-07-13 | a literal grep misses all 8 bpp-backend module e2e suites |
-| Exclusive `LocalIntegration` | 2026-08-14 | five repos report zero coverage / "No test matches" |
+`Integration` and `LocalIntegration` are **synonyms**; which name a repo uses is history, not
+meaning. Most suites tag through a **constant**, not a literal — `[Category(E2eTestCategories.Integration)]`
+(bpp-backend's `BPP.Backend.NET.IntegrationTesting.Shared/E2eTestCategories.cs`; bpp-auth, bpp-chat,
+bpp-push, bpp-stella, bpp-file and the connectors use the same class). The older
+`IntegrationTestCategories` class can still appear on old branches. A grep for the literal alone, or
+for one constant class only, reports every endpoint of those repos as `GAP` — and this skill, which
+*writes the missing tests*, then duplicates suites that already exist.
 
 Use these three forms, matching `bpp-run-integration-tests`:
 
@@ -70,8 +59,8 @@ TESTDIR=BPP.Backend.NET/BPP.Backend.NET.Contract.Tests   # the test project you 
 PROJ="$TESTDIR/BPP.Backend.NET.Contract.Tests.csproj"
 SLN=BPP.Backend.NET/BPP.Backend.NET.sln
 
-# discovery — literal OR constant, both category names
-grep -rlnE 'Category\("(Local)?Integration"|Category\(IntegrationTestCategories\.' --include="*.cs" "$TESTDIR"
+# discovery — literal OR either constant class, both category names
+grep -rlnE 'Category\("(Local)?Integration"|Category\((E2eTestCategories|IntegrationTestCategories)\.' --include="*.cs" "$TESTDIR"
 
 # run
 dotnet test "$PROJ" --filter "Category=Integration|Category=LocalIntegration"
@@ -147,24 +136,22 @@ Follow the **`bpp-add-integration-tests`** skill for the WAF + `GlobalTestSetup`
 
 Per `bpp-run-integration-tests` conventions: bring the stack up first (**`bpp-start-local-stack`**), run **one suite at a time, ≥60s apart** (bpp-auth login 429 has no retry), **max 3 runs per suite**.
 
-- **bpp-backend trap:** `BPP.Backend.NET.Public.Tests` is **not in the `.sln`** — build that csproj explicitly; a `dotnet test --no-build` on it silently exits 0 with no output (looks green, ran nothing).
-- Module e2e suites tag via the constant `[Category(IntegrationTestCategories.Integration)]` — a grep for the literal `Category("Integration")` misses them. Use the discovery grep from Categories below; `--filter` matches on the constant's *value*, so a constant-tagged suite is caught by the category name it resolves to.
+- Module e2e suites tag via the constant `[Category(E2eTestCategories.Integration)]` — a grep for the literal `Category("Integration")` misses them. Use the discovery grep from Categories above; `--filter` matches on the constant's *value*, so a constant-tagged suite is caught by the category name it resolves to.
 
 ### 7. One MR per repo
 
-Follow **`bpp-create-mr`**. Target `development`, reviewer `apittrich`, and pin the base remote to dodge the glab-base trap:
+Follow **`bpp-create-mr`**. Target `development`, reviewer `apittrich`; create the MR through the API:
 
 ```bash
 git -C <worktree> add <new-test-file> ...          # explicit adds only — never git add -A
 git -C <worktree> commit -m "test(<module>): close e2e coverage gaps"
 git -C <worktree> push -u origin test/e2e-audit-$slug     # never --force
-glab mr create -R lipso/clients/brokernet/<repo> --source-branch test/e2e-audit-$slug \
-  --target-branch development --reviewer apittrich --fill
-```
-
-Commit trailer:
-```
-Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+# `glab mr create` is unreliable here — create through the API, then set assignee + reviewer explicitly.
+ENC=$(printf %s "lipso/clients/brokernet/<repo>" | sed 's#/#%2F#g')   # subgroup repos: take enc from the bpp-project-index manifest
+IID=$(glab api --method POST "/projects/$ENC/merge_requests" \
+  -f source_branch="test/e2e-audit-$slug" -f target_branch=development \
+  -f title="test: e2e coverage for <module>" --raw-field "description=$DESC" | jq -r '.iid')
+glab mr update "$IID" -R lipso/clients/brokernet/<repo> --assignee "$(glab api user | jq -r .username)" --reviewer apittrich
 ```
 
 ### 8. Deliberate-skip policy
@@ -179,7 +166,7 @@ A case that needs infrastructure not available locally (real Minio blobs, an ext
 | Fetch | `git -C <repo> fetch -q origin development` before auditing |
 | Inventory | `grep -rnE '\[Http(Get\|Post\|Put\|Delete\|Patch)' <module>/Controllers/` |
 | Cases | 2xx (+JSON fields), auth 401/403, 404 (id-routes), 400 (body routes) |
-| Categories | BOTH: `Category\("(Local)?Integration"\|Category\(IntegrationTestCategories\.` — never `Integration` alone |
+| Categories | BOTH names, BOTH constants: `Category\("(Local)?Integration"\|Category\((E2eTestCategories\|IntegrationTestCategories)\.` |
 | Match | `HttpClient` route calls in `IntegrationTests/`, not test names |
 | Write | `bpp-add-integration-tests` pattern, worktree off `origin/development` |
 | Run | `bpp-run-integration-tests` conventions (stack up, 1 suite, ≥60s, ≤3 runs) |
@@ -194,9 +181,7 @@ A case that needs infrastructure not available locally (real Minio blobs, an ext
 - **Marking a happy-path-only test "covered"** → it's a partial; auth/404/400 remain GAPs for protected id/body routes.
 - **Auditing a stale checkout** → fetch `origin/development` first; endpoints drift.
 - **Switching a main checkout's branch** → never. Always a worktree off `origin/development`.
-- **Grepping only literal `Category("Integration")`** → misses the constant-tagged module suites.
-- **Auditing on `Integration` alone** → bpp-auth, bpp-chat, bpp-push, bpp-stella and bpp-id-austria tag e2e EXCLUSIVELY as `LocalIntegration` (proven 2026-08-14). Every endpoint reports `GAP` and this skill then writes duplicates of tests that already exist. Always match both names.
-- **`--no-build` test on `BPP.Backend.NET.Public.Tests`** → not in the `.sln`; exits 0 having run nothing. Build the csproj.
+- **Grepping only the literal `Category("Integration")`, or only one constant class** → misses the constant-tagged suites (`E2eTestCategories` fleet-wide). Every endpoint reports `GAP` and this skill then writes duplicates of tests that already exist. Match both names and both constants.
 - **Running suites back-to-back** → bpp-auth login 429 (no retry) → whole suite dies in `OneTimeSetUp`, looks like a regression. Space ≥60s.
 - **Silently dropping infra-blocked cases** → document them as skipped in the MR description.
 

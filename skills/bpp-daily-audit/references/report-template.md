@@ -1,6 +1,6 @@
 # Phase F — Report
 
-Model **Haiku 4.5**, effort **low** — this is templating structured data, not analysis. The findings
+Model **`haiku`**, effort **low** — this is templating structured data, not analysis. The findings
 are already decided; the report renders them.
 
 Path: `reports/<YYYY>/<MM>/<YYYY-MM-DD-HHMM>-audit.md` in `bpp-audit-reports`.
@@ -15,7 +15,7 @@ actually written.
 # BPP daily audit — <YYYY-MM-DD HH:MM>
 
 **Run:** <RUN_ID> · **Status:** complete | partial
-**Models:** reviewers Sonnet 5 · debate Sonnet 5 · adjudication Opus 5 · MRs Opus 5 · report Haiku 4.5
+**Models:** reviewers <model> · debate <model> · adjudication <model> · MRs <model> · report <model> — the model each phase actually ran on
 
 ## Summary
 <N> work items · <F> findings after dedup · <M> MRs · <E> escalations · <D> deferred

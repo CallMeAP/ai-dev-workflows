@@ -51,32 +51,27 @@ Read one of these first; copy its structure.
 
 ## Categories — follow the repo, filter on both
 
-`Integration` and `LocalIntegration` are **synonyms**. bpp-backend's `IntegrationTestCategories`
-documents `Integration` as *"Tests, die gegen laufende Companion-Services ausgefuehrt werden
-duerfen"* — exactly what `LocalIntegration` means elsewhere. Which name a repo uses is history.
+`Integration` and `LocalIntegration` are **synonyms**. Which name a repo uses is history.
 
-**Authoring a new fixture: follow the repo's existing convention.** Census it first; do not hardcode
-either name and do not introduce a second one into a repo that already has one:
+**Authoring a new fixture: follow the repo's existing convention.** Census it first — literals **and**
+constants, since most suites tag through `[Category(E2eTestCategories.Integration)]` — and do not
+introduce a second form into a repo that already has one:
 
 ```bash
-grep -rho 'Category("[A-Za-z]*Integration")' --include='*.cs' . | sort | uniq -c
+grep -rhoE 'Category\("[A-Za-z]*Integration"\)|Category\((E2eTestCategories|IntegrationTestCategories)\.[A-Za-z]+\)' --include='*.cs' . | sort | uniq -c
 ```
 
-bpp-backend prints `202 Category("Integration")`. bpp-auth (17 files), bpp-chat (9), bpp-push (4),
-bpp-stella (32) and bpp-id-austria-connector (7) tag e2e **exclusively** `LocalIntegration`;
-bpp-file, bpp-cheggnet and bpp-vera use both.
-
-**Discovering and filtering: always match both names**, whichever the repo authors in — otherwise a
-run in one of those five prints "No test matches" and false-greens having executed nothing (blind
-spot proven 2026-08-14):
+**Discovering and filtering: always match both names and both constant classes**, whichever the repo
+authors in — a grep or filter that misses the repo's form prints "No test matches" and false-greens
+having executed nothing:
 
 ```bash
 TESTDIR=BPP.Backend.NET/BPP.Backend.NET.Contract.Tests   # the test project you are adding to
 PROJ="$TESTDIR/BPP.Backend.NET.Contract.Tests.csproj"
 SLN=BPP.Backend.NET/BPP.Backend.NET.sln
 
-# discovery — literal OR constant-tagged
-grep -rlnE 'Category\("(Local)?Integration"|Category\(IntegrationTestCategories\.' --include="*.cs" "$TESTDIR"
+# discovery — literal OR either constant class
+grep -rlnE 'Category\("(Local)?Integration"|Category\((E2eTestCategories|IntegrationTestCategories)\.' --include="*.cs" "$TESTDIR"
 
 # run
 dotnet test "$PROJ" --filter "Category=Integration|Category=LocalIntegration"
@@ -84,10 +79,6 @@ dotnet test "$PROJ" --filter "Category=Integration|Category=LocalIntegration"
 # unit-only gate
 dotnet test "$SLN" --filter "Category!=LocalIntegration&Category!=Integration"
 ```
-
-Module suites may tag via the **constant** `[Category(IntegrationTestCategories.Integration)]`; a
-grep for the literal string misses all 8 bpp-backend module e2e suites (proven 2026-07-13), which is
-why the discovery grep covers both spellings.
 
 ## Self-seeding rules
 

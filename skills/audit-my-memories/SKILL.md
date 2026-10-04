@@ -19,19 +19,17 @@ three mechanical integrity checks (`[[links]]`, `MEMORY.md` rows, frontmatter sc
 secret scan before anything is called done. For the `bpp-backend` project specifically, it also
 covers syncing the audited result to its GitLab knowledge-repo mirror.
 
-**Founding run:** 2026-09-14, `~/.claude/projects/-home-alex-Entwicklung-bpp-bpp-backend/memory/`
-(226 files) plus a lighter pass over 8 smaller project memory directories (31 files). That run was
-deliberately done on a stronger model given the scale and the cost of getting the four-bucket
-classification wrong the first time. **Routine re-runs of this skill do not need that** — the
-verification steps below are bounded lookups (a `git log`, a `glab mr view`, a grep of live
-source), not creative judgement calls, so a cheap/fast model is the right default going forward.
+The verification steps below are bounded lookups (a `git log`, a `glab mr view`, a grep of live
+source), not creative judgement calls, so a cheap/fast model is enough. A first audit of a large,
+never-audited directory is the exception: the four-bucket classification is costly to get wrong at
+that scale.
 
 ## When to Use
 
 - "audit my memories", "check my memory files for staleness", "clean up the memory directory"
 - Periodically (monthly, or whenever a memory directory feels large / a session recently caught
   itself trusting a stale status line) — not something to run on every session.
-- "sync the memory mirror" / "publish memory to the knowledge repo" (bpp-backend only, see Part 3)
+- "sync the memory mirror" / "publish memory to the knowledge repo" (bpp-backend only, see Part 4)
 
 ## Scope resolution
 
@@ -175,12 +173,9 @@ that fixes the maximum number of broken links for free instead of creating new o
 ## Part 3 — Secret scan (do this before calling anything done, including a plain local edit)
 
 **Never pipe a credential-bearing file through a naive redactor and never `cat`/dump a config
-file that might hold a secret**, even "just to check." This is not a hypothetical: in the
-founding run, a verification step grepped a live `appsettings.local.json` through a redaction
-pipe that failed silently, and the real value it was supposed to mask landed unredacted in that
-step's own tool output. The memory *file itself* was fine (it only pointed at the config file's
-location, never embedded a value) — the leak was in the verification method, not the content
-being audited.
+file that might hold a secret**, even "just to check": a redaction pipe that fails silently
+puts the raw value into your own tool output. The leak risk is in the verification method, not
+only in the content being audited.
 
 **The safe pattern: grep for the KEY NAME, or check the file merely exists — never print the
 value.**
@@ -262,7 +257,7 @@ cat /home/alex/Entwicklung/lipso/agentic-coding-knowledge/personal-workflows/api
 | Schema | flat `type:` → nested `metadata: {type:}`; non-kebab `name:` → kebab matching existing inbound links |
 | Secrets | grep KEY NAMES, never pipe/cat a credential file; read every hit by eye |
 | Mirror (bpp-backend) | read `SYNC.md` fresh, worktree, rsync source→mirror, grep-gate = 0 hits, `docs/*` branch + MR, never mirror `main` directly |
-| Model | cheap/fast by default; this founding run used a stronger model deliberately |
+| Model | cheap/fast by default; stronger for a first audit of a large directory |
 
 ## Common Mistakes
 

@@ -28,20 +28,16 @@ Single arrow `->` with spaces, exact casing. The staging→main label is `main-d
 
 ## Repo discovery — delegated to `bpp-project-index`
 
-**This skill no longer derives the repo set.** `bpp-project-index` owns the group listing, the
-`bpp/repos.md` cross-check, the subgroup-encoded paths and the always-exclude list, and publishes them
-as `~/.claude/bpp-fleet/manifest.tsv`. Invoke it first (read-only refresh, ~7 s), then filter.
+`bpp-project-index` owns the group listing, the `bpp/repos.md` cross-check, the subgroup-encoded
+paths and the always-exclude list, and publishes them as `~/.claude/bpp-fleet/manifest.tsv`. Invoke it
+first (read-only refresh, ~7 s), then filter.
 
 The promotion candidate set is:
 
 > `state=active`, tags ∌ `generated-output,excluded-manual`, and
 > `class ∈ {backend, frontend, docs}` **or** (`class=unlisted` and name matches `^bpp-|^brokernet-.*-ui$`)
 
-Verified 2026-09-14: this reproduces the old filter + extras + cross-check set **exactly** — 35 repos,
-zero drift in either direction.
-
-Everything below is still true; it just lives in the index now, once, instead of here and in three other
-skills:
+Background on the set (owned by the index, summarised here):
 
 - **`servo-backend`** (tag `excluded-manual`) — excluded by user decision 2026-09-18. Its
   `development`→`staging` diff is 2024 legacy (`development` idle since 2024-12-11, `staging` since
@@ -78,7 +74,7 @@ skills:
 
 ## Version bump (extra step for the repos in the bump table)
 
-**The repos in the table below need a version bump on the source branch BEFORE the promotion MR is created.** Rule (user directive 2026-08-06): **raise the PATCH version when promoting** — applies to BOTH directions. Reference commit: brokernet-hotel-ui `83b8bc87` ("raise version for staging", `package.json` version line change; that instance happened to be a major bump — the standing rule is patch).
+**The repos in the table below need a version bump on the source branch BEFORE the promotion MR is created.** Rule: **raise the PATCH version when promoting** — applies to BOTH directions.
 
 Affected repos (exactly these nine):
 
@@ -94,7 +90,7 @@ Affected repos (exactly these nine):
 | `brokernet-document-cms` | root `package.json` | `.version` |
 | `brokernet-varias-sign` | root `pom.xml` | the project `<version>` — the first one **after** `</parent>`. The first `<version>` in the file is the spring-boot parent (`2.7.2`); never touch it. |
 
-Why `brokernet-document-cms` and `brokernet-varias-sign` are in: their image build refuses to overwrite an existing tag — `main with tag 4.2.2-SNAPSHOT already exists!` / `main with tag 11.0.0 already exists!` — so an un-bumped promotion merges but **skips deploy**. Happened on both `main` pipelines in the 2026-08-14 and 2026-09-25 waves.
+Why `brokernet-document-cms` and `brokernet-varias-sign` are in: their image build refuses to overwrite an existing tag — `main with tag 4.2.2-SNAPSHOT already exists!` / `main with tag 11.0.0 already exists!` — so an un-bumped promotion merges but **skips deploy**.
 
 The `bpp-*` backends do NOT get a bump — MR only.
 
@@ -129,7 +125,6 @@ Rules when a promotion wave includes `bpp-stella-ui`:
 - If the wave needs a go-stella release bump, hand that off to `stella-bump-version-staging-mr` (or the user) **first**, then create the promotion MR here so the bump commit rides in it.
 - If no app bump is wanted, the app goes MR-only, riding along with the web bump. That is the default.
 - Note that skill targets **`development` -> `staging`** and the `staging-deployment` **label** (not a git tag). For `staging` -> `main` it does not apply — bump handling there is out of its scope; ask the user.
-- Also note it is written for BSD `sed -i ''`; on this Linux box that invocation fails. Read it as the source of truth for *which files and which anchors*, not for verbatim commands.
 
 Mechanics, per affected repo that will get an MR:
 
@@ -171,7 +166,6 @@ UPDATE ui_configs SET version_number = '<v>', updated_at = now(), updated_by_nam
 - Read it from every file in `projects/bpp-stella-app/src/environments/` except `environment.local-network.ts`.
 - That file is stale at `1.5.0` on purpose: it is an emulator config against `localhost:8080`, left unmaintained per `stella-bump-version-staging-mr`.
 - If, on a stage branch, the env files disagree among themselves or with package.json, that stage gets BOTH values and the mismatch warning instead of a statement. Never guess.
-- On 2026-10-02, development and staging had package.json `1.33.1` against appVersion `1.33.0`.
 
 ```bash
 P=${ENC[bpp-stella-ui]}
@@ -210,7 +204,7 @@ echo "${#REPOS[@]} repos — $(grep -m1 '^#generated' "$MANIFEST") $(grep -m1 '^
 [ ${#REPOS[@]} -gt 20 ] || { echo "FAIL — only ${#REPOS[@]} repos; the manifest is truncated or stale" >&2; exit 1; }
 ```
 
-- **Sanity gate, not decoration:** the set has been 34–35 repos all year. A sudden small set means a
+- **Sanity gate, not decoration:** the fleet is well above 20 repos. A sudden small set means a
   truncated manifest, not a shrinking fleet — abort rather than promote a subset.
 - **Check the manifest header.** Older than 24 h, or `#source` says `gitlab=unreachable`? Refresh the
   index before creating MRs, or state it in the preview. A promotion wave built on a stale fleet list
@@ -250,7 +244,7 @@ while IFS='|' read -r _ name link _; do
   path=${link#https://gitlab.com/}
   [ -z "${ENC[$name]:-}" ] && ENC[$name]=$(printf %s "$path" | sed 's#/#%2F#g')
 done < <(grep -E '^\|[^|]+\| *https://gitlab.com/' "$WORK/repos.md")
-unset 'ENC[bpp-audit-reports]'
+unset 'ENC[bpp-audit-reports]' 'ENC[servo-backend]'
 ```
 
 </details>
@@ -421,14 +415,14 @@ echo "Open $TITLE MRs: https://gitlab.com/groups/lipso/clients/brokernet/-/merge
 - **Creating MRs without diff check** → GitLab returns "no commits between branches"; always compare first.
 - **Gating on commit count instead of `.diffs | length`** → degenerate merge-commit-only promotions create empty MRs.
 - **Trusting `jq '.commits | length'` for missing-branch detection** → `null | length` is `0` in jq; a missing branch silently reads as "no diffs". Probe branches explicitly.
-- **Writing `select(.path | test(...) and .path != "x")`** → inside `select(.path | ...)` the pipe rebinds `.` to the string, so the second `.path` fails with `Cannot index string with string "path"` and the whole listing aborts (verified 2026-09-08; this was a live bug in this skill). Each field access needs its own parenthesised pipe: `select((.path | test(...)) and (.path | IN("a","b") | not))`.
+- **Writing `select(.path | test(...) and .path != "x")`** → inside `select(.path | ...)` the pipe rebinds `.` to the string, so the second `.path` fails with `Cannot index string with string "path"` and the whole listing aborts. Each field access needs its own parenthesised pipe: `select((.path | test(...)) and (.path | IN("a","b") | not))`.
 - **Wrong label for the direction** → `staging-deployment` vs `main-deployment`; ops dashboards filter on these. staging→main is NOT `prod-deployment` (retired).
 - **Wrong title casing or arrow** → exactly `Development -> Staging` / `Staging -> Main` (space, single `->`, space).
 - **Matching existing MRs by title** → legacy MRs use `-->`; match on source/target branch only.
 - **Concluding "X isn't in this promotion" from compare output** → the compare diff is truncated; read the raw file on both branches.
 - **Silent skip on an API error** → "no stage branch" is an expected reported outcome; a compare error with both branches present is an abort.
 - **Skipping preview** → never bulk-write across 13+ repos without explicit user confirmation.
-- **Omitting the change-summary description** → every created MR carries the short added/updated/fixed/removed summary; empty descriptions are no longer allowed.
+- **Omitting the change-summary description** → every created MR carries the short added/updated/fixed/removed summary; never an empty description.
 - **Adding assignee / reviewer** → defaults only; only override if user explicitly asks.
 - **Forgetting the patch-version bump** → the nine repos in the bump table (six UIs + stella-web + document-cms + varias-sign) need the patch bump committed on the source branch BEFORE the MR; backends don't. Missing it on document-cms / varias-sign does not fail the MR — it fails the **target** pipeline with `<stage> with tag <version> already exists!` and silently skips deploy.
 - **Bumping the spring-boot parent in `brokernet-varias-sign/pom.xml`** → the first `<version>` in the file is the parent; the project version is the first one after `</parent>`.
@@ -438,7 +432,7 @@ echo "Open $TITLE MRs: https://gitlab.com/groups/lipso/clients/brokernet/-/merge
 - **Taking the `stella` value from package.json, or printing it without the store warning** → the app compares `environment.appVersion`, and a premature major/minor raise locks every user onto `/update` with nothing to install. On a package.json/appVersion mismatch, print both values and no statement.
 - **Double-bumping on re-run** → always apply the idempotency guard (source vs target version differ = already bumped).
 - **Missing servo-ui / callidus-bvs-ui** → both live in subgroups; a group listing without `include_subgroups=true` never returns them (verified 2026-09-14: 57 projects, zero of them). They reach this skill as ordinary `bpp-project-index` manifest rows with subgroup-encoded `enc` values — never rebuild an encoded path from the repo name.
-- **Rebuilding the repo set here instead of reading the manifest** → the filter+extras provably drift from `bpp/repos.md` in both directions (2026-08-14: six repos missed, e.g. `brokernet-app`, `servo-hw-connector`; 2026-09-14: `bpp-cypress` and `bpp-db-migrator` in the group but not in the list). `bpp-project-index` does the union on every refresh — read it. If the manifest is stale or `#source` says `gitlab=unreachable`, flag it in the preview instead of silently proceeding.
+- **Rebuilding the repo set here instead of reading the manifest** → the name filter + extras drift from `bpp/repos.md` in both directions (repos in the list the filter misses, repos in the group the list omits). `bpp-project-index` does the union on every refresh — read it. If the manifest is stale or `#source` says `gitlab=unreachable`, flag it in the preview instead of silently proceeding.
 
 ## Red flags — STOP
 

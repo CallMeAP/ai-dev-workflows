@@ -97,16 +97,16 @@ and `#extra <name> <path>` for *additional* checkouts of a repo that already has
 | `generated-output` | `bpp-audit-reports` | generated output of `bpp-daily-audit` (reports, escalations, ledger). Single `main` branch, no product code — never promoted, and auditing it is a self-audit loop. |
 | `scaffold` | `bpp-shared-template` | template projects, no product code. Excluded by the audit; the promotion sweep keeps it and reports "no staging branch". |
 | `shared-source` | `bpp-shared` | the source of `BPP.Shared.NET`, not a consumer of it. |
-| `excluded-manual` | `servo-backend` | excluded from every automated sweep by user decision 2026-09-18. Its `development`→`staging` diff is 2024 legacy (dev idle since 2024-12-11, staging since 2024-05-24) and its build job fails on a pre-existing CI defect — `invalid tag "…/servo-backend/:4.0.0": invalid reference format`, an unset image-name variable. A promotion sweep re-opened MR !2 from it; that MR was closed. Re-including it means fixing the repo's CI first. `servo-ui` and `servo-hw-connector` are NOT excluded. |
+| `excluded-manual` | `servo-backend` | excluded from every automated sweep by user decision 2026-09-18. Its `development`→`staging` diff is 2024 legacy (dev idle since 2024-12-11, staging since 2024-05-24) and its build job fails on a pre-existing CI defect — `invalid tag "…/servo-backend/:4.0.0": invalid reference format`, an unset image-name variable. Re-including it means fixing the repo's CI first. `servo-ui` and `servo-hw-connector` are NOT excluded. |
 
 A tag is a *label*, not a filter. Each consumer excludes the tags that matter to it — the sets differ,
 and flattening them into one boolean would silently change three skills' behaviour.
 
-### Consumer filters (verified 2026-09-14 to reproduce each skill's current repo set exactly)
+### Consumer filters
 
 | Skill | Filter | Set size |
 |---|---|---|
-| `bpp-promote-dev-to-staging` | `state=active`, tags ∌ `generated-output,excluded-manual`, and `class ∈ {backend,frontend,docs}` **or** (`class=unlisted` and name matches `^bpp-|^brokernet-.*-ui$`) | 37 (re-measured 2026-09-18; was 38 before `servo-backend` was excluded — the old "35" dates from 2026-09-14 and the fleet has grown since) |
+| `bpp-promote-dev-to-staging` | `state=active`, tags ∌ `generated-output,excluded-manual`, and `class ∈ {backend,frontend,docs}` **or** (`class=unlisted` and name matches `^bpp-|^brokernet-.*-ui$`) | 37 (measured 2026-09-18) |
 | `bpp-daily-audit` | same, plus tags ∌ `scaffold` | 37 — same as promote, not a typo: the only `scaffold` repo (`bpp-shared-template`) is `class=infra` and is already dropped by the class filter |
 | `bpp-bump-shared-version` | `state=active`, name matches `^bpp-`, tags ∌ `shared-source` | 24 |
 
@@ -399,13 +399,8 @@ refreshed first or the run reports that it was not.
   and other agents work in it. API commit on `main` only.
 - **Deleting a `repos.md` row because a repo is archived or missing** → append-only. Report it; removal
   is a human decision.
-- **`jq 'select(.path | test(...) and .path != "x")'`** → inside `select(.path | …)` the pipe rebinds `.`
-  to the string, so the second `.path` fails with `Cannot index string with string "path"` and the whole
-  listing aborts (a real bug in `bpp-promote-dev-to-staging`, 2026-09-08). Each field access needs its
-  own parenthesised pipe. This skill sidesteps it by filtering in `awk` over the manifest, not in `jq`.
-- **`jq '.commits | length'` to detect a missing branch** → `null | length` is `0` in jq, so a missing
-  branch reads as "no diffs". Not this skill's job — but every consumer that probes branches must probe
-  explicitly first. The manifest's `default_branch` is not a promise that `staging` exists.
+- **Treating `default_branch` as proof a stage branch exists** → it is not a promise that `staging`
+  exists; consumers that need a stage branch probe it explicitly.
 - **Letting a lookup trigger network calls** → lookups must stay instant and offline-safe.
 
 ## Red flags — STOP

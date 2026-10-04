@@ -1,5 +1,7 @@
 # bpp-kanban-loop
 
+> **OBSOLETE — retired 2026-10-04.** Do not install. Kept for history only.
+
 ## Placeholders
 
 **None — and that is deliberate.** This is a *personal* skill: per

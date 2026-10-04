@@ -8,7 +8,9 @@ These two locations mirror each other's tracked skill content — `.md` plus the
   `skills/`, which does not exist there. `install.sh` renders from `$here/bpp/skills/$s` and is the authority —
   confirm the path from it rather than from this file. (Corrected 2026-09-22: this said "repo-level `skills/`",
   which has zero tracked files; writing there puts a skill where `install.sh` never looks.) Only personal-only skills
-  (`gs-*`, `lipsum-stundenliste`, `sync-my-skills`) remain under `personal-workflows/apittrich/skills/`.
+  (`gs-*`, `lipsum-stundenliste`, `sync-my-skills`, `audit-my-memories`, and the obsolete `bpp-kanban-loop`) remain
+  under `personal-workflows/apittrich/skills/`. Another developer's skill synced from here (e.g. nangert's
+  `stella-bump-version-staging-mr`) goes to `personal-workflows/<owner>/skills/`, reviewed by its owner.
 
 **Rule:** edit in the source. When source files in scope change, mirror them to
 the published copy (source → mirror). Keep both in sync.

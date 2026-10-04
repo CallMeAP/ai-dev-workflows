@@ -56,9 +56,7 @@ what is in it.
 
 🔴 **Do NOT judge this with `git diff origin/development...<branch>` (three dots).** Three-dot measures
 merge-base→branch, so a squash/rebase-merged branch still displays its entire diff and every row reads as
-"unsafe". It also inflates rows whose files dev has since evolved. **Measured 2026-08-31: the three-dot
-test called all 5 CONFIRM rows unsafe; patch-identity proved all 5 had landed** — including two that the
-ancestor test alone had made look like genuine post-merge work (1 and 10 commits outside dev).
+"unsafe". It also inflates rows whose files dev has since evolved.
 
 **Expect `git branch -d` to REFUSE on every CONFIRM row** — the tip is not an ancestor, which is the whole
 reason it is a CONFIRM. That refusal is the **correct outcome, not a failure**: remove the worktree, leave
@@ -66,8 +64,10 @@ the branch, report it. **Never escalate to `-D`.** A stale local branch pointer 
 one command here that destroys unmerged work if the read is wrong.
 
 
-- Plan (default): `bash cleanup.sh` or `bash cleanup.sh plan`
-- Apply (removes only REMOVE rows, re-verified at removal time): `bash cleanup.sh apply`
+The script below is not shipped as a file. Write it to a temp file first (`f=$(mktemp --suffix=.sh)`), then:
+
+- Plan (default): `bash "$f"` or `bash "$f" plan`
+- Apply (removes only REMOVE rows, re-verified at removal time): `bash "$f" apply`
 
 Discovery, classification, and removal are one script:
 
@@ -219,7 +219,7 @@ exit 0
 - **Treating a squash merge as unmerged** → squash-merged branch tips are NOT ancestors of dev (`ahead>0`), so the ancestor check says "unmerged". Cross-check the GitLab MR state; a merged MR with local commits still-outside-dev is **CONFIRM**, never auto-REMOVE (its commits could also be genuine post-merge work). Settle it with patch-identity (`git cherry`) + a two-dot diff over the touched files — **never a three-dot diff**, which reports every squash/rebase merge as unsafe.
 - **`git worktree remove --force`** → strips uncommitted/untracked work silently. Never use `--force`; plain `remove` refuses on a dirty/locked worktree, which is the desired safety.
 - **`git branch -D`** → force-deletes unmerged branches, orphaning commits. Only ever `git branch -d`; if it refuses (squash merge), retain the branch and report it.
-- **Removing a Claude Code worktree an agent is still using** → `**/.claude/worktrees/*` ARE in scope (they are often the biggest pocket on disk — measured 2026-09-12: 2.2 GB in bpp-backend alone, all three stale since 2026-08-14), but ONLY after two extra guards pass: the worktree is not `locked`, and nothing outside `.git`/`bin`/`obj` has been written in the last `IDLE_DAYS` (default 7, override with `IDLE_DAYS=n`). A live agent trips one or the other. All the normal rules still apply on top — dirty, unmerged, detached are still KEEP. Claude Code prunes these itself in principle; in practice it leaves them for months. The `/tmp/**/scratchpad/*` worktrees stay out of scope (not under BASE).
+- **Removing a Claude Code worktree an agent is still using** → `**/.claude/worktrees/*` ARE in scope (they are often the biggest pocket on disk), but ONLY after two extra guards pass: the worktree is not `locked`, and nothing outside `.git`/`bin`/`obj` has been written in the last `IDLE_DAYS` (default 7, override with `IDLE_DAYS=n`). A live agent trips one or the other. All the normal rules still apply on top — dirty, unmerged, detached are still KEEP. Claude Code prunes these itself in principle; in practice it leaves them for months. The `/tmp/**/scratchpad/*` worktrees stay out of scope (not under BASE).
 - **Deleting the branch before the worktree** → a branch checked out in a worktree can't be `-d`'d; remove the worktree (then `prune`) first, then delete the branch from the **main** checkout (`$mainwt`), not from inside the now-gone worktree.
 - **Trusting the plan at apply time** → other agents commit between plan and apply; apply mode re-checks clean + merge state per row and skips anything that changed.
 - **`git status --porcelain` "clean" ignores staged/untracked?** → it does not: it reports staged, modified, and `??` untracked alike. Any non-empty output ⇒ KEEP.

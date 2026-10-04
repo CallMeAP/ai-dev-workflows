@@ -15,7 +15,7 @@ Scope: .NET repos only (bpp-mail / bpp-js-report-connector are Maven — differe
 
 ```bash
 dotnet restore <Solution>.sln          # needs GitLab private-feed auth; 401 = env, fix creds first
-dotnet list <Solution>.sln package --outdated              # per-project latest columns
+dotnet list <Solution>.sln package --outdated --source https://api.nuget.org/v3/index.json   # without --source it also queries the GitLab feed and 401s
 dotnet list <Solution>.sln package --include-transitive    # for diagnosing NU1107 caps
 ```
 
@@ -30,12 +30,9 @@ dotnet list <Solution>.sln package --include-transitive    # for diagnosing NU11
 
 ## Hold matrix — do NOT blind-bump these
 
-Holds marked (†) apply **while the consumed BPP.Shared.NET package still targets net9** — they dissolve after shared ships net10 + consumers bump `BppSharedVersion`.
-
 | Package | Hold at | Why |
 |---|---|---|
-| EF Core family + Npgsql (†) | latest **9.x** (EF 9.0.17 / Npgsql 9.0.5 / provider 9.0.4 at fleet-run time) | shared's transitive `EFCore.NamingConventions` 9.0.0 caps EF `<10` → **NU1107**; shared bumps it to 10.0.1 on its net10 MR |
-| Microsoft.AspNetCore.OpenApi + Swashbuckle (†) | OpenApi latest 9.x + Swashbuckle 9.0.6 | Microsoft.OpenApi 2.x **removes `Microsoft.OpenApi.Models`** → breaks SwaggerGen filters (shared's TranslocoEnumSchemaFilter, ConfigureServerUrl) |
+| Microsoft.AspNetCore.OpenApi + Swashbuckle | OpenApi latest 9.x + Swashbuckle 9.0.6 | Microsoft.OpenApi 2.x **removes `Microsoft.OpenApi.Models`** → breaks SwaggerGen filters (shared's TranslocoEnumSchemaFilter, ConfigureServerUrl) |
 | StackExchange.Redis | **2.13.17** (fleet pin) | 3.x breaks `StringSetAsync` (`When` → `Expiration` overload). 2.13.x already adds the Expiration overload — only code compiling `RedisService` (bpp-shared) hits the ambiguity; fix there is a 1-line `When.Always` |
 | FluentAssertions | last adopted **pre-8** line (6.12.2 fleet baseline) | **8.x = Xceed commercial license.** Per-repo/user decision, never a mechanical bump (alt: AwesomeAssertions fork). Some repos already ship 8.x — don't downgrade those either |
 | AutoMapper | 15.1.1 (fixes GHSA-rvv3-g6hj-g44x) | **≥16 commercial.** Backend/stella removed AutoMapper entirely — check it still exists before bumping |

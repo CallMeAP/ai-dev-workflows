@@ -1,6 +1,6 @@
 # Phase B — Reviewer lenses
 
-Three agents per work item, dispatched **in parallel in one message**. Model: **Sonnet 5**, effort
+Three agents per work item, dispatched **in parallel in one message**. Model: **`sonnet`**, effort
 **medium**.
 
 ## What each agent receives

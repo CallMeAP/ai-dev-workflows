@@ -13,7 +13,9 @@ errors and mis-implemented requirements against its BRO ticket. Agreed findings 
 targeted change can fix become MRs; everything else is escalated. A separate phase sweeps .NET repos
 for NuGet updates against `development` only.
 
-**Design spec:** `bpp-backend/docs/superpowers/specs/2026-09-08-bpp-daily-audit-design.md`.
+**Design spec:** `docs/superpowers/specs/2026-09-08-bpp-daily-audit-design.md` on bpp-backend's
+unmerged branch `feature/bpp-daily-audit-skill` — it is not on `development`; read it with
+`git -C <bpp-backend> show origin/feature/bpp-daily-audit-skill:<path>`.
 When this skill and the spec disagree, the spec is the intent — fix the skill.
 
 **Every run commits a report, including zero-finding days.** A run that produces no report did not
@@ -36,7 +38,7 @@ happen.
 | 1. Skill written | done |
 | 2. `bpp-audit-reports` repo + `audit-bot` group label created | **done 2026-09-08** — repo id 86222771, label inherited group-wide (verified on `servo-ui`) |
 | 3. Dry-run tuning | **done 2026-09-08** — 2 runs: single-repo (`bpp-backend`) and fleet (32 repos, 4 active). 11 findings, 2 false positives killed by debate. 8 skill defects found and fixed. Still unexercised: the Jira status-change sweep, the caps (never fired), and a fleet-wide NuGet sweep. |
-| 4. Supervised live run | **next** — would open 2 deferred MRs (bpp-stella migration guide, bpp-stella-ui stale Dockerfile) |
+| 4. Supervised live run | **done 2026-09-08** — first live run, 3 MRs (`bpp-audit-reports` 3f4fd69); second live run 2026-09-09, 1 MR (79912e5) |
 | 5. `/sync-my-skills bpp-daily-audit` | **done 2026-09-08** — canonical + mirror |
 | 6. systemd timer armed at 12:07 | pending |
 
@@ -58,12 +60,14 @@ phase, not before.
 | Phase | What | Model | Reference |
 |---|---|---|---|
 | A | Discovery: repo map, branch probe, commit windows, Jira fetch, **rule load**, **ledger dedup** | none — bash/`glab`/`acli` | `references/discovery.md` |
-| B | Review: 3 lenses per work item, parallel, driven by the fetched rules | Sonnet 5, medium | `references/reviewer-prompts.md` |
-| C | Debate: cross-rebuttal of every finding — **resume the Phase B lenses, 6-minute bounded wait, fresh challengers only for the silent ones** | Sonnet 5, medium | `references/debate-protocol.md` |
-| D | Adjudication: verdict + fixability | Opus 5, high | `references/adjudication.md` |
-| E | Act: MR or escalation, ledger write | Opus 5, high (MR authoring only) | `references/act.md` |
-| F | Report: commit to `bpp-audit-reports` | Haiku 4.5, low | `references/report-template.md` |
-| G | NuGet sweep, `development` only | none + Opus 5 for the MR | `references/nuget-sweep.md` |
+| B | Review: 3 lenses per work item, parallel, driven by the fetched rules | `sonnet`, medium | `references/reviewer-prompts.md` |
+| C | Debate: cross-rebuttal of every finding — **resume the Phase B lenses, 6-minute bounded wait, fresh challengers only for the silent ones** | `sonnet`, medium | `references/debate-protocol.md` |
+| D | Adjudication: verdict + fixability | `opus`, high | `references/adjudication.md` |
+| E | Act: MR or escalation, ledger write | `opus`, high (MR authoring only) | `references/act.md` |
+| F | Report: commit to `bpp-audit-reports` | `haiku`, low | `references/report-template.md` |
+| G | NuGet sweep, `development` only | none + `opus` for the MR | `references/nuget-sweep.md` |
+
+Model values are the Agent tool's tier aliases; each resolves to the current model of that tier.
 
 Known-non-issues loop (spans A, B, D, E): `references/known-non-issues.md`.
 

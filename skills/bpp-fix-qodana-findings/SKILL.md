@@ -58,7 +58,7 @@ The qodana CI component analyzes **without restoring the private BPP.Shared.NET 
 
 **Verification rule before touching ANY of these:** confirm the referenced symbol genuinely fails (typo/renamed/moved) — if it's a correct reference to a bpp-shared/cross-assembly type, skip as "scan artifact" and count it. For NUnit1003: actual-arg-count vs method-param-count; matching arity + shared-typed args = artifact.
 
-**Root fix (preferred over per-repo skips):** teach the ci-components qodana template a restore bootstrap (`dotnet restore` with `CI_JOB_TOKEN` against the GitLab NuGet registry) — then re-scan; the artifact classes disappear honestly. Remember: ci-components changes only propagate via **release tags** (`@~latest` = latest tag, NOT development HEAD). **Until that bootstrap lands, this whole resolver-driven family (CS1574, NUnit1003, `…AccordingToAPIContract`, `RedundantNameQualifier`) is skip-by-default** — treat the `NuGetCredentialProvider` job-log line as proof the class is a scan artifact, not code debt.
+**Root fix — shipped in ci-components 0.1.21** (restore bootstrap; see the 0.1.21 section below). The table above therefore applies only to a report whose job trace still shows the `NuGetCredentialProvider` line (scan ran under an older tag, or before the release published): that report is contaminated — re-scan instead of fixing from it. ci-components changes propagate only via **release tags** (`@~latest` = latest published tag, NOT development HEAD).
 
 ## Never fix
 
@@ -107,7 +107,7 @@ Caveat on `RedundantSuppressNullableWarningExpression`: `!` is compile-time-only
   ```
   Use `add_labels=` on an existing MR, never `labels=` — the latter REPLACES the whole set and would drop e.g. `staging-deployment`.
 - Java repos, wrong analyzer trap: a Java repo whose CI passes `qodana_image: jetbrains/qodana-dotnet:*` reports **0 findings = fake-clean** (nothing analyzed). Use `jetbrains/qodana-jvm:*`. Verify the image matches the language before trusting a clean report.
-- Java toolchain trap on this box: `/usr/lib/jvm/java-21-openjdk-amd64` is JRE-ONLY (`mvn -version` claims 21, compile fails "release version 21 not supported") — use a full Temurin JDK 21 (scratchpad tarball).
+- Java toolchain on this box: a full JDK 21 is installed at `/usr/lib/jvm/java-21-openjdk-amd64` (`javac 21.0.12`), but the PATH-default `java` is 17 — point `JAVA_HOME` at the 21 install; check `javac -version` per `/usr/lib/jvm/*` entry, not the PATH default.
 - Java image builds: ci-components `build-java-image` default Dockerfile hardcodes JDK 17 (no input until the jdk_version input ships + a release tag is cut).
 - Java repos (bpp-mail, bpp-js-report): `VulnerableLibrariesLocal` → prefer ONE Spring Boot parent patch-bump (BOM covers most CVEs) + explicit overrides for stragglers; `JvmTaintAnalysis` on PDF/attachment endpoints = usually false positive (attachment disposition ≠ HTML render) — assess per endpoint in the MR description, don't rewrite code.
 - Verification mode is the user's call: local build+unit tests OR pipeline-only ("don't build locally") — in pipeline-only mode be MORE conservative (that's when the blind-mass-edit ban matters most; a 400-edit Redundant* bulk pass belongs to a cleanupcode+build task, not a no-build sweep).
@@ -121,7 +121,7 @@ Caveat on `RedundantSuppressNullableWarningExpression`: `!` is compile-time-only
 3. Config changes with per-exclusion finding counts + justification.
 4. Follow-up list (EF MaxLength ticket, bulk Redundant* cleanupcode pass, ci-components restore fix).
 
-## 2026-07-19 fleet run — approaches & gotchas
+## Approaches & gotchas
 
 ### The fix scope is FOUR buckets, not "only safe-mechanical"
 Reducing a report to "3 safe fixes, close the rest" under-delivers. Every report classifies into **four fix/act buckets + two pure-skip buckets**:
@@ -129,7 +129,7 @@ Reducing a report to "3 safe fixes, close the rest" under-delivers. Every report
 - **Verified judgment tier** — fixed *after per-site verification*, never blind (e.g. unused private methods/dead injected fields, `ConditionalTernaryEqualBranch`, `PossibleMultipleEnumeration` → materialize, `NonReadonlyMemberInGetHashCode` → init-only, verified `RedundantSuppressNullableWarningExpression` removals). Several are real; don't dismiss the tier.
 - **Config-suppress (qodana.yaml)** — a real deliverable, not a skip: document-and-suppress serialization FPs (`Unused*.Global/.Local` on DTOs/test-helpers, `NotAccessedPositionalProperty.Global`) and exclude generated/migration trees.
 - **Follow-up ticket** — `EntityFramework UnlimitedStringLength` (MaxLength + migration), `CheckNamespace` on a **public** shared type (renaming breaks consumers), possible latent bugs surfaced by an "unused" finding (e.g. a seeded-but-dropped result).
-- Pure-skip only: **Never-fix** (`RedundantUsingDirective`, `Unused*` consumed cross-repo) and the **bpp-shared-resolver artifacts** (`CS1574`/`NUnit1003`/`*AccordingToAPIContract`/shared-typed `RedundantCast`/`RedundantNameQualifier`).
+- Pure-skip only: **Never-fix** (`RedundantUsingDirective`, `Unused*` consumed cross-repo) and — in a contaminated report only (see the 0.1.21 section) — the **bpp-shared-resolver artifacts** (`CS1574`/`NUnit1003`/shared-typed `RedundantCast`/`RedundantNameQualifier`). `*AccordingToAPIContract` is verified-judgment tier, not an artifact.
 
 Real yield example: bpp-shared's 115 findings = ~10 real code fixes + ~24 verified-judgment + ~46 config-suppress + 2 follow-ups + 12 hard-skip — NOT "nothing".
 
@@ -148,11 +148,11 @@ Rebase open qodana MRs onto latest `development` **server-side** via the GitLab 
 - Probe marker: append `<!-- qodana refresh probe <date> -->` to `README.md` (fallback `PROJECT.md`/`CLAUDE.md`). The component has no `rules:changes` gate, so a docs-only touch triggers the scan. Create the branch + Draft MR via **`glab api`** (`glab mr create` returns 404 in this env). Remove the marker (byte-identical to development) before un-drafting; **close** the probe if the fresh report is clean/all-skip.
 - Fleet-wide runs: dispatch **one guardrailed agent per open qodana MR** (parallel background), each loading this skill + running the verify-loop; order high-yield first (shared/backend/rebased-connectors before near-empty probes like chat/push/cca). Tell each agent to **bail early + report** when nothing is actionable after skips rather than inventing fixes.
 
-### ci-components 0.1.21 — restore-bootstrap RELEASED + VERIFIED (supersedes the resolver-artifact skip)
+### ci-components 0.1.21 — restore-bootstrap released + verified
 The bpp-shared restore-bootstrap (ci-components **!5**: qodana job `variables:` `GITLAB_PACKAGE_REGISTRY_USERNAME=gitlab-ci-token` + `GITLAB_PACKAGE_REGISTRY_PASSWORD=${CI_JOB_TOKEN}`, consumed by each repo's `nuget.config` `%…%` env placeholders) + the **!4** RedundantUsing exclude shipped in **tag 0.1.21** (2026-07-19). **VERIFIED on bpp-backend: 1189 → 392.** The resolver-artifact family is now FIXED AT SOURCE, not skip-by-default:
 - Under ≥0.1.21 these classes **vanish**: `CS1574`-crefs 465→4, `RedundantUsingDirective` 236→0, shared-typed `RedundantCast` 180→6, `NUnit1003` 39→**0** (all error-level gone), `InheritdocInvalidUsage` 19→4. **No job-token-allowlist change needed** — `CI_JOB_TOKEN` already reaches bpp-shared (feed project `73257349`).
 - If they still appear, first confirm the scan actually ran under ≥0.1.21: the trace must have **NO** `NuGetCredentialProvider — Interaction required` line. If it's present, the restore didn't run (old tag / publish race — see below) → report is contaminated, don't fix.
-- **CORRECTION to the four-buckets pure-skip list above:** `*AccordingToAPIContract` / `ConditionIsAlways*NullableAPIContract` / `NullCoalescing*NotNull` are **NOT** resolver artifacts — post-restore they RESOLVE and **GROW** (`ConditionalAccessQualifier` 81→118) because ReSharper finally sees bpp-shared's nullable annotations. They're **genuine, verified-judgment tier** (real null-safety / dead null-handling): fix the clear ones, keep intentional defensive checks. Only `RedundantSuppressNullableWarningExpression` stays mostly-FP.
+- `*AccordingToAPIContract` / `ConditionIsAlways*NullableAPIContract` / `NullCoalescing*NotNull` are **NOT** resolver artifacts — post-restore they RESOLVE and **GROW** (`ConditionalAccessQualifier` 81→118) because ReSharper finally sees bpp-shared's nullable annotations. They're **genuine, verified-judgment tier** (real null-safety / dead null-handling): fix the clear ones, keep intentional defensive checks. Only `RedundantSuppressNullableWarningExpression` stays mostly-FP.
 
 ### Re-scanning under a NEW ci-components tag — the publish RACE
 Cutting a ci-components tag (`POST /repository/tags`) kicks off ci-components' OWN catalog-release pipeline; the **CI/CD-Catalog release publishes ~8 min AFTER the tag**, and `@~latest` resolves the latest *published* release. A pipeline created before publish silently uses the OLD version (bpp-backend !174: pipeline @15:10 → 0.1.20 → identical 1189, restore never ran; release published @15:18).

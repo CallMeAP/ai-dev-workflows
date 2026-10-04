@@ -7,7 +7,7 @@ description: Use when user wants to check the health of the local BPP service st
 
 ## Overview
 
-Reports health (UP/DOWN) of each service in the local BPP stack: bpp-auth, bpp-file, bpp-mail, bpp-js-report-connector, bpp-push.
+Reports health (UP/DOWN) of each service in the local BPP stack: bpp-auth, bpp-file, bpp-mail, bpp-js-report-connector, bpp-push, brokernet-file-scanner.
 
 ## When to Use
 

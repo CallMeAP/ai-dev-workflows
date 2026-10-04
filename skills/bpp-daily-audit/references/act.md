@@ -47,7 +47,7 @@ When a finding's MR is closed unmerged:
 
 ## `targeted-mr`
 
-Model **Opus 5**, effort **high** — it writes code that lands on a real branch.
+Model **`opus`**, effort **high** — it writes code that lands on a real branch.
 
 ```bash
 BRANCH="audit/$(date +%Y-%m-%d)-${REPO}-${SLUG}"
