@@ -1,13 +1,13 @@
 ---
 name: bpp-create-mr
-description: Use when turning current local work in a BPP .NET repo into a reviewed merge request — phrases like "create an MR", "open a merge request for my changes", "MR my pending work", "push this and make an MR", "create MR and run unit tests". Auto-branches off a protected branch, commits unstaged work, pushes, creates a GitLab MR targeting development assigned to yourself with the repo's reviewer (backend/.NET apittrich, Angular/frontend chaslauer), runs unit tests, and pings when ready for an e2e run.
+description: Use when turning current local work in a BPP .NET repo into a reviewed merge request — phrases like "create an MR", "open a merge request for my changes", "MR my pending work", "push this and make an MR", "create MR and run unit tests". Auto-branches off a protected branch, commits unstaged work, pushes, creates a GitLab MR targeting development assigned to yourself with the repo's reviewer (backend/.NET apittrich, Angular/frontend chaslauer), runs unit tests, and pings when ready for an e2e run. Then watches the MR's Qodana job: auto-fixes findings the MR introduced, fixes overlooked pre-existing ones when local and safe, and posts one MR comment explaining every finding left unfixed.
 ---
 
 # bpp-create-mr
 
 ## Overview
 
-One-shot path from local work → reviewed MR in a BPP GitLab repo. Auto-creates a feature branch when on a protected branch, commits pending changes, **verifies the new public surface the branch adds (controller endpoints, public `I*Service` methods, DTO validation/mapper classes) is covered by tests**, pushes, creates (or reuses) an MR targeting `development` **assigned to yourself**, with the reviewer picked by repo kind (**apittrich** for .NET/backend repos, **chaslauer** for Angular/frontend repos), then runs the **unit** test suite as a regression gate. On green it pings the user that e2e can start; on red it reports the failures and pings — it never runs the e2e/integration suite itself (that's `bpp-run-integration-tests`).
+One-shot path from local work → reviewed MR in a BPP GitLab repo. Auto-creates a feature branch when on a protected branch, commits pending changes, **verifies the new public surface the branch adds (controller endpoints, public `I*Service` methods, DTO validation/mapper classes) is covered by tests**, pushes, creates (or reuses) an MR targeting `development` **assigned to yourself**, with the reviewer picked by repo kind (**apittrich** for .NET/backend repos, **chaslauer** for Angular/frontend repos), then runs the **unit** test suite as a regression gate. On green it pings the user that e2e can start; on red it reports the failures and pings — it never runs the e2e/integration suite itself (that's `bpp-run-integration-tests`). Finally a **Qodana watcher** (step 9) waits for the MR's qodana job, fixes what the MR introduced, triages pre-existing findings, and posts one summary comment on the MR.
 
 ## When to Use
 
@@ -194,6 +194,89 @@ If no `.sln`, run each `*.Tests.csproj` with the same `--filter`. Capture pass/f
   ```
   Leave the diagnosis to the user / `bpp-run-integration-tests`; do not edit tests to make them green.
 
+### 9. Qodana watcher
+
+Runs after step 8, on new and reused MRs. **REQUIRED BACKGROUND:** `bpp-fix-qodana-findings` — fetch mechanics, never-fix list, safe/judgment tiers, false-positive classes. Load it; don't re-derive its rules.
+
+- Unit gate (step 7) **red** → classify + comment only, no fixes: a fix can't be validated against a red suite.
+- Watcher commits land in this checkout. If the user may already be running e2e from it, say so in the final ping.
+
+**9a — Wait for the qodana job.** Qodana runs **only** in `merge_request_event` pipelines. Pick the pipeline whose `sha` equals local `HEAD`:
+
+```bash
+ENC=$(printf %s "$PROJ" | sed 's#/#%2F#g'); SHA=$(git rev-parse HEAD)
+# one call ≤ 9 min; run it in the background (run_in_background) and re-launch up to 3× (~30 min total)
+for i in $(seq 1 9); do
+  PL=$(glab api "projects/$ENC/merge_requests/$IID/pipelines" | jq -r --arg s "$SHA" '[.[]|select(.sha==$s)][0].id // empty')
+  [ -n "$PL" ] && JOB=$(glab api "projects/$ENC/pipelines/$PL/jobs?per_page=100" | jq -c '[.[]|select(.name|test("qodana";"i"))][0] // empty')
+  [ -n "$PL" ] && [ -z "$JOB" ] && { echo "NO_QODANA_JOB pl=$PL"; break; }
+  ST=$(echo "${JOB:-null}" | jq -r '.status // "pending"')
+  case "$ST" in success|failed|canceled|skipped|manual) echo "DONE $ST pl=$PL job=$(echo "$JOB" | jq -r .id)"; break;; esac
+  sleep 60
+done
+```
+
+- `NO_QODANA_JOB` (e.g. `bpp-agent`: no MR pipelines; repos without the component) → report "no qodana job in this pipeline", skip the phase.
+- `failed`/`canceled` with no report artifact, or still running after ~30 min → report status + job URL, stop the phase.
+- Check the job trace for `NuGetCredentialProvider`: if present, the report is contaminated (see `bpp-fix-qodana-findings`) → comment that, fix nothing.
+
+**9b — Fetch the MR report + a baseline.**
+- MR report (`JOB_ID` = `job=` from 9a): `glab api "projects/$ENC/jobs/$JOB_ID/artifacts/.qodana/results/gl-code-quality-report.json"`. Entries carry `check_name`, `fingerprint`, `location.path`, `location.lines.begin`.
+- Baseline: `development`/`staging`/`main` push pipelines have **no qodana job** (verified 2026-10-20). That makes GitLab's MR code-quality comparison empty, and its `/-/…/codequality_reports.json` route sits behind Cloudflare, unreachable through `glab api`. Use the newest **merged** MR into the target branch that has a successful qodana job: `merge_requests?state=merged&target_branch=development&order_by=merged_at&per_page=5` → its pipelines → qodana job → same artifact path.
+- No baseline found → classify by diff hunks alone (third rule below) and say so in the comment.
+
+**9c — Classify** each MR finding, first matching rule wins:
+
+1. `fingerprint` in baseline → **PRE-EXISTING**.
+2. Same `check_name` + `path` + `description` in baseline (line moved) → **PRE-EXISTING**.
+3. Its line is in a hunk this MR adds or changes (`git diff -U0 origin/development...HEAD -- <path>`) → **NEW**.
+4. Otherwise: a file the MR doesn't touch, or the baseline is older than `origin/development` → **PRE-EXISTING**. Exception: a finding this MR provokes away from its own hunks (e.g. a member made unused by a deletion) → **NEW**. Check the diff.
+
+Re-verify every finding against current content by file + text, not line number. Stale entries are counted as "already fixed".
+
+**9d — NEW findings → fix.** The MR caused them, so fixing them is in scope. Still obey the never-fix list and the false-positive verification rules from `bpp-fix-qodana-findings`.
+1. Edit only the flagged site(s).
+2. Build, then rerun the unit tests covering the touched projects (step-7 filter).
+3. Commit: `git add -- <paths>`, read `git diff --cached`, then `git commit -m "fix(qodana): <rule> in <file>"`.
+4. Plain `git push`. Never amend, never force-push.
+5. Back to 9a for the new HEAD. **Cap: 3 fix iterations**, then report what remains.
+
+**9e — PRE-EXISTING findings → investigate before touching.** Find why each one is still there:
+
+| Check | Means |
+|---|---|
+| `git log -L<line>,<line>:<path>` / `git blame` | Deliberate commit or MR discussion → keep |
+| `qodana.yaml` excludes, `// ReSharper disable`, `// noinspection`, `[SuppressMessage]`, `.editorconfig` severity | Was meant to be suppressed and the suppression is broken → report, don't widen it yourself |
+| False-positive / never-fix classes in `bpp-fix-qodana-findings` | Scan artifact or intended → keep |
+| Fix needs a bpp-shared change | Out of this repo → keep, name the shared type |
+| Fix changes a public API / DTO / endpoint contract | Needs an endpoint migration guide + broader review → keep |
+| Generated code (`*.g.cs`, `Migrations/*.Designer.cs`, snapshots) | Never edit → keep |
+
+None of these apply, the fix is local, small and in the safe/verified-judgment tier → **overlooked**. Fix it in this MR as a **separate commit** (`chore(qodana): fix pre-existing <rule> in <file>`), with the same build/test/push loop as 9d (it counts toward the 3-iteration cap). Everything else is **collected, not fixed**.
+
+**9f — Post ONE MR comment**, after the last iteration:
+
+```bash
+glab api --method POST "projects/$ENC/merge_requests/$IID/notes" --raw-field "body=$BODY"
+```
+
+`BODY` sections, skipping empty ones:
+- New findings fixed: rule, `file:line`, commit sha.
+- Pre-existing fixed: same columns.
+- Pre-existing NOT auto-fixed, as a table: rule, `file:line`, reason (false-positive class / needs bpp-shared / API change / deliberate (link commit) / generated / out of scope).
+- Still open after the cap, plus report/baseline provenance (pipeline ids).
+
+Clean report → still post the one-liner `Qodana: no new findings (pipeline <id>)`. Without it, a silent MR can't be told apart from a watcher that never ran. One line is worth that.
+
+**9g — Ping** `PushNotification(status="proactive", message="<repo> !<iid> qodana: <n> fixed, <m> left — see MR comment")`.
+
+**Safety (whole phase):**
+- Never suppress a finding (`qodana.yaml`, inline disable, baseline) to get green. Suppression is a reviewed decision, not a watcher action.
+- Touch only the files of the finding being fixed. No drive-by cleanups. Never stage secrets or `appsettings.local.json`.
+- Follow the repo's `CLAUDE.md` conventions.
+- `bpp-document-analysis` (doci): no local build/test. The pipeline is the proof. Fix NEW findings only, and only from the safe-mechanical tier. The next pipeline (build + unit + qodana) verifies them; a red pipeline stops the loop. Pre-existing findings are comment-only.
+- `bpp-agent`: no MR pipelines, so the phase ends at 9a.
+
 ## Quick Reference
 
 | Step | Command |
@@ -210,6 +293,10 @@ If no `.sln`, run each `*.Tests.csproj` with the same `--filter`. Capture pass/f
 | Set assignee+reviewer (always follow up) | `glab mr update <iid> -R lipso/clients/brokernet/<repo> --assignee <me> --reviewer <apittrich\|chaslauer>` |
 | Unit tests | `dotnet test <sln> --filter "Category!=LocalIntegration&Category!=Integration"` |
 | Ping | `PushNotification(status="proactive", message="…")` |
+| MR pipelines (qodana lives only here) | `glab api "projects/<enc>/merge_requests/<iid>/pipelines"` → pick `sha == HEAD` |
+| Qodana report | `glab api "projects/<enc>/jobs/<job>/artifacts/.qodana/results/gl-code-quality-report.json"` |
+| Baseline MR | `glab api "projects/<enc>/merge_requests?state=merged&target_branch=development&order_by=merged_at&per_page=5"` |
+| MR comment | `glab api --method POST "projects/<enc>/merge_requests/<iid>/notes" --raw-field "body=…"` |
 
 ## Common Mistakes
 
@@ -226,6 +313,10 @@ If no `.sln`, run each `*.Tests.csproj` with the same `--filter`. Capture pass/f
 - **`--force` push** → never.
 - **Editing tests to go green** → out of scope; report red and stop.
 - **Pinging e2e-ready when tests are red** → only ping "start e2e" on green.
+- **Taking the qodana baseline from a `development` pipeline** → none has a qodana job. Use the newest merged MR's report.
+- **Fixing a pre-existing finding without asking why it's still there** → it may be deliberate, a scan artifact, or need a bpp-shared/API change. Run the 9e checks first.
+- **Suppressing a finding to make the watcher go green** → never. Fix it, or list it with a reason in the MR comment.
+- **Waiting on qodana in one >10 min shell call** → ≤9 min per call, background, re-launch.
 
 ## Red Flags — STOP
 
@@ -236,3 +327,5 @@ If no `.sln`, run each `*.Tests.csproj` with the same `--filter`. Capture pass/f
 - About to create an MR without pinning `-R` → STOP.
 - Clean tree with nothing ahead of `origin/development` → STOP, nothing to MR.
 - About to `git push --force` or run e2e/integration tests → STOP (e2e is a separate, user-triggered run).
+- Watcher about to amend, force-push, add a suppression/exclude, edit generated code, or touch a file the finding isn't in → STOP.
+- 3 watcher fix iterations done → STOP fixing, post the comment with what remains.
