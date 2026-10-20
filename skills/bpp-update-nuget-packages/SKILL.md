@@ -35,16 +35,30 @@ dotnet list <Solution>.sln package --include-transitive    # for diagnosing NU11
 | Microsoft.AspNetCore.OpenApi + Swashbuckle | OpenApi latest 9.x + Swashbuckle 9.0.6 | Microsoft.OpenApi 2.x **removes `Microsoft.OpenApi.Models`** → breaks SwaggerGen filters (shared's TranslocoEnumSchemaFilter, ConfigureServerUrl) |
 | StackExchange.Redis | **2.13.17** (fleet pin) | 3.x breaks `StringSetAsync` (`When` → `Expiration` overload). 2.13.x already adds the Expiration overload — only code compiling `RedisService` (bpp-shared) hits the ambiguity; fix there is a 1-line `When.Always` |
 | FluentAssertions | last adopted **pre-8** line (6.12.2 fleet baseline) | **8.x = Xceed commercial license.** Per-repo/user decision, never a mechanical bump (alt: AwesomeAssertions fork). Some repos already ship 8.x — don't downgrade those either |
-| AutoMapper | 15.1.1 (fixes GHSA-rvv3-g6hj-g44x) | **≥16 commercial.** Backend/stella removed AutoMapper entirely — check it still exists before bumping |
-| MockQueryable.Moq | 7.0.0 | ≥7.0.2 **moved the `BuildMock` namespace** → compile break unless you also fix usings |
+| MassTransit (+ .RabbitMQ, .EntityFrameworkCore, .TestFramework) | latest **8.x** (8.5.11 on 2026-10-16) | **≥9 commercial** (Massient license, massient.com/license); 8.x is Apache-2.0. Keep all MassTransit packages on the same 8.x version across bpp-shared, bpp-doci and bpp-agent |
+| AutoMapper | **do not re-add**; if unavoidable, 14.0.0 (last MIT) | **≥15.0.0 is commercial** (RPL-1.5 or Lucky Penny license; free Community License only below US$5M gross revenue incl. parent group and ≤US$10M outside capital). Removed from backend/doci/shared in 2026 — verified absent on dev/staging/main 2026-10-16 |
+| JsonSchema.Net (+ JsonPointer.Net, Json.More.Net) | **8.0.5** (last MIT) — bpp-agent tests are on 9.4.0 (user decision pending) | **≥9.0.0 ships OSMFEULA.txt**: monthly maintenance fee (GitHub Sponsors) for orgs using the NuGet binary in revenue-generating activity; 9.4.x states a US$10,000 annual-revenue threshold. Never bump into it mechanically |
+| Moq | 4.x | 4.20.0/4.20.1 had SponsorLink (removed in 4.20.2). The upcoming **v5** adds an Open Source Maintenance Fee EULA — hold on 4.x until reviewed |
+| Kreuzberg | 4.x | **5.x (currently prereleases) is Elastic License 2.0**, no longer MIT — needs review before adopting |
 
-License rule generalized: on any **major** bump, check the license didn't flip commercial (FluentAssertions 8, AutoMapper 16, Moq/SponsorLink history). "Latest" with a paywall is not an update.
+License rule generalized: on any **major** bump, check the license didn't flip commercial (FluentAssertions 8, AutoMapper ≥15 [$5M revenue Community License], MassTransit 9 [$1M], JsonSchema.Net 9 [OSMF fee], Moq v5 [OSMF fee], Kreuzberg 5 [ELv2]). "Latest" with a paywall is not an update.
+
+## bpp-shared bumps break bpp-doci and bpp-agent (NU1605)
+
+bpp-doci (bpp-document-analysis) and bpp-agent are usually left out of sweeps, but they pin many of the same packages as
+`BPP.Shared.NET` directly. Raising any of those in bpp-shared turns their restore red with **NU1605 (downgrade)** as soon
+as the new shared package is bumped there (2026-10-16: dev pipelines + staging MR !332). **When the sweep raises a package
+in bpp-shared, raise the overlapping refs in doci + agent in the same run** (only those refs if the repos are otherwise
+excluded). A local `dotnet build` of their solutions shows the NU1605 — verify there, then via their pipelines.
 
 ## Always take
 
 - **log4net ≥ 3.3.2** — CVE fix (GHSA-4f7c-pmjv-c25w).
 - Test infra fleet standard: `Microsoft.NET.Test.Sdk` 18.x line / `NUnit3TestAdapter` 6.x / `coverlet.collector` 10.x — don't "align down" to 17.x based on stale examples in older repos (id-austria/cca lagged; fleet majority is the 18 line).
 - Patch/minor bumps of everything not in the hold matrix.
+- **MockQueryable.Moq 10.x** (hold lifted 2026-10-16): `BuildMock()`/`BuildMockDbSet()` are now extensions on `IEnumerable<T>`/`ICollection<T>` — drop the `.AsQueryable()` before them (`list.BuildMockDbSet()`). Mechanical, own commit.
+- **NUnit 5.x** (fleet decision 2026-10-16): `Assert.ThrowsAsync` / `DoesNotThrowAsync` now return a `Task` (NUnit2059 / CS0029) — make the test `async Task` and `await` the assert. Mechanical, own commit; never hold NUnit back to dodge it.
+- **Microsoft.Extensions.ApiDescription.Server**: take the latest (10.x). Build-time only, no package dependencies — it is NOT part of the OpenApi/Swashbuckle hold.
 
 ## Restore-error decoder
 

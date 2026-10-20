@@ -1,13 +1,13 @@
 ---
 name: bpp-create-mr
-description: Use when turning current local work in a BPP .NET repo into a reviewed merge request — phrases like "create an MR", "open a merge request for my changes", "MR my pending work", "push this and make an MR", "create MR and run unit tests". Auto-branches off a protected branch, commits unstaged work, pushes, creates a GitLab MR targeting development assigned to yourself with the repo's reviewer (backend/.NET apittrich, Angular/frontend nangertLipso), runs unit tests, and pings when ready for an e2e run.
+description: Use when turning current local work in a BPP .NET repo into a reviewed merge request — phrases like "create an MR", "open a merge request for my changes", "MR my pending work", "push this and make an MR", "create MR and run unit tests". Auto-branches off a protected branch, commits unstaged work, pushes, creates a GitLab MR targeting development assigned to yourself with the repo's reviewer (backend/.NET apittrich, Angular/frontend chaslauer), runs unit tests, and pings when ready for an e2e run.
 ---
 
 # bpp-create-mr
 
 ## Overview
 
-One-shot path from local work → reviewed MR in a BPP GitLab repo. Auto-creates a feature branch when on a protected branch, commits pending changes, **verifies the new public surface the branch adds (controller endpoints, public `I*Service` methods, DTO validation/mapper classes) is covered by tests**, pushes, creates (or reuses) an MR targeting `development` **assigned to yourself**, with the reviewer picked by repo kind (**apittrich** for .NET/backend repos, **nangertLipso** for Angular/frontend repos), then runs the **unit** test suite as a regression gate. On green it pings the user that e2e can start; on red it reports the failures and pings — it never runs the e2e/integration suite itself (that's `bpp-run-integration-tests`).
+One-shot path from local work → reviewed MR in a BPP GitLab repo. Auto-creates a feature branch when on a protected branch, commits pending changes, **verifies the new public surface the branch adds (controller endpoints, public `I*Service` methods, DTO validation/mapper classes) is covered by tests**, pushes, creates (or reuses) an MR targeting `development` **assigned to yourself**, with the reviewer picked by repo kind (**apittrich** for .NET/backend repos, **chaslauer** for Angular/frontend repos), then runs the **unit** test suite as a regression gate. On green it pings the user that e2e can start; on red it reports the failures and pings — it never runs the e2e/integration suite itself (that's `bpp-run-integration-tests`).
 
 ## When to Use
 
@@ -24,7 +24,7 @@ Not for: bulk dev→staging promotion (`bpp-promote-dev-to-staging`), running e2
 | Push remote | `origin` (the cwd repo — **never** `glab-base`) |
 | Target branch | `development` |
 | Assignee | **yourself** — the authenticated glab user (`glab api user \| jq -r .username`). Never another person; the author drives the MR until merge |
-| Reviewer | by repo kind: `apittrich` for .NET/backend repos, `nangertLipso` for Angular/frontend repos (`brokernet-cockpit-ui`, `bpp-stella-ui`/`go-stella`, `*-ui`) |
+| Reviewer | by repo kind: `apittrich` for .NET/backend repos, `chaslauer` for Angular/frontend repos (`brokernet-cockpit-ui`, `bpp-stella-ui`/`go-stella`, `*-ui`) |
 | Protected branches | `development`, `staging`, `main`, `master` |
 | New branch prefix | `feature/` + kebab slug from the diff |
 | Commit message | auto-generated, conventional (`feat:`/`fix:`/`chore:` …) from the diff |
@@ -144,7 +144,7 @@ Never `--force`. A push to an existing MR's source branch updates that MR automa
 ```bash
 ME=$(glab api user | jq -r .username)                 # assignee is always the author
 case "$REPO" in                                        # reviewer follows the stack
-  brokernet-cockpit-ui|bpp-stella-ui|go-stella|*-ui) REVIEWER=nangertLipso ;;
+  brokernet-cockpit-ui|bpp-stella-ui|go-stella|*-ui) REVIEWER=chaslauer ;;
   *) REVIEWER=apittrich ;;
 esac
 
@@ -207,7 +207,7 @@ If no `.sln`, run each `*.Tests.csproj` with the same `--filter`. Capture pass/f
 | Push | `git push -u origin <branch>` |
 | Existing MR? | `glab api .../merge_requests?state=opened&source_branch=<b>&target_branch=development` |
 | Create MR | `glab api --method POST "/projects/<enc>/merge_requests" -f source_branch=… -f target_branch=development -f title=…` |
-| Set assignee+reviewer (always follow up) | `glab mr update <iid> -R lipso/clients/brokernet/<repo> --assignee <me> --reviewer <apittrich\|nangertLipso>` |
+| Set assignee+reviewer (always follow up) | `glab mr update <iid> -R lipso/clients/brokernet/<repo> --assignee <me> --reviewer <apittrich\|chaslauer>` |
 | Unit tests | `dotnet test <sln> --filter "Category!=LocalIntegration&Category!=Integration"` |
 | Ping | `PushNotification(status="proactive", message="…")` |
 
@@ -221,7 +221,7 @@ If no `.sln`, run each `*.Tests.csproj` with the same `--filter`. Capture pass/f
 - **Including integration tests in the gate** → they need the local stack and trip bpp-auth's 429; this skill is unit-only (`Category!=LocalIntegration&Category!=Integration`).
 - **Using `glab mr create`** → unreliable here, and it drops `--reviewer`/`--assignee` at creation time. Create via `glab api --method POST …/merge_requests`, then always follow up with `glab mr update <iid> --assignee "$ME" --reviewer "$REVIEWER" -R lipso/clients/brokernet/<repo>` (on new and reused MRs).
 - **Assigning the MR to the reviewer** → the author keeps the assignee slot (they push the fixes and drive it to merge); the other person goes in `--reviewer` only.
-- **Using the backend reviewer on a frontend MR** → Angular repos are reviewed by `nangertLipso`, .NET repos by `apittrich`. Derive it from the repo, don't default blindly.
+- **Using the backend reviewer on a frontend MR** → Angular repos are reviewed by `chaslauer`, .NET repos by `apittrich`. Derive it from the repo, don't default blindly.
 - **Duplicating an MR** → query open MRs for the source branch first; a push already updates an existing one.
 - **`--force` push** → never.
 - **Editing tests to go green** → out of scope; report red and stop.

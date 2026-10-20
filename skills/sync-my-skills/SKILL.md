@@ -38,7 +38,7 @@ The mirror's `install.sh` is the authority for this path — read it, do not ass
 config and becomes a placeholder: `/home/alex/Entwicklung/bpp` → `{{BPP_ROOT}}`, and a username
 *inside a filesystem path* (`dev/apittrich/`) → `{{DEV_USER}}`. A username naming a **real person**
 is not machine config and stays literal: MR reviewers (`apittrich` for .NET/backend repos,
-`nangertLipso` for Angular/frontend), "maintained by nangert" attributions, Jira/GitLab handles in
+`chaslauer` for Angular/frontend), "maintained by nangert" attributions, Jira/GitLab handles in
 prose. Blanket-replacing those breaks the reviewer logic. Ambiguous → leave it and say so.
 
 **Every skill carries its own `README.md` — personal ones too.** For a skill under
