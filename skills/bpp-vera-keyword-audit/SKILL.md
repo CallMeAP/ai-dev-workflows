@@ -21,6 +21,7 @@ Support files (this directory; invoke through the interpreter):
 |---|---|
 | `vera-tenant-creds.sql` | PROD query: one row per GoUser with a VERA token, per tenant (`idx`, `tenant_idx`, `user_idx`, creds) |
 | `vera-audit.sh` | driver: `preflight`, `run-all`, `run <idx> [1]` (updates `results.tsv`), `refetch <idx>`, `check-fingerprints`, `manifest`, `swap`, `restore` |
+| `../bpp-vera-prod-session/vera-session.sh` | sourced by `vera-audit.sh`: preflight, swap, restore, build, smoke, App start/stop, rate-limited `get` (single-tenant runs: skill `bpp-vera-prod-session`) |
 | `vera-keyword-audit.workflow.js` | analyze -> verify -> implement (TDD) -> review; args below |
 | `leak-scan.py` | scans a git range for tenant names / cred values from `creds.csv`, prints only column + file:line |
 
@@ -102,7 +103,7 @@ tenants/catalogs/rows (counts, T<idx> only), per-area verdicts, **Decisions take
 | put a tenant name in code, tests, commits, reports, MR text | tenants are `T<idx>` in reports and absent from code |
 | add salutation-like free-text fields (Anrede, Briefanrede, names) to the inventory `ENUM_KEYS` | they carry customer names; enum_values must stay value counts of real enums |
 | build the manifest after a fingerprint mismatch | one representative user per tenant is then unproven; stop and report |
-| edit `vera-audit.sh` while it runs | bash reads scripts lazily; write a new file, then `mv` it over the old one |
+| edit `vera-audit.sh` or `vera-session.sh` while it runs | bash reads scripts lazily; write a new file, then `mv` it over the old one |
 | re-run without the user's go because "the last audit was approved" | a go covers one prod run |
 
 ## Lessons learned

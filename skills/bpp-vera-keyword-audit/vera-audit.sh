@@ -19,173 +19,21 @@
 set -uo pipefail
 
 SELF=$(realpath "$0")
-MAIN=/home/alex/Entwicklung/bpp/bpp-vera-connector
-SLN=$MAIN/BPP.VeraConnector.NET
-APP=$SLN/BPP.VeraConnector.NET.App
-CONSTS=$SLN/BPP.VeraConnector.NET.Vera/Consts/VeraDebugTestConsts.cs
-TESTS=$SLN/BPP.VeraConnector.NET.Integration.Tests/BPP.VeraConnector.NET.Integration.Tests.csproj
 AUDIT=$HOME/Downloads/.vera-audit
-CREDS=$AUDIT/creds.csv
-BACKUP=$AUDIT/VeraDebugTestConsts.cs.orig
 OUT=$AUDIT/out
 LOG=$AUDIT/logs
+STATE=$AUDIT/.ratelimit
 PORT=5246
 BASE=http://localhost:$PORT/api/debug/vera
-RETRY_WAIT=${RETRY_WAIT:-30}
-# Rate limiting toward VERA (all probe GETs go through get()):
-MIN_INTERVAL_MS=${MIN_INTERVAL_MS:-1500}   # min gap between two probe GETs, across rows
-MAX_RETRIES=${MAX_RETRIES:-3}              # per GET on 429/5xx/timeout, exponential backoff
-BACKOFF_BASE=${BACKOFF_BASE:-5}            # seconds; 5, 10, 20 ... capped at BACKOFF_MAX
-BACKOFF_MAX=${BACKOFF_MAX:-120}
 ROW_COOLDOWN=${ROW_COOLDOWN:-15}           # pause between two cred rows (smoke burst + catalog)
 SMOKE_COOLDOWN=${SMOKE_COOLDOWN:-10}       # pause after a smoke run before the catalog fetch
-MAX_CALLS_PER_ROW=${MAX_CALLS_PER_ROW:-200} # hard budget of probe GETs per row
-MAX_CALLS_TOTAL=${MAX_CALLS_TOTAL:-6000}    # hard budget per invocation; abort when reached
-STATE=$AUDIT/.ratelimit
 
-umask 077
-mkdir -p "$OUT" "$LOG" "$AUDIT/.ratelimit"
-
-export ASPNETCORE_ENVIRONMENT=local
-unset DOTNET_ENVIRONMENT
-for v in $(env | cut -d= -f1 | grep -iE '^(FeatureTogglesVeraSync|VeraIntegrationTesting)__'); do unset "$v"; done
-
-die() { echo "ABORT: $*" >&2; exit 1; }
-
-preflight() {
-  [[ "$(pwd -P)" != *worktrees* ]] || die "running inside a worktree"
-  [[ "${ASPNETCORE_ENVIRONMENT}" == "local" ]] || die "ASPNETCORE_ENVIRONMENT is not local"
-  if env | grep -qiE '^(FeatureTogglesVeraSync|VeraIntegrationTesting)__'; then die "env var overrides a VERA gate"; fi
-  python3 - "$APP" <<'PY' || exit 1
-import json, sys
-app = sys.argv[1]
-base = json.load(open(f"{app}/appsettings.json"))
-loc = json.load(open(f"{app}/appsettings.local.json"))
-def eff(sec, key):
-    v = loc.get(sec, {}).get(key)
-    return v if v is not None else base.get(sec, {}).get(key)
-ew = eff("FeatureTogglesVeraSync", "EnableWriteAccess")
-wt = eff("VeraIntegrationTesting", "VeraWriteTestsEnabled")
-# appsettings.local.json itself must pin both gates to false (it is the last JSON source for env=local)
-lew = loc.get("FeatureTogglesVeraSync", {}).get("EnableWriteAccess")
-lwt = loc.get("VeraIntegrationTesting", {}).get("VeraWriteTestsEnabled")
-print(f"preflight: EnableWriteAccess={ew} VeraWriteTestsEnabled={wt} (appsettings.local.json: {lew}/{lwt}) env=local")
-if ew is not False or wt is not False or lew is not False or lwt is not False:
-    print("REFUSE: a VERA write gate is not explicitly false in appsettings.local.json"); sys.exit(1)
-PY
-}
-
-col() { # col <idx> <column>  -> value on stdout (only ever captured into the swap, never echoed)
-  python3 - "$CREDS" "$1" "$2" <<'PY'
-import csv, sys
-for r in csv.DictReader(open(sys.argv[1], newline="")):
-    if r["idx"] == sys.argv[2]:
-        sys.stdout.write(r[sys.argv[3]]); break
-PY
-}
-
-swap() {
-  local idx=$1
-  [[ -f "$BACKUP" ]] || { cp -p "$CONSTS" "$BACKUP"; chmod 600 "$BACKUP"; }
-  python3 - "$CREDS" "$idx" "$CONSTS" <<'PY' || die "swap failed for row $idx"
-import csv, re, sys
-creds, idx, path = sys.argv[1:4]
-row = next((r for r in csv.DictReader(open(creds, newline="")) if r["idx"] == idx), None)
-if row is None: sys.exit(f"row {idx} not found")
-mapping = {"VeraUsername": "vera_username", "VeraPassword": "vera_password", "VeraApiKey": "vera_api_key",
-           "VeraClientSecret": "vera_client_secret", "VeraClientId": "vera_client_id",
-           "VeraUserToken": "vera_user_token"}
-src = open(path, encoding="utf-8").read()
-for const, column in mapping.items():
-    value = row[column].strip()
-    if '"' in value or "\\" in value or "\n" in value: sys.exit(f"{const}: value needs escaping")
-    pattern = re.compile(r'(const\s+string\s+' + const + r'\s*=\s*)(@?"[^"\n]*")(\s*;)')
-    if len(pattern.findall(src)) != 1: sys.exit(f"{const}: expected exactly one declaration")
-    src = pattern.sub(lambda m: m.group(1) + '"' + value + '"' + m.group(3), src)
-open(path, "w", encoding="utf-8").write(src)
-print(f"swapped row {idx} (tenant_idx={row['tenant_idx']} user_idx={row['user_idx']})")
-PY
-}
-
-restore() {
-  [[ -f "$BACKUP" ]] || { echo "no backup, nothing to restore"; return 0; }
-  cp -p "$BACKUP" "$CONSTS" && echo "restored original VeraDebugTestConsts.cs"
-}
-
-build() {
-  dotnet build "$SLN/BPP.VeraConnector.sln" -c Debug -v q -nologo >"$LOG/build-$1.log" 2>&1 \
-    || { echo "build failed (see $LOG/build-$1.log)"; return 1; }
-}
-
-smoke_once() {
-  preflight >/dev/null || exit 1
-  dotnet test "$TESTS" -c Debug --no-build --filter "FullyQualifiedName~Phase1_Smoke" \
-    --logger "console;verbosity=minimal" >"$LOG/smoke-$1-$2.log" 2>&1
-}
-
-smoke() {
-  local idx=$1
-  if smoke_once "$idx" 1; then echo ok; return 0; fi
-  sleep "$RETRY_WAIT"
-  if smoke_once "$idx" 2; then echo ok-retry; return 0; fi
-  echo failed; return 1
-}
-
-app_start() {
-  ss -ltn "sport = :$PORT" | grep -q LISTEN && die "port $PORT already in use"
-  preflight >/dev/null || exit 1
-  (cd "$APP" && exec dotnet run --no-build --launch-profile http >"$LOG/app-$1.log" 2>&1) &
-  APP_PID=$!
-  for _ in $(seq 1 60); do
-    curl -s -o /dev/null "http://localhost:$PORT/" && return 0
-    sleep 2
-  done
-  die "App did not start (see $LOG/app-$1.log)"
-}
-
-app_stop() {
-  [[ -n "${APP_PID:-}" ]] || return 0
-  pkill -P "$APP_PID" 2>/dev/null; kill "$APP_PID" 2>/dev/null; wait "$APP_PID" 2>/dev/null
-  for _ in $(seq 1 15); do ss -ltn "sport = :$PORT" | grep -q LISTEN || break; sleep 1; done
-  APP_PID=
-}
-
-throttle() { # wait until MIN_INTERVAL_MS has passed since the last probe GET (persists across rows)
-  local now last wait_ms
-  now=$(date +%s%3N); last=$(cat "$STATE/last" 2>/dev/null || echo 0)
-  wait_ms=$(( last + MIN_INTERVAL_MS - now ))
-  (( wait_ms > 0 )) && sleep "$(awk -v m="$wait_ms" 'BEGIN{printf "%.3f", m/1000}')"
-  date +%s%3N >"$STATE/last"
-}
-
-count_call() { # enforce per-row and total call budgets
-  local row total
-  row=$(( $(cat "$STATE/row" 2>/dev/null || echo 0) + 1 )); echo "$row" >"$STATE/row"
-  total=$(( $(cat "$STATE/total" 2>/dev/null || echo 0) + 1 )); echo "$total" >"$STATE/total"
-  (( total > MAX_CALLS_TOTAL )) && die "total VERA call budget ($MAX_CALLS_TOTAL) reached"
-  (( row > MAX_CALLS_PER_ROW )) && { echo "row call budget ($MAX_CALLS_PER_ROW) reached" >>"$LOG/http-errors.log"; return 1; }
-  return 0
-}
-
-get() { # get <url> <outfile> ; GET only, rate limited, backoff on 429/5xx (honours Retry-After)
-  local code attempt=0 delay hdr ra
-  hdr=$(mktemp)
-  while :; do
-    count_call || { rm -f "$hdr"; return 1; }
-    throttle
-    code=$(curl -s -D "$hdr" -o "$2" -w '%{http_code}' --max-time 120 "$1")
-    [[ "$code" == 200 ]] && { rm -f "$hdr"; return 0; }
-    attempt=$((attempt + 1))
-    if [[ "$code" != 429 && "$code" != 5* && "$code" != 000 ]] || (( attempt > MAX_RETRIES )); then
-      echo "GET $1 -> $code (attempts $attempt)" >>"$LOG/http-errors.log"; rm -f "$hdr"; return 1
-    fi
-    delay=$(( BACKOFF_BASE * (1 << (attempt - 1)) )); (( delay > BACKOFF_MAX )) && delay=$BACKOFF_MAX
-    ra=$(awk 'tolower($1)=="retry-after:"{gsub("\r","",$2); print $2}' "$hdr")
-    [[ "$ra" =~ ^[0-9]+$ ]] && (( ra > delay )) && delay=$ra
-    echo "GET $1 -> $code, backoff ${delay}s (attempt $attempt)" >>"$LOG/http-backoff.log"
-    sleep "$delay"
-  done
-}
+# Shared with bpp-vera-prod-session: paths (MAIN, SLN, APP, CONSTS, TESTS, CREDS, BACKUP), rate-limit env vars,
+# forced env=local, die, preflight, swap, restore, build, smoke_once, smoke, app_start, app_stop, throttle,
+# count_call, get. Paths and PORT are fixed there; the library honours LOG/STATE set above.
+# shellcheck source=../bpp-vera-prod-session/vera-session.sh
+source "$(dirname "$SELF")/../bpp-vera-prod-session/vera-session.sh" || { echo "ABORT: shared vera-session.sh missing" >&2; exit 1; }
+mkdir -p "$OUT" "$LOG" "$STATE"
 
 catalog() { # catalog <idx> -> writes $OUT/row-<idx>/catalog.json + prints fingerprint
   local idx=$1 t p; local dir=$OUT/row-$idx
