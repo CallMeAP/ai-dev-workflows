@@ -1,6 +1,6 @@
 ---
 name: bpp-cleanup-merged-worktrees
-description: Use when cleaning up finished git worktrees under ~/Entwicklung/bpp whose branches are already merged — phrases like "clean up merged worktrees", "remove stale worktrees", "prune finished .wt-* folders", "delete merged worktree branches", "worktree cleanup". Discovers stray `.wt-*` dirs plus every repo's linked worktrees, classifies each as REMOVE (ancestor of origin/development + clean) / LANDED (squash- or post-merge, patch-identity proven automatically) / REMOVE-AFTER-SCAFFOLD (merged, dirt is only local scaffolding — removed on user go) / KEEP (real dirt, unmerged, unproven, at-tip, detached, or git error), prints a plan first, then removes REMOVE + LANDED rows with `git worktree remove` + `git branch -d` — never `--force`; `-D` only as the fallback for a proven LANDED row.
+description: Use when cleaning up finished git worktrees under ~/Entwicklung/bpp whose branches are already merged — phrases like "clean up merged worktrees", "remove stale worktrees", "prune finished .wt-* folders", "delete merged worktree branches", "worktree cleanup". Discovers stray `.wt-*` dirs plus every repo's linked worktrees, classifies each as REMOVE (ancestor of origin/development + clean) / LANDED (squash- or post-merge, patch-identity proven automatically) / REMOVE-AFTER-SCAFFOLD (merged, dirt is only local scaffolding — removed on user go) / KEEP (real dirt, unmerged, unproven, at-tip, detached, or git error), prints a read-only plan first (no fetch unless `--fetch`), then removes only the worktree paths the user approved — `apply <path>…` for REMOVE/LANDED, `apply-scaffold <path>…` for scaffold rows, each re-verified — with `git worktree remove` + `git branch -d` — never `--force`; `-D` only as the fallback for a proven LANDED row.
 ---
 
 # bpp-cleanup-merged-worktrees
@@ -10,7 +10,8 @@ description: Use when cleaning up finished git worktrees under ~/Entwicklung/bpp
 Safely reclaim disk + mental space by removing git worktree folders under `~/Entwicklung/bpp`
 whose branch content is **already in** `origin/development` **and** whose tree is spotless. Everything
 else is kept and reported. The skill is destructive-by-invocation but conservative-by-construction:
-it always prints a **plan first**, removes only what it can prove landed, uses `git worktree remove`
+it always prints a **read-only plan first**, removes only the worktree paths the user approved and only
+if it can still prove them landed, uses `git worktree remove`
 (never `--force`) + `git branch -d`, and settles squash/post-merge cases with an automatic
 patch-identity proof instead of a human guess. Many `.wt-*` folders belong to **other agents working
 right now** — the guards keep those.
@@ -34,8 +35,8 @@ a manifest-driven loop could only ever be less complete.
 
 | Verdict | Condition | Apply does |
 |---|---|---|
-| REMOVE | clean, HEAD ancestor of dev, dev advanced past it (behind>0) | `worktree remove` + `branch -d` |
-| LANDED | clean, merged MR, `git cherry` all `-`, and (two-dot diff empty **or** merge-tree == dev tree **or** every branch-touched file still differing is a version dev's own history once had) | `worktree remove` + `branch -d`, fallback `-D` (proof re-run first) |
+| REMOVE | clean, HEAD ancestor of dev, dev advanced past it (behind>0) | `apply <path>…` (approved paths only): `worktree remove` + `branch -d` |
+| LANDED | clean, merged MR, `git cherry` all `-`, and (two-dot diff empty **or** merge-tree == dev tree **or** every branch-touched file still differing is a version dev's own history once had) | `apply <path>…` (approved paths only): `worktree remove` + `branch -d`, fallback `-D` (proof re-run first) |
 | REMOVE-AFTER-SCAFFOLD | REMOVE/LANDED except every dirty file is LOCAL-SCAFFOLDING | nothing; `apply-scaffold <path>…` only on the user's explicit go |
 | KEEP | any REAL-CHANGE dirt, cherry `+`, unproven, no merged MR, at dev tip, detached, locked/fresh Claude worktree, git error | nothing — reported with evidence |
 
@@ -51,9 +52,12 @@ a manifest-driven loop could only ever be less complete.
 
 ## Steps
 
-Run **plan mode first** (default). Show the user the table. Then run **apply mode** (REMOVE + LANDED).
-REMOVE-AFTER-SCAFFOLD rows are removed only after the user OKs the listed files per worktree, via
-`apply-scaffold`. KEEP rows are never touched.
+Run **plan mode first** (default, read-only: no fetch, no removal). Show the user the table. Then run
+`apply` with **exactly the REMOVE/LANDED worktree paths the user approved** — never a re-discovered set:
+a worktree sitting at the dev tip (e.g. a running workflow's) reads KEEP in the plan and flips to REMOVE
+the moment dev advances. `apply` with no paths refuses and prints the plan. REMOVE-AFTER-SCAFFOLD rows
+are removed only after the user OKs the listed files per worktree, via `apply-scaffold <path>…`. KEEP
+rows are never touched. Both apply modes fetch and re-verify each named path immediately before removing it.
 
 ### How a squash/post-merge row is proven (automatic, in `merge_state`)
 
@@ -78,16 +82,16 @@ was just re-run and still holds.
 
 The script below is not shipped as a file. Write it to a temp file first (`f=$(mktemp --suffix=.sh)`), then:
 
-- Plan (default): `bash "$f"` or `bash "$f" plan`
-- Apply (REMOVE + LANDED rows, re-verified at removal time): `bash "$f" apply`
+- Plan (default, read-only, uses the refs of the last fetch): `bash "$f"` or `bash "$f" plan`; `bash "$f" plan --fetch` refreshes origin first
+- After the user's go on specific REMOVE/LANDED rows: `bash "$f" apply <worktree> [<worktree>…]` — no paths ⇒ refuses, prints the plan
 - After the user's go on specific REMOVE-AFTER-SCAFFOLD rows: `bash "$f" apply-scaffold <worktree> [<worktree>…]`
+- Reuse the helpers: `source "$f"` stops before reading any argument as a mode
 
 ```bash
 #!/usr/bin/env bash
-# bpp-cleanup-merged-worktrees — MODE: plan (default) | apply | apply-scaffold <worktree>...
+# bpp-cleanup-merged-worktrees — MODE: plan [--fetch] (default) | apply <worktree>... | apply-scaffold <worktree>...
 set -uo pipefail
 BASE=/home/alex/Entwicklung/bpp
-MODE="${1:-plan}"; shift || true
 IDLE_DAYS="${IDLE_DAYS:-7}"   # a .claude/worktrees candidate must be untouched this long before it is even classified
 SECRET_RE='(^|/)(appsettings[^/]*\.local\.json|[^/]*DebugTestConsts\.cs|\.env[^/]*|[^/]*\.(pfx|p12|pem|key))$'
 WIRING_RE='ProjectReference|BPP\.Shared|BppShared|Exists\(|Condition=|ItemGroup|PropertyGroup|</?Project|<!--|-->|^[[:space:]]*$'
@@ -146,7 +150,7 @@ merge_state() { # W branch projenc → "VERDICT<TAB>reason"; VERDICT = REMOVE | 
   plus=$(git -C "$W" cherry origin/development HEAD 2>/dev/null | awk '/^\+/{n++; if (n<=10) printf "%s ", substr($2,1,9)} END{if (n>10) printf "(+%d more) ", n-10}')
   [ -n "$plus" ] && { printf 'KEEP\tMR !%s->%s merged, but cherry "+" (not in dev): %s(see git cherry -v)' "$iid" "$tgt" "$plus"; return; }
   git -C "$W" diff --quiet origin/development HEAD && { printf 'LANDED\tMR !%s->%s; cherry all "-", two-dot diff empty' "$iid" "$tgt"; return; }
-  files=$(git -C "$W" diff --name-only origin/development...HEAD)
+  files=$(git -C "$W" diff --name-only origin/development...HEAD 2>/dev/null)   # silences "multiple merge bases"
   if [ -n "$mc" ] && git -C "$W" cat-file -e "$mc^{commit}" 2>/dev/null; then
     if git -C "$W" diff --quiet "$mc" HEAD -- $files; then mrres=yes; else mrres=no; fi
   fi
@@ -180,20 +184,48 @@ reverify() { # W branch → echoes current verdict line after a fresh fetch; emp
   git -C "$1" fetch -q origin 2>/dev/null || return
   merge_state "$1" "$2" "$(projenc_of "$1")"
 }
+guard_target() { # W → empty if W may be a removal target, else the reason it may not
+  local m
+  case "$1" in "$BASE"/*) ;; *) echo "outside $BASE"; return;; esac
+  m=$(mainwt_of "$1"); [ -z "$m" ] && { echo "not a worktree"; return; }
+  [ "$m" = "$1" ] && echo "main checkout — never a removal target"
+}
 
-# ── apply-scaffold: only the worktrees the user named, only if still scaffold-only + merged ──
-if [ "$MODE" = "apply-scaffold" ]; then
+# Sourced (to reuse the helpers): stop here, so no argument is ever consumed as MODE.
+(return 0 2>/dev/null) && return 0
+MODE="${1:-plan}"; shift || true
+FETCH=0
+if [ "$MODE" = --fetch ]; then MODE=plan; FETCH=1
+elif [ "$MODE" = plan ] && [ "${1:-}" = --fetch ]; then FETCH=1; shift; fi
+case "$MODE" in plan|apply|apply-scaffold) ;; *) echo "unknown mode '$MODE' (plan [--fetch] | apply <worktree>... | apply-scaffold <worktree>...)"; exit 2;; esac
+
+# ── apply / apply-scaffold: ONLY the worktrees the user approved, each re-verified now ──
+if [ "$MODE" != plan ] && [ $# -eq 0 ]; then
+  echo "REFUSED: '$MODE' takes the worktree paths the user approved ($MODE <worktree>...). Nothing removed; read-only plan follows."
+  echo; MODE=plan
+fi
+if [ "$MODE" != plan ]; then
   for W in "$@"; do
-    W=${W%/}; b=$(git -C "$W" rev-parse --abbrev-ref HEAD 2>/dev/null) || { echo "SKIP $W: not a worktree"; continue; }
+    W=${W%/}
+    g=$(guard_target "$W"); [ -n "$g" ] && { echo "SKIP $W: $g"; continue; }
+    b=$(git -C "$W" rev-parse --abbrev-ref HEAD 2>/dev/null)
+    if [ -z "$b" ] || [ "$b" = HEAD ]; then echo "SKIP $W: detached HEAD / unreadable"; continue; fi
     classify_wt "$W"
     [ -n "$REAL" ] && { echo "SKIP $W: REAL-CHANGE now present: $REAL"; continue; }
-    [ -z "$SCAF" ] && { echo "SKIP $W: clean now — use apply"; continue; }
+    if [ "$MODE" = apply ]; then
+      [ -n "$SCAF" ] && { echo "SKIP $W: LOCAL-SCAFFOLDING present — needs apply-scaffold on the user's go: $SCAF"; continue; }
+    else
+      [ -z "$SCAF" ] && { echo "SKIP $W: clean now — use apply"; continue; }
+    fi
     ms=$(reverify "$W" "$b"); v=${ms%%$'\t'*}
-    case "$v" in REMOVE|LANDED) ;; *) echo "SKIP $W: no longer merged (${ms#*$'\t'})"; continue;; esac
-    [ ${#SCAF_T[@]} -gt 0 ] && git -C "$W" restore --source=HEAD --staged --worktree -- "${SCAF_T[@]}"
-    for f in "${SCAF_U[@]}"; do rm -f -- "$W/$f"; done
-    [ -n "$(git -C "$W" status --porcelain 2>/dev/null)" ] && { echo "SKIP $W: still dirty after discarding scaffolding"; continue; }
-    echo "DISCARDED in $W: $SCAF"
+    case "$v" in REMOVE|LANDED) ;; *) echo "SKIP $W: not removable now (${ms:+${ms#*$'\t'}}${ms:-fetch failed})"; continue;; esac
+    if [ "$MODE" = apply-scaffold ]; then
+      [ ${#SCAF_T[@]} -gt 0 ] && git -C "$W" restore --source=HEAD --staged --worktree -- "${SCAF_T[@]}"
+      for f in "${SCAF_U[@]}"; do rm -f -- "$W/$f"; done
+      [ -n "$(git -C "$W" status --porcelain 2>/dev/null)" ] && { echo "SKIP $W: still dirty after discarding scaffolding"; continue; }
+      echo "DISCARDED in $W: $SCAF"
+    fi
+    echo "VERIFIED $W ($b): $ms"
     remove_wt "$W" "$b" "$v"
   done
   exit 0
@@ -256,7 +288,7 @@ for W in "${CANDS[@]}"; do
     RESULTS+=("KEEP	$W	$branch	$repo	dirty, REAL-CHANGE: $REAL${SCAF:+| LOCAL-SCAFFOLDING: $SCAF}"); continue
   fi
   cdir=$(git -C "$W" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
-  if [ -z "${FETCHED[$cdir]:-}" ]; then
+  if [ "$FETCH" = 1 ] && [ -z "${FETCHED[$cdir]:-}" ]; then   # plan is read-only unless --fetch
     if ! git -C "$W" fetch -q origin 2>/dev/null; then
       RESULTS+=("KEEP	$W	$branch	$repo	fetch failed — cannot verify merge state"); continue
     fi
@@ -276,8 +308,9 @@ for W in "${CANDS[@]}"; do
   RESULTS+=("$v	$W	$branch	$repo	$why")
 done
 
-# ── 3. Print the plan (ALWAYS, before any removal) ───────────────────────────
-echo "PLAN (mode=$MODE)"
+# ── 3. Print the plan (read-only; removal happens only via apply <worktree>...) ──
+if [ "$FETCH" = 1 ]; then echo "PLAN (origin refs fetched now)"
+else echo "PLAN (origin refs as of the last fetch — pass --fetch to refresh)"; fi
 printf '%-22s %-46s %-38s %s\n' VERDICT WORKTREE BRANCH REASON
 printf '%-22s %-46s %-38s %s\n' "-------" "--------" "------" "------"
 declare -A N=()
@@ -287,27 +320,14 @@ for r in "${RESULTS[@]}"; do
   N[$v]=$(( ${N[$v]:-0} + 1 ))
 done
 echo; echo "SUMMARY: REMOVE=${N[REMOVE]:-0}  LANDED=${N[LANDED]:-0}  REMOVE-AFTER-SCAFFOLD=${N[REMOVE-AFTER-SCAFFOLD]:-0}  KEEP=${N[KEEP]:-0}"
-
-# ── 4. Apply (REMOVE + LANDED rows only, each re-verified immediately before removing) ──
-if [ "$MODE" = "apply" ]; then
-  echo; echo "APPLYING (REMOVE + LANDED rows; REMOVE-AFTER-SCAFFOLD + KEEP left untouched)"
-  for r in "${RESULTS[@]}"; do
-    IFS=$'\t' read -r v W b repo reason <<<"$r"
-    case "$v" in REMOVE|LANDED) ;; *) continue;; esac
-    if [ -n "$(git -C "$W" status --porcelain 2>/dev/null)" ]; then echo "SKIP $W: became dirty since plan"; continue; fi
-    ms=$(reverify "$W" "$b"); nv=${ms%%$'\t'*}
-    if [ "$nv" != "$v" ]; then echo "SKIP $W: verdict changed since plan ($v -> ${nv:-fetch failed})"; continue; fi
-    remove_wt "$W" "$b" "$v"
-  done
-fi
 exit 0
 ```
 
 ## Output
 
 - **Plan table** — every candidate as `VERDICT | worktree | branch | reason`, then `SUMMARY: REMOVE=n LANDED=n REMOVE-AFTER-SCAFFOLD=n KEEP=n`. Reasons carry the evidence: MR iid + target, which proof landed it, the cherry `+` SHAs, or the unproven files.
-- **Apply run** — one line per REMOVE/LANDED row: `REMOVED …` (branch deleted with `-d` / `-D: proven LANDED` / retained) or `SKIP … <reason>`.
-- Report back four buckets: **removed**, **kept (with evidence)**, **REMOVE-AFTER-SCAFFOLD** (the exact files per worktree and what discarding loses — e.g. local creds in `appsettings.local.json`, or a sibling worktree that another `.wt-*` `Directory.Build.props` still points at), **REAL-CHANGE dirt** (file names only). Ask for the go per scaffold row, then run `apply-scaffold` for the approved paths only.
+- **Apply run** — one line per named path: `VERIFIED … <verdict>` then `REMOVED …` (branch deleted with `-d` / `-D: proven LANDED` / retained), or `SKIP … <reason>`; `REFUSED` + the plan when no path was named.
+- Report back four buckets: **removed**, **kept (with evidence)**, **REMOVE-AFTER-SCAFFOLD** (the exact files per worktree and what discarding loses — e.g. local creds in `appsettings.local.json`, or a sibling worktree that another `.wt-*` `Directory.Build.props` still points at), **REAL-CHANGE dirt** (file names only). Ask for the go per row, then run `apply` / `apply-scaffold` for the approved paths only.
 
 ## Common Mistakes
 
@@ -321,7 +341,9 @@ exit 0
 - **`git worktree remove --force`** → strips uncommitted/untracked work silently. `apply-scaffold` discards exactly the approved scaffolding files, re-checks the tree is clean, then uses plain `remove`.
 - **Removing a Claude Code worktree an agent is still using** → `**/.claude/worktrees/*` are in scope only when not `locked` and nothing outside `.git`/`bin`/`obj` was written in the last `IDLE_DAYS` (default 7). The `/tmp/**/scratchpad/*` worktrees stay out of scope.
 - **Deleting the branch before the worktree** → remove the worktree (then `prune`) first, then delete the branch from the **main** checkout.
-- **Trusting the plan at apply time** → apply re-checks clean + re-runs `merge_state` per row and skips anything whose verdict changed.
+- **Trusting the plan at apply time** → apply re-fetches, re-classifies the dirt and re-runs `merge_state` per named path, and skips anything no longer REMOVE/LANDED.
+- **Letting apply re-discover its targets** → rows can flip between plan and apply (a live worktree at the dev tip becomes REMOVE once dev advances). `apply` acts only on the paths passed to it; with none it refuses.
+- **Fetching in plan mode** → plan is read-only; it uses the last-fetched refs unless `--fetch` is passed. The apply modes always fetch before re-verifying.
 - **Loop dies on a failed test under `pipefail`** → keep per-candidate failures as `continue` with a KEEP verdict; end the script with `exit 0`.
 
 ## Red Flags — STOP
@@ -329,6 +351,7 @@ exit 0
 - You are about to type `--force`. Don't — ever.
 - You are about to type `-D` outside `remove_wt` for a re-proven LANDED row. Don't.
 - You are about to remove without having printed the plan. Always plan → show user → apply.
+- You are about to run `apply` on a path the user did not approve, or to make it work without paths. Pass only the approved worktree paths.
 - You are about to run `apply-scaffold` on a worktree the user did not explicitly OK, or the file list changed since you showed it. Stop and re-show.
 - A dirty file classifies as REAL-CHANGE, cherry shows `+`, the proof says NOT proven, the HEAD is detached, or any git command errored → KEEP. If you find yourself rationalizing removal anyway, stop.
 - You are about to print the contents of an `appsettings*.local.json`, `*DebugTestConsts.cs` or other secrets file. Names only.
