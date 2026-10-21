@@ -1,6 +1,6 @@
 ---
 name: bpp-cleanup-merged-worktrees
-description: Use when cleaning up finished git worktrees under ~/Entwicklung/bpp whose branches are already merged — phrases like "clean up merged worktrees", "remove stale worktrees", "prune finished .wt-* folders", "delete merged worktree branches", "worktree cleanup". Discovers stray `.wt-*` dirs plus every repo's linked worktrees, classifies each as REMOVE (merged into origin/development + clean) / CONFIRM (squash-or-post-merge, needs sign-off) / KEEP (dirty, untracked, unmerged, at-tip, detached, or git error), prints a plan first, then removes only merged+clean worktrees with `git worktree remove` + `git branch -d` — never `--force` / `-D`.
+description: Use when cleaning up finished git worktrees under ~/Entwicklung/bpp whose branches are already merged — phrases like "clean up merged worktrees", "remove stale worktrees", "prune finished .wt-* folders", "delete merged worktree branches", "worktree cleanup". Discovers stray `.wt-*` dirs plus every repo's linked worktrees, classifies each as REMOVE (ancestor of origin/development + clean) / LANDED (squash- or post-merge, patch-identity proven automatically) / REMOVE-AFTER-SCAFFOLD (merged, dirt is only local scaffolding — removed on user go) / KEEP (real dirt, unmerged, unproven, at-tip, detached, or git error), prints a plan first, then removes REMOVE + LANDED rows with `git worktree remove` + `git branch -d` — never `--force`; `-D` only as the fallback for a proven LANDED row.
 ---
 
 # bpp-cleanup-merged-worktrees
@@ -8,12 +8,12 @@ description: Use when cleaning up finished git worktrees under ~/Entwicklung/bpp
 ## Overview
 
 Safely reclaim disk + mental space by removing git worktree folders under `~/Entwicklung/bpp`
-whose branch is **already merged** into `origin/development` **and** whose tree is spotless. Everything
+whose branch content is **already in** `origin/development` **and** whose tree is spotless. Everything
 else is kept and reported. The skill is destructive-by-invocation but conservative-by-construction:
-it always prints a KEEP / REMOVE / CONFIRM **plan first**, removes only what it can prove is merged and
-clean, uses `git worktree remove` (never `--force`) + `git branch -d` (never `-D`), and downgrades any
-ambiguous case (squash merge, post-merge commits, branch sitting exactly at the dev tip) to CONFIRM so a
-human decides. Many `.wt-*` folders belong to **other agents working right now** — the guards keep those.
+it always prints a **plan first**, removes only what it can prove landed, uses `git worktree remove`
+(never `--force`) + `git branch -d`, and settles squash/post-merge cases with an automatic
+patch-identity proof instead of a human guess. Many `.wt-*` folders belong to **other agents working
+right now** — the guards keep those.
 
 ## When to Use
 
@@ -28,56 +28,176 @@ a manifest-driven loop could only ever be less complete.
 
 - Removing a **single** known worktree → just `git worktree remove <path>` yourself
 - Pulling / fast-forwarding development in checkouts → `bpp-pull-all-dev`
-- A worktree you *know* is unmerged but want gone anyway → do it manually with `-D` (this skill never force-deletes)
+- A worktree you *know* is unmerged but want gone anyway → do it manually with `-D` (this skill never force-deletes unproven work)
+
+## Quick Reference
+
+| Verdict | Condition | Apply does |
+|---|---|---|
+| REMOVE | clean, HEAD ancestor of dev, dev advanced past it (behind>0) | `worktree remove` + `branch -d` |
+| LANDED | clean, merged MR, `git cherry` all `-`, and (two-dot diff empty **or** merge-tree == dev tree **or** every branch-touched file still differing is a version dev's own history once had) | `worktree remove` + `branch -d`, fallback `-D` (proof re-run first) |
+| REMOVE-AFTER-SCAFFOLD | REMOVE/LANDED except every dirty file is LOCAL-SCAFFOLDING | nothing; `apply-scaffold <path>…` only on the user's explicit go |
+| KEEP | any REAL-CHANGE dirt, cherry `+`, unproven, no merged MR, at dev tip, detached, locked/fresh Claude worktree, git error | nothing — reported with evidence |
+
+**LOCAL-SCAFFOLDING** (uncommitted, never meant to ship; everything else is REAL-CHANGE):
+
+| Pattern | Typical example |
+|---|---|
+| Added lines carry a `never commit` marker (tracked or untracked) | `<!-- LOCAL perf sweep … only, never commit -->` ItemGroup in `Directory.Build.props`; untracked `Directory.Build.targets` marked `LOCAL-ONLY, untracked, never commit` |
+| `Directory.Build.{props,targets,local.props}` where every changed line is bpp-shared wiring (`ProjectReference`, `BPP.Shared`/`BppShared*`, `Exists(`, `Condition=`, `ItemGroup`/`PropertyGroup`, comments) | apittrich/klaffi `ProjectReference` repointed at a sibling `.wt-*-bpp-shared` worktree |
+| Untracked repo-root `Directory.Build.local.props` | the per-checkout local build override |
+| Local secrets file — **name only, content never printed** | `appsettings*.local.json` (tracked with empty secrets by convention, filled locally), `*DebugTestConsts.cs`, `.env*`, `*.pfx/.p12/.pem/.key` |
+| Comment-out only: every `+` line is a `//` copy of a `-` line | a test-factory safety guard (e.g. forcing the dev tenant URL) commented out for one local run — flagged **DISABLES CODE**, must never ship |
 
 ## Steps
 
-Run **plan mode first** (default). Show the user the table. Only then run **apply mode**, and for any
-CONFIRM rows ask the user explicitly before removing them by hand — apply mode never auto-removes CONFIRM.
+Run **plan mode first** (default). Show the user the table. Then run **apply mode** (REMOVE + LANDED).
+REMOVE-AFTER-SCAFFOLD rows are removed only after the user OKs the listed files per worktree, via
+`apply-scaffold`. KEEP rows are never touched.
 
-### Settling a CONFIRM row — patch-identity, NOT a three-dot diff
+### How a squash/post-merge row is proven (automatic, in `merge_state`)
 
 `ahead>0` only means the branch tip is not an *ancestor* of dev. It does **not** mean the content is
-missing: a squash- or rebase-merged branch has its work in dev under **different commit hashes**. Two
-tests separate "genuinely unmerged" from "merged under a rewritten hash":
+missing: a squash-, rebase- or staging/main-merged branch has its work in dev under **different hashes**.
+With a merged MR present, the script runs, in order:
 
-```bash
-# (1) patch-identity: '-' = this patch already exists upstream, '+' = it does not
-git -C <repo> cherry origin/development <branch>
+1. `git cherry origin/development HEAD` — any `+` ⇒ **KEEP**, listing the unmerged commits.
+2. `git diff --quiet origin/development HEAD` — empty ⇒ **LANDED**.
+3. "Did development move on after the merge?" (two-dot non-empty because dev advanced, or the branch was cut from staging/main and its base is staging's older copy of dev):
+   - `git merge-tree --write-tree origin/development HEAD` equals `origin/development^{tree}` ⇒ merging adds nothing ⇒ **LANDED**.
+   - else for every file in the branch's own diff (`origin/development...HEAD`) that still differs two-dot: the branch's blob must appear as a version in `git log -m --raw origin/development -- <file>` (dev once had exactly this content, then changed it later — covers MRs that targeted staging/main and arrived via merge-back). All match ⇒ **LANDED**; otherwise **KEEP** with the unproven files.
+4. Evidence also records the MR target and whether the MR's merge/squash commit equals the branch on the branch-touched files.
 
-# (2) two-dot diff restricted to the files the branch actually touched
-files=$(git -C <repo> diff --name-only origin/development...<branch>)
-git -C <repo> diff --stat origin/development <branch> -- $files
-```
+🔴 **Never judge with `git diff origin/development...<branch>` (three dots) alone.** Three-dot measures
+merge-base→branch, so every squash/rebase merge reads as "unsafe". And never require the plain two-dot
+diff to be empty as the only proof — it can never be empty once dev moved past the branch.
 
-**All `-` from `git cherry` AND an empty two-dot diff over those files ⇒ the content landed. Safe to
-remove.** Any `+` line, or a non-empty two-dot diff, ⇒ real work is missing — **KEEP** and show the user
-what is in it.
-
-🔴 **Do NOT judge this with `git diff origin/development...<branch>` (three dots).** Three-dot measures
-merge-base→branch, so a squash/rebase-merged branch still displays its entire diff and every row reads as
-"unsafe". It also inflates rows whose files dev has since evolved.
-
-**Expect `git branch -d` to REFUSE on every CONFIRM row** — the tip is not an ancestor, which is the whole
-reason it is a CONFIRM. That refusal is the **correct outcome, not a failure**: remove the worktree, leave
-the branch, report it. **Never escalate to `-D`.** A stale local branch pointer costs nothing; `-D` is the
-one command here that destroys unmerged work if the read is wrong.
-
+`git branch -d` usually succeeds even on LANDED rows (git accepts "merged to its upstream" with a
+warning). Only when it refuses does apply fall back to `-D` — and only for a LANDED row whose proof
+was just re-run and still holds.
 
 The script below is not shipped as a file. Write it to a temp file first (`f=$(mktemp --suffix=.sh)`), then:
 
 - Plan (default): `bash "$f"` or `bash "$f" plan`
-- Apply (removes only REMOVE rows, re-verified at removal time): `bash "$f" apply`
-
-Discovery, classification, and removal are one script:
+- Apply (REMOVE + LANDED rows, re-verified at removal time): `bash "$f" apply`
+- After the user's go on specific REMOVE-AFTER-SCAFFOLD rows: `bash "$f" apply-scaffold <worktree> [<worktree>…]`
 
 ```bash
 #!/usr/bin/env bash
-# bpp-cleanup-merged-worktrees — MODE: plan (default, classify only) | apply (remove REMOVE rows)
+# bpp-cleanup-merged-worktrees — MODE: plan (default) | apply | apply-scaffold <worktree>...
 set -uo pipefail
 BASE=/home/alex/Entwicklung/bpp
-MODE="${1:-plan}"
+MODE="${1:-plan}"; shift || true
 IDLE_DAYS="${IDLE_DAYS:-7}"   # a .claude/worktrees candidate must be untouched this long before it is even classified
+SECRET_RE='(^|/)(appsettings[^/]*\.local\.json|[^/]*DebugTestConsts\.cs|\.env[^/]*|[^/]*\.(pfx|p12|pem|key))$'
+WIRING_RE='ProjectReference|BPP\.Shared|BppShared|Exists\(|Condition=|ItemGroup|PropertyGroup|</?Project|<!--|-->|^[[:space:]]*$'
+
+# ── helpers ───────────────────────────────────────────────────────────────────
+chg() { # W file untracked(0/1) → changed lines with +/- prefix. NEVER printed (may hold secrets).
+  if [ "$3" = 1 ]; then sed 's/^/+/' "$1/$2"
+  else git -C "$1" diff HEAD -- "$2" | grep -E '^[+-]' | grep -vE '^(\+\+\+|---) '; fi
+}
+classify_file() { # W XY file → "SCAFFOLD:<why>" | "REAL:<why>"
+  local W=$1 xy=$2 f=$3 u=0 c
+  [ "$xy" = "??" ] && u=1
+  case "$xy" in R*|C*) echo "REAL:rename/copy"; return;; esac
+  if printf '%s' "$f" | grep -qE "$SECRET_RE"; then echo "SCAFFOLD:local secrets, content not shown"; return; fi
+  c=$(chg "$W" "$f" $u 2>/dev/null)
+  if printf '%s\n' "$c" | grep '^+' | grep -qi 'never commit'; then echo "SCAFFOLD:marked never-commit"; return; fi
+  case "$f" in Directory.Build.local.props) [ $u = 1 ] && { echo "SCAFFOLD:untracked repo-root local build override"; return; };; esac
+  case "$f" in */Directory.Build.props|*/Directory.Build.targets|*/Directory.Build.local.props|Directory.Build.*)
+    if [ -n "$c" ] && ! printf '%s\n' "$c" | sed 's/^[+-]//' | grep -qvE "$WIRING_RE"; then
+      echo "SCAFFOLD:local bpp-shared wiring"; return; fi;;
+  esac
+  if [ -n "$c" ] && printf '%s\n' "$c" | awk '
+      function t(s){ gsub(/^[ \t]+|[ \t]+$/,"",s); return s }
+      /^-/{ m[t(substr($0,2))]++; nm++ }
+      /^\+/{ p=t(substr($0,2)); if (p !~ /^\/\//) bad=1; sub(/^\/\/[ \t]*/,"",p); pl[p]++; np++ }
+      END{ if (bad || nm==0 || nm!=np) exit 1; for (k in m) if (m[k]!=pl[k]) exit 1 }'; then
+    echo "SCAFFOLD:comment-out only, DISABLES CODE"; return
+  fi
+  echo "REAL:uncommitted change"
+}
+classify_wt() { # W → sets SCAF, REAL, SCAF_T (tracked paths), SCAF_U (untracked paths)
+  local W=$1 l xy f c
+  SCAF=""; REAL=""; SCAF_T=(); SCAF_U=()
+  while IFS= read -r l; do
+    [ -z "$l" ] && continue
+    xy=${l:0:2}; f=${l:3}
+    c=$(classify_file "$W" "$xy" "$f")
+    case "$c" in
+      SCAFFOLD:*) SCAF+="$f [${c#SCAFFOLD:}]; "; if [ "$xy" = "??" ]; then SCAF_U+=("$f"); else SCAF_T+=("$f"); fi;;
+      *)          REAL+="$f [${c#REAL:}]; ";;
+    esac
+  done < <(git -C "$W" status --porcelain --untracked-files=all 2>/dev/null)
+}
+merge_state() { # W branch projenc → "VERDICT<TAB>reason"; VERDICT = REMOVE | LANDED | KEEP
+  local W=$1 b=$2 pe=$3 ahead behind mr iid tgt mc plus files f bb bad="" mrres="n.a."
+  ahead=$(git -C "$W" rev-list --count origin/development..HEAD 2>/dev/null)
+  behind=$(git -C "$W" rev-list --count HEAD..origin/development 2>/dev/null)
+  [ -z "$ahead" ] && { printf 'KEEP\tgit rev-list failed'; return; }
+  [ "$ahead" = 0 ] && [ "$behind" = 0 ] && { printf 'KEEP\tat development tip, no unique commits (fresh/active worktree)'; return; }
+  [ "$ahead" = 0 ] && { printf 'REMOVE\tmerged into development (dev advanced %s past it)' "$behind"; return; }
+  mr=$(glab api "projects/$pe/merge_requests?source_branch=$b&state=merged&per_page=1" 2>/dev/null)
+  iid=$(printf '%s' "$mr" | jq -r '.[0].iid // empty' 2>/dev/null)
+  [ -z "$iid" ] && { printf 'KEEP\tunmerged: %s commit(s) not in dev, no merged MR' "$ahead"; return; }
+  tgt=$(printf '%s' "$mr" | jq -r '.[0].target_branch')
+  mc=$(printf '%s' "$mr" | jq -r '.[0].squash_commit_sha // .[0].merge_commit_sha // empty')
+  plus=$(git -C "$W" cherry origin/development HEAD 2>/dev/null | awk '/^\+/{n++; if (n<=10) printf "%s ", substr($2,1,9)} END{if (n>10) printf "(+%d more) ", n-10}')
+  [ -n "$plus" ] && { printf 'KEEP\tMR !%s->%s merged, but cherry "+" (not in dev): %s(see git cherry -v)' "$iid" "$tgt" "$plus"; return; }
+  git -C "$W" diff --quiet origin/development HEAD && { printf 'LANDED\tMR !%s->%s; cherry all "-", two-dot diff empty' "$iid" "$tgt"; return; }
+  files=$(git -C "$W" diff --name-only origin/development...HEAD)
+  if [ -n "$mc" ] && git -C "$W" cat-file -e "$mc^{commit}" 2>/dev/null; then
+    if git -C "$W" diff --quiet "$mc" HEAD -- $files; then mrres=yes; else mrres=no; fi
+  fi
+  if [ "$(git -C "$W" merge-tree --write-tree origin/development HEAD 2>/dev/null | head -1)" = \
+       "$(git -C "$W" rev-parse 'origin/development^{tree}')" ]; then
+    printf 'LANDED\tMR !%s->%s (MR result==branch: %s); cherry all "-", merge-tree into dev == dev tree (dev moved on)' "$iid" "$tgt" "$mrres"; return
+  fi
+  for f in $files; do
+    git -C "$W" diff --quiet origin/development HEAD -- "$f" && continue
+    bb=$(git -C "$W" rev-parse -q --verify "HEAD:$f") || { bad+="$f(deleted on branch) "; continue; }
+    git -C "$W" log -m --format= --raw --no-abbrev origin/development -- "$f" | awk '{print $4}' | grep -qx "$bb" \
+      || bad+="$f "
+  done
+  if [ -z "$bad" ]; then
+    printf 'LANDED\tMR !%s->%s (MR result==branch: %s); cherry all "-", every differing branch file is an older dev version (dev moved on)' "$iid" "$tgt" "$mrres"
+  else
+    printf 'KEEP\tMR !%s->%s, cherry all "-" but NOT proven landed; branch content absent from dev history: %s' "$iid" "$tgt" "$bad"
+  fi
+}
+projenc_of() { local u; u=$(git -C "$1" remote get-url origin 2>/dev/null | sed -E 's#^.*gitlab\.com[:/]##; s#\.git$##'); printf '%s' "${u//\//%2F}"; }
+mainwt_of() { git -C "$1" worktree list --porcelain 2>/dev/null | awk '/^worktree /{print $2; exit}'; }
+remove_wt() { # W branch verdict — NO --force; -D only for a re-proven LANDED row
+  local W=$1 b=$2 v=$3 m; m=$(mainwt_of "$W")
+  if ! git -C "$m" worktree remove "$W" 2>/dev/null; then echo "SKIP $W: 'git worktree remove' refused — left intact"; return; fi
+  git -C "$m" worktree prune 2>/dev/null
+  if git -C "$m" branch -d "$b" 2>/dev/null; then echo "REMOVED $W  (branch $b deleted with -d)"
+  elif [ "$v" = LANDED ] && git -C "$m" branch -D "$b" >/dev/null 2>&1; then echo "REMOVED $W  (branch $b deleted with -D: proven LANDED)"
+  else echo "REMOVED $W  (branch $b RETAINED — -d refused)"; fi
+}
+reverify() { # W branch → echoes current verdict line after a fresh fetch; empty on failure
+  git -C "$1" fetch -q origin 2>/dev/null || return
+  merge_state "$1" "$2" "$(projenc_of "$1")"
+}
+
+# ── apply-scaffold: only the worktrees the user named, only if still scaffold-only + merged ──
+if [ "$MODE" = "apply-scaffold" ]; then
+  for W in "$@"; do
+    W=${W%/}; b=$(git -C "$W" rev-parse --abbrev-ref HEAD 2>/dev/null) || { echo "SKIP $W: not a worktree"; continue; }
+    classify_wt "$W"
+    [ -n "$REAL" ] && { echo "SKIP $W: REAL-CHANGE now present: $REAL"; continue; }
+    [ -z "$SCAF" ] && { echo "SKIP $W: clean now — use apply"; continue; }
+    ms=$(reverify "$W" "$b"); v=${ms%%$'\t'*}
+    case "$v" in REMOVE|LANDED) ;; *) echo "SKIP $W: no longer merged (${ms#*$'\t'})"; continue;; esac
+    [ ${#SCAF_T[@]} -gt 0 ] && git -C "$W" restore --source=HEAD --staged --worktree -- "${SCAF_T[@]}"
+    for f in "${SCAF_U[@]}"; do rm -f -- "$W/$f"; done
+    [ -n "$(git -C "$W" status --porcelain 2>/dev/null)" ] && { echo "SKIP $W: still dirty after discarding scaffolding"; continue; }
+    echo "DISCARDED in $W: $SCAF"
+    remove_wt "$W" "$b" "$v"
+  done
+  exit 0
+fi
 
 # ── 1. Collect candidate worktree paths ──────────────────────────────────────
 declare -A SEEN=()
@@ -127,18 +247,13 @@ for W in "${CANDS[@]}"; do
     ;;
   esac
   branch=$(git -C "$W" rev-parse --abbrev-ref HEAD 2>/dev/null)
-  url=$(git -C "$W" remote get-url origin 2>/dev/null)
-  repo=$(printf '%s' "$url" | sed -E 's#^.*gitlab\.com[:/]##; s#\.git$##; s#^.*/##')
-  proj=$(printf '%s' "$url" | sed -E 's#^.*gitlab\.com[:/]##; s#\.git$##')
-  projenc=${proj//\//%2F}
-
+  repo=$(git -C "$W" remote get-url origin 2>/dev/null | sed -E 's#\.git$##; s#^.*/##')
   if [ "$branch" = "HEAD" ] || [ -z "$branch" ]; then
     RESULTS+=("KEEP	$W	(detached)	$repo	detached HEAD — unknown state"); continue
   fi
-  status=$(git -C "$W" status --porcelain 2>/dev/null)
-  if [ -n "$status" ]; then
-    unt=$(printf '%s\n' "$status" | grep -c '^??'); trk=$(printf '%s\n' "$status" | grep -vc '^??')
-    RESULTS+=("KEEP	$W	$branch	$repo	dirty ($trk tracked, $unt untracked change(s))"); continue
+  classify_wt "$W"
+  if [ -n "$REAL" ]; then
+    RESULTS+=("KEEP	$W	$branch	$repo	dirty, REAL-CHANGE: $REAL${SCAF:+| LOCAL-SCAFFOLDING: $SCAF}"); continue
   fi
   cdir=$(git -C "$W" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
   if [ -z "${FETCHED[$cdir]:-}" ]; then
@@ -150,58 +265,39 @@ for W in "${CANDS[@]}"; do
   if ! git -C "$W" rev-parse --verify -q origin/development >/dev/null 2>&1; then
     RESULTS+=("KEEP	$W	$branch	$repo	no origin/development ref"); continue
   fi
-  ahead=$(git -C "$W" rev-list --count origin/development..HEAD 2>/dev/null)
-  behind=$(git -C "$W" rev-list --count HEAD..origin/development 2>/dev/null)
-
-  if [ "$ahead" = "0" ] && [ "$behind" = "0" ]; then
-    RESULTS+=("KEEP	$W	$branch	$repo	at development tip, no unique commits (fresh/active worktree)"); continue
+  ms=$(merge_state "$W" "$branch" "$(projenc_of "$W")"); v=${ms%%$'\t'*}; why=${ms#*$'\t'}
+  if [ -n "$SCAF" ]; then
+    case "$v" in
+      REMOVE|LANDED) RESULTS+=("REMOVE-AFTER-SCAFFOLD	$W	$branch	$repo	$why; discard on user go: $SCAF");;
+      *)             RESULTS+=("KEEP	$W	$branch	$repo	$why; dirt is LOCAL-SCAFFOLDING only: $SCAF");;
+    esac
+    continue
   fi
-  if [ "$ahead" = "0" ]; then
-    RESULTS+=("REMOVE	$W	$branch	$repo	merged into development (dev advanced $behind past it), clean"); continue
-  fi
-  # ahead>0: commits not in dev — only a merged MR (squash / post-merge) rescues it, and only as CONFIRM
-  mrmerged=$(glab api "projects/$projenc/merge_requests?source_branch=$branch&state=merged&per_page=1" 2>/dev/null | grep -c '"iid"')
-  if [ "${mrmerged:-0}" -ge 1 ]; then
-    RESULTS+=("CONFIRM	$W	$branch	$repo	MR merged but $ahead local commit(s) not in dev (squash/post-merge) — confirm"); continue
-  fi
-  RESULTS+=("KEEP	$W	$branch	$repo	unmerged: $ahead commit(s) not in dev, no merged MR")
+  RESULTS+=("$v	$W	$branch	$repo	$why")
 done
 
 # ── 3. Print the plan (ALWAYS, before any removal) ───────────────────────────
 echo "PLAN (mode=$MODE)"
-printf '%-9s %-46s %-38s %s\n' VERDICT WORKTREE BRANCH REASON
-printf '%-9s %-46s %-38s %s\n' "-------" "--------" "------" "------"
-nR=0; nC=0; nK=0
+printf '%-22s %-46s %-38s %s\n' VERDICT WORKTREE BRANCH REASON
+printf '%-22s %-46s %-38s %s\n' "-------" "--------" "------" "------"
+declare -A N=()
 for r in "${RESULTS[@]}"; do
   IFS=$'\t' read -r v p b repo reason <<<"$r"
-  printf '%-9s %-46s %-38s %s\n' "$v" ".../${p#$BASE/}" "$b" "$reason"
-  case "$v" in REMOVE) nR=$((nR+1));; CONFIRM) nC=$((nC+1));; KEEP) nK=$((nK+1));; esac
+  printf '%-22s %-46s %-38s %s\n' "$v" ".../${p#$BASE/}" "$b" "$reason"
+  N[$v]=$(( ${N[$v]:-0} + 1 ))
 done
-echo; echo "SUMMARY: REMOVE=$nR  CONFIRM=$nC  KEEP=$nK"
+echo; echo "SUMMARY: REMOVE=${N[REMOVE]:-0}  LANDED=${N[LANDED]:-0}  REMOVE-AFTER-SCAFFOLD=${N[REMOVE-AFTER-SCAFFOLD]:-0}  KEEP=${N[KEEP]:-0}"
 
-# ── 4. Apply (only REMOVE rows, re-verified immediately before removing) ──────
+# ── 4. Apply (REMOVE + LANDED rows only, each re-verified immediately before removing) ──
 if [ "$MODE" = "apply" ]; then
-  echo; echo "APPLYING (REMOVE rows only; CONFIRM + KEEP left untouched)"
+  echo; echo "APPLYING (REMOVE + LANDED rows; REMOVE-AFTER-SCAFFOLD + KEEP left untouched)"
   for r in "${RESULTS[@]}"; do
     IFS=$'\t' read -r v W b repo reason <<<"$r"
-    [ "$v" = "REMOVE" ] || continue
-    # re-verify: still clean, still merged (ancestor + dev ahead) — guards against races since the plan ran
+    case "$v" in REMOVE|LANDED) ;; *) continue;; esac
     if [ -n "$(git -C "$W" status --porcelain 2>/dev/null)" ]; then echo "SKIP $W: became dirty since plan"; continue; fi
-    git -C "$W" fetch -q origin 2>/dev/null || { echo "SKIP $W: fetch failed"; continue; }
-    a=$(git -C "$W" rev-list --count origin/development..HEAD 2>/dev/null)
-    bh=$(git -C "$W" rev-list --count HEAD..origin/development 2>/dev/null)
-    if [ "$a" != "0" ] || [ "$bh" = "0" ]; then echo "SKIP $W: merge state changed (ahead=$a behind=$bh)"; continue; fi
-    mainwt=$(git -C "$W" worktree list --porcelain 2>/dev/null | awk '/^worktree /{print $2; exit}')
-    if git -C "$mainwt" worktree remove "$W" 2>/dev/null; then       # NO --force
-      git -C "$mainwt" worktree prune 2>/dev/null
-      if git -C "$mainwt" branch -d "$b" 2>/dev/null; then           # NO -D
-        echo "REMOVED $W  (branch $b deleted)"
-      else
-        echo "REMOVED $W  (branch $b RETAINED — not a git-ancestor of dev; delete manually if certain)"
-      fi
-    else
-      echo "SKIP $W: 'git worktree remove' refused (locked / in use) — left intact"
-    fi
+    ms=$(reverify "$W" "$b"); nv=${ms%%$'\t'*}
+    if [ "$nv" != "$v" ]; then echo "SKIP $W: verdict changed since plan ($v -> ${nv:-fetch failed})"; continue; fi
+    remove_wt "$W" "$b" "$v"
   done
 fi
 exit 0
@@ -209,26 +305,32 @@ exit 0
 
 ## Output
 
-- **Plan table** — every candidate as `VERDICT | worktree | branch | reason`, then `SUMMARY: REMOVE=n CONFIRM=n KEEP=n`.
-- **Apply run** — one line per REMOVE row: `REMOVED …` (with branch deleted / retained) or `SKIP … <reason>`.
-- Report back three buckets: **removed**, **kept (with reason)**, **needs-confirmation (CONFIRM)** — and for CONFIRM rows tell the user *why* (squash / post-merge) plus the patch-identity result, so they can OK a manual `git worktree remove`. **Do not suggest `git branch -D`** — leave the branch.
+- **Plan table** — every candidate as `VERDICT | worktree | branch | reason`, then `SUMMARY: REMOVE=n LANDED=n REMOVE-AFTER-SCAFFOLD=n KEEP=n`. Reasons carry the evidence: MR iid + target, which proof landed it, the cherry `+` SHAs, or the unproven files.
+- **Apply run** — one line per REMOVE/LANDED row: `REMOVED …` (branch deleted with `-d` / `-D: proven LANDED` / retained) or `SKIP … <reason>`.
+- Report back four buckets: **removed**, **kept (with evidence)**, **REMOVE-AFTER-SCAFFOLD** (the exact files per worktree and what discarding loses — e.g. local creds in `appsettings.local.json`, or a sibling worktree that another `.wt-*` `Directory.Build.props` still points at), **REAL-CHANGE dirt** (file names only). Ask for the go per scaffold row, then run `apply-scaffold` for the approved paths only.
 
 ## Common Mistakes
 
-- **`is-ancestor` alone = REMOVE** → a freshly-created worktree sitting *exactly* at `origin/development` (ahead=0 **and** behind=0) is a trivial ancestor with no merged work to reclaim — almost always a live agent's fresh worktree. Require **behind>0** (dev advanced past the branch) before auto-removing; ahead=0/behind=0 is KEEP.
-- **Treating a squash merge as unmerged** → squash-merged branch tips are NOT ancestors of dev (`ahead>0`), so the ancestor check says "unmerged". Cross-check the GitLab MR state; a merged MR with local commits still-outside-dev is **CONFIRM**, never auto-REMOVE (its commits could also be genuine post-merge work). Settle it with patch-identity (`git cherry`) + a two-dot diff over the touched files — **never a three-dot diff**, which reports every squash/rebase merge as unsafe.
-- **`git worktree remove --force`** → strips uncommitted/untracked work silently. Never use `--force`; plain `remove` refuses on a dirty/locked worktree, which is the desired safety.
-- **`git branch -D`** → force-deletes unmerged branches, orphaning commits. Only ever `git branch -d`; if it refuses (squash merge), retain the branch and report it.
-- **Removing a Claude Code worktree an agent is still using** → `**/.claude/worktrees/*` ARE in scope (they are often the biggest pocket on disk), but ONLY after two extra guards pass: the worktree is not `locked`, and nothing outside `.git`/`bin`/`obj` has been written in the last `IDLE_DAYS` (default 7, override with `IDLE_DAYS=n`). A live agent trips one or the other. All the normal rules still apply on top — dirty, unmerged, detached are still KEEP. Claude Code prunes these itself in principle; in practice it leaves them for months. The `/tmp/**/scratchpad/*` worktrees stay out of scope (not under BASE).
-- **Deleting the branch before the worktree** → a branch checked out in a worktree can't be `-d`'d; remove the worktree (then `prune`) first, then delete the branch from the **main** checkout (`$mainwt`), not from inside the now-gone worktree.
-- **Trusting the plan at apply time** → other agents commit between plan and apply; apply mode re-checks clean + merge state per row and skips anything that changed.
-- **`git status --porcelain` "clean" ignores staged/untracked?** → it does not: it reports staged, modified, and `??` untracked alike. Any non-empty output ⇒ KEEP.
+- **`is-ancestor` alone = REMOVE** → a freshly-created worktree sitting *exactly* at `origin/development` (ahead=0 **and** behind=0) is almost always a live agent's fresh worktree. Require **behind>0**; ahead=0/behind=0 is KEEP.
+- **Requiring an empty two-dot diff as the only proof** → once dev moved on after the merge (or the MR targeted staging/main and the branch was cut from staging), `git diff origin/development <branch>` is never empty. Use the `merge_state` chain: cherry → two-dot → merge-tree identity → per-file "branch blob is in dev history".
+- **Judging with a three-dot diff** → reports every squash/rebase merge as unsafe. It is only used to list the files the branch touched.
+- **Treating a squash merge as unmerged / escalating to `-D` without proof** → `-D` is allowed only inside `remove_wt` for a LANDED row whose proof was re-run at apply time. Everywhere else: retain the branch.
+- **Calling every dirty tree KEEP** → classify each file. A merged branch whose only dirt is LOCAL-SCAFFOLDING (bpp-shared `ProjectReference` redirects, `never commit` markers, local secrets) is REMOVE-AFTER-SCAFFOLD, not silent KEEP — but still no auto-remove.
+- **Printing a secrets file's diff while classifying** → `chg` output is consumed, never echoed. Report `appsettings*.local.json` / `*DebugTestConsts.cs` by name only.
+- **Calling a commented-out safety guard harmless** → it is scaffolding (must not ship) but flagged DISABLES CODE; say so in the report.
+- **`git worktree remove --force`** → strips uncommitted/untracked work silently. `apply-scaffold` discards exactly the approved scaffolding files, re-checks the tree is clean, then uses plain `remove`.
+- **Removing a Claude Code worktree an agent is still using** → `**/.claude/worktrees/*` are in scope only when not `locked` and nothing outside `.git`/`bin`/`obj` was written in the last `IDLE_DAYS` (default 7). The `/tmp/**/scratchpad/*` worktrees stay out of scope.
+- **Deleting the branch before the worktree** → remove the worktree (then `prune`) first, then delete the branch from the **main** checkout.
+- **Trusting the plan at apply time** → apply re-checks clean + re-runs `merge_state` per row and skips anything whose verdict changed.
 - **Loop dies on a failed test under `pipefail`** → keep per-candidate failures as `continue` with a KEEP verdict; end the script with `exit 0`.
 
 ## Red Flags — STOP
 
-- You are about to type `--force` or `-D`. Don't. The skill's entire safety model is that both are forbidden — an unmerged/dirty worktree is KEPT and reported, never forced.
+- You are about to type `--force`. Don't — ever.
+- You are about to type `-D` outside `remove_wt` for a re-proven LANDED row. Don't.
 - You are about to remove without having printed the plan. Always plan → show user → apply.
-- A worktree is dirty, has untracked files, has commits not in `origin/development` without a merged MR, is detached, or any git command errored → it is KEEP. If you find yourself rationalizing removal anyway, stop.
+- You are about to run `apply-scaffold` on a worktree the user did not explicitly OK, or the file list changed since you showed it. Stop and re-show.
+- A dirty file classifies as REAL-CHANGE, cherry shows `+`, the proof says NOT proven, the HEAD is detached, or any git command errored → KEEP. If you find yourself rationalizing removal anyway, stop.
+- You are about to print the contents of an `appsettings*.local.json`, `*DebugTestConsts.cs` or other secrets file. Names only.
 - `git worktree remove` refused (locked / in use) → leave it; do not escalate to `--force`.
 - The candidate resolves to a main checkout (a repo root under `~/Entwicklung/bpp`) or a path outside `~/Entwicklung/bpp` → it must never be a removal target.
