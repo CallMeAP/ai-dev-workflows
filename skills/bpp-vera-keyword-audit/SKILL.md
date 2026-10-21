@@ -41,7 +41,7 @@ python3 -I -c 'import csv,sys;r=list(csv.DictReader(open(sys.argv[1])));print(li
 **2. Preflight + stack + go.** `bash ~/.claude/skills/bpp-vera-keyword-audit/vera-audit.sh preflight` must print
 `EnableWriteAccess=False VeraWriteTestsEnabled=False (appsettings.local.json: False/False)`: both gates **explicitly
 false in `appsettings.local.json`** (a default from `appsettings.json` is refused), env forced to `local`, no env
-override. `appsettings.local.json` points `Vera` at PROD, the mTLS cert is in place, VPN is up (see sub-skill).
+override. `appsettings.local.json` points `Vera` at PROD, the mTLS cert is in place (VERA PROD needs no VPN).
 Start Postgres + Redis (`bpp-start-local-stack`). Show the user preflight output + row/tenant counts + the command of
 step 3 and wait for an explicit go for this prod run.
 
