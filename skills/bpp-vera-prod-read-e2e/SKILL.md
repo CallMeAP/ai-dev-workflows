@@ -91,10 +91,10 @@ bpp-vera-connector (`main` and `development`) and bpp-shared all target **net10*
 cd BPP.VeraConnector.NET
 
 # Phase1 smoke (read-only connectivity) — run FIRST
-dotnet test BPP.VeraConnector.NET.IntegrationTests/BPP.VeraConnector.NET.IntegrationTests.csproj -c Debug --filter "FullyQualifiedName~Phase1_Smoke"
+dotnet test BPP.VeraConnector.NET.Integration.Tests/BPP.VeraConnector.NET.Integration.Tests.csproj -c Debug --filter "FullyQualifiedName~Phase1_Smoke"
 
 # Full read-only prod probes ([Explicit] => must be named explicitly). Space suites ≥60s (bpp-auth 429 trap); ≤3 runs.
-dotnet test BPP.VeraConnector.NET.IntegrationTests/BPP.VeraConnector.NET.IntegrationTests.csproj -c Debug --filter "Category=VeraProdReadOnly"
+dotnet test BPP.VeraConnector.NET.Integration.Tests/BPP.VeraConnector.NET.Integration.Tests.csproj -c Debug --filter "Category=VeraProdReadOnly"
 ```
 
 `VeraProdReadOnly` probes are `[Explicit]` + inert unless `appsettings.local.json` points VERA at PROD and `ReadTestAnchor:CustomerVeraId` (for anchor-based tests) is set; the discovery probe needs no anchor. Never force `[Explicit]` WRITE tests.
@@ -102,7 +102,7 @@ dotnet test BPP.VeraConnector.NET.IntegrationTests/BPP.VeraConnector.NET.Integra
 ## Diagnosing failures (read-only, so never a write risk)
 
 - **Health 503 / reads 500, host TCP-reachable** → **FIRST suspect: missing mTLS cert** `gobrokernet.p12` in `App/Certificates/` (Step 2). Otherwise a VERA token/credential problem. The generic 500 handler masks the inner exception; check the `health` 503 body (`Error` field) or the App server log.
-- **Health 503 / reads fail, host NOT reachable (DNS/TCP)** → VPN/network. Connect to the VERA-prod VPN.
+- **Health 503 / reads fail, host NOT reachable (DNS/TCP)** → network/DNS problem. VERA PROD needs **no** VPN (only the mTLS cert + creds); do not ask the user to connect one.
 - **`Assert.Ignore` "Vera section points to Dev-Tenant"** → `appsettings.local.json` still on dmz211/uniquare; set the `Vera` section to PROD.
 - **bpp-auth down** → only blocks authenticated suites; Phase1 + the debug-endpoint probes are unauthenticated and still run.
 

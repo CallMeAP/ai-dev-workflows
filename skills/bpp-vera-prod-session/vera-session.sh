@@ -390,6 +390,7 @@ poll() { # poll <paths-file> <outdir>: guarded, rate-limited GETs against the lo
   local n=0 method url slug paths=$2/paths.txt
   cp "$1" "$paths" || die "cannot copy the paths file"   # guard and loop read the same snapshot
   guard check "$paths" >"$2/guard.txt" || { cat "$2/guard.txt"; die "GET guard refused the paths file"; }
+  preflight || exit 1   # second write-gate check, right before the first live GET of the batch
   echo 0 >"$STATE/row"
   while read -r method url; do
     [[ -z "$method" || "$method" == \#* ]] && continue
@@ -420,7 +421,7 @@ use_session() { # use_session <sel> [paths-file]
   trap 'exit 130' INT TERM HUP
   swap "$S_IDX" || exit 1
   BUILT=1; build "$S_IDX" || exit 1
-  s=$(smoke "$S_IDX") || die "Phase1 smoke $s (see $LOG/smoke-$S_IDX-*.log): VPN / cert / creds of row $S_IDX"
+  s=$(smoke "$S_IDX") || die "Phase1 smoke $s (see $LOG/smoke-$S_IDX-*.log): network / mTLS cert / creds of row $S_IDX (VERA PROD needs no VPN)"
   echo "smoke: $s"
   [[ -n "$paths" ]] || return 0
   app_start "$S_IDX"

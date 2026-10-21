@@ -42,8 +42,9 @@ creds). Also `bpp-start-local-stack` (Postgres, Redis). Fleet-wide catalog runs:
 1. `bash $S resolve <sel>`: confirm the row (idx, tenant name, go_user_id) with what the task needs.
 2. `bash $S poll --dry-run <paths>`: every line must say `ALLOW` (no network).
 3. `bash $S preflight`: every flag must be `True`. Start the local stack. Show the user the preflight line, the
-   resolved row and the exact `use` command, then **wait for an explicit go and VPN up**. A go covers one run.
-4. `bash $S use <sel> [<paths>]` with `run_in_background`. Smoke red -> abort + restore (VPN, cert, or creds).
+   resolved row and the exact `use` command, then **wait for an explicit go**. A go covers one run. VERA PROD needs **no** VPN (mTLS cert + creds only).
+4. Write gates are checked three times inside `use`: before the swap, before each smoke run and app start, and again right before the GET batch. Any `REFUSE` aborts and restores.
+   `bash $S use <sel> [<paths>]` with `run_in_background`. Smoke red -> abort + restore (network, mTLS cert, or creds).
    Output: `~/Downloads/.vera-audit/session/out/<ts>-row<idx>/NN-<route>.json`; logs in `.../session/logs/`.
 5. After it exits, it must print `consts: restored`, `rebuilt with original consts` and `leak-check: ... 0 hit(s)`
    (out dir, session logs and `bin/` scanned for the row's cred values). A `HIT` names column + file only: do not
