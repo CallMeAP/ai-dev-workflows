@@ -72,6 +72,8 @@ Background on the set (owned by the index, summarised here):
 | Description | short generated change summary (see "MR change summary" below) |
 | Assignee / Reviewer | none |
 
+These defaults are for promotion MRs. The UI MRs opened by the migration-guide audit (steps 3b and 4b) follow `bpp-migration-guide-audit` instead (reviewer chaslauer, target `development`, no deployment label).
+
 ## Version bump (extra step for the repos in the bump table)
 
 **The repos in the table below need a version bump on the source branch BEFORE the promotion MR is created.** Rule: **raise the PATCH version when promoting** — applies to BOTH directions.
@@ -299,6 +301,12 @@ for repo in "${REPOS[@]}"; do
 done
 ```
 
+### 3b. Migration-guide audit pre-check (development → staging only)
+
+Only when `[ "$SRC" = development ]`. Never for staging → main.
+
+Run `bpp-migration-guide-audit` in `report` mode against `origin/development`. Keep its rows (`repo | guide path | target UI | verdict | action`) as `AUDIT_ROWS`: they go into the step-4 preview, and the one "go" covers exactly those rows and nothing else. A backend repo with `mark [X]` rows but `NDIFFS = 0` is listed under "Will create MR for" as `(audit [X] renames only)`, because the rename commit gives it a diff. If the audit fails, put the error in the preview and carry on. It never blocks the promotion MRs.
+
 ### 4. Preview — STOP and wait for "go"
 
 Print four groups: repos that WILL get an MR (diffs, no existing MR), repos SKIPPED for no content diffs (show commit count if > 0 — degenerate), repos SKIPPED because an open promotion MR already exists (show the existing `!iid`), and repos with NO stage branch (expected topology). Then stop and ask the user to confirm. Do NOT create any MR before the user replies "go" (or equivalent).
@@ -308,6 +316,7 @@ Will create MR for:
   bpp-backend             (3 commits, 12 files)
   bpp-auth                (1 commit, 2 files)
   brokernet-hotel-ui      (2 commits, 5 files)  + patch-version bump 4.0.1 → 4.0.2
+  bpp-file                (audit [X] renames only)
   ...
 
 Skipping (no content diffs):
@@ -323,8 +332,21 @@ No stage branch (expected):
   bpp-shared              (no staging — ships via NuGet)
   ...
 
+Migration-guide audit (dev→staging only; UI MRs target development):
+  mark [X]   bpp-backend __112_2026-10-09_…   (cockpit applied)
+  UI MR      bpp-vera-connector __1_2026-06-10_… → bpp-stella-ui
+  report     bpp-auth __8_2026-10-22_…   (in-flight, cockpit !1268)
+
 Reply "go" to create MRs.
 ```
+
+### 4b. Apply the migration-guide audit (development → staging only, after go, before step 5)
+
+Run `bpp-migration-guide-audit` in `apply` mode with the user's go from step 4, passing `AUDIT_ROWS`: it acts only on those previewed rows (re-checked per row, changed rows are skipped and reported). Its UI MRs target the UI's `development`: they are NOT promotion MRs, get no deployment label and no bump.
+
+Then, for every backend repo that got a rename commit, re-run the step-2 compare for that repo so `NDIFFS` and the compare payload used by step 5 include the renames (a repo that had no other diffs now gets its promotion MR). If it already has an open promotion MR (step 3), the commit rides in it.
+
+If the audit fails, report it in step 7 and continue. It never blocks the promotion MRs.
 
 ### 5. MR change summary (description) — generate per repo
 
@@ -402,6 +424,8 @@ UPDATE ui_configs SET version_number = '0.1.0', updated_at = now(), updated_by_n
 UPDATE ui_configs SET version_number = '1.33.0', updated_at = now(), updated_by_name = 'release', updated_by_type = 'system' WHERE ui_type = 'stella' AND is_soft_deleted = false;
 ```
 
+For development → staging, add a **"Migration-guide audit"** section of its own: guides marked `[X]` (with the commit), UI MRs opened (URLs, Draft or not), existing MRs reused, `in-flight` / `unclear` rows, and any audit error. Keep it separate from the promotion MR list.
+
 Note: `detailed_merge_status` stays `checking` for a while after bulk creation and `has_conflicts:false` is NOT authoritative while checking — report mergeability as un-computed rather than clean.
 
 The report's last line is always the group-wide list of open MRs for this direction:
@@ -439,4 +463,6 @@ echo "Open $TITLE MRs: https://gitlab.com/groups/lipso/clients/brokernet/-/merge
 - About to call POST `/merge_requests` before showing preview → STOP, show preview first.
 - Compare API errored on a repo whose branches both exist → do NOT silently skip; abort with error.
 - About to label a staging→main MR `staging-deployment` (or vice versa) → STOP, check the direction table.
+- The migration-guide audit opened a second MR for a guide that already had an open UI MR → STOP; report both `!iid`s to the user and fix the dedupe before the next run.
+- The migration-guide audit is running for staging → main → STOP; it belongs to development → staging only.
 - Considering creating an MR for a repo the manifest filter did not return → STOP, exclude it. Fix the classification in `bpp/repos.md` via `bpp-project-index`, never by special-casing a repo here.
