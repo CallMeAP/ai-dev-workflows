@@ -9,7 +9,7 @@ These two locations mirror each other's tracked skill content — `.md` plus the
   confirm the path from it rather than from this file. (Corrected 2026-09-22: this said "repo-level `skills/`",
   which has zero tracked files; writing there puts a skill where `install.sh` never looks.) Only personal-only skills
   (`gs-*`, `lipsum-stundenliste`, `sync-my-skills`, `audit-my-memories`, the global session skills
-  `interactive-questions-mode-on`, `interactive-questions-mode-off` and `pause-and-handover`, and the obsolete `bpp-kanban-loop`) remain
+  `interactive-questions-mode-on`, `interactive-questions-mode-off`, `interactive-questions-once` and `pause-and-handover`, and the obsolete `bpp-kanban-loop`) remain
   under `personal-workflows/apittrich/skills/`. Another developer's skill synced from here (e.g. nangert's
   `stella-bump-version-staging-mr`) goes to `personal-workflows/<owner>/skills/`, reviewed by its owner.
 

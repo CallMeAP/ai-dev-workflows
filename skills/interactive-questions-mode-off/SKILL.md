@@ -90,6 +90,7 @@ current task. Do not ask "are you sure?" before switching; the user asking IS th
 | Thought | Reality |
 |---|---|
 | "This one question is important enough to ask anyway" | Mode OFF means no AskUserQuestion. Pick the recommended option, log it. |
+| "The user wants just this one group asked, but keep OFF" | Use `/interactive-questions-once` — asks one group, leaves this block and the mode untouched. |
 | "Off means I can push/merge/delete without asking" | No. Unauthorized outward or irreversible actions are prepared and listed as pending. |
 | "Safety gate? The user said power through" | Hard gates (prod writes, secrets, destructive ops) still STOP. |
 | "I'll just append the block at the end of the file" | One block, between the markers, in `## Before coding`. Never a second copy. |
