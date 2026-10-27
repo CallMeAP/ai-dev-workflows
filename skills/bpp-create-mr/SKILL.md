@@ -238,7 +238,7 @@ Re-verify every finding against current content by file + text, not line number.
 1. Edit only the flagged site(s).
 2. Build, then rerun the unit tests covering the touched projects (step-7 filter).
 3. Commit: `git add -- <paths>`, read `git diff --cached`, then `git commit -m "fix(qodana): <rule> in <file>"`.
-4. Plain `git push`. Never amend, never force-push.
+4. **Do not push yet** — the combined round (10e) pushes once per round. Never amend, never force-push.
 5. Back to the combined round (10e) for the new HEAD. **Cap: 3 rounds, shared with the Duo watcher**, then report what remains.
 
 **9e — PRE-EXISTING findings → investigate before touching.** Find why each one is still there:
@@ -252,7 +252,7 @@ Re-verify every finding against current content by file + text, not line number.
 | Fix changes a public API / DTO / endpoint contract | Needs an endpoint migration guide + broader review → keep |
 | Generated code (`*.g.cs`, `Migrations/*.Designer.cs`, snapshots) | Never edit → keep |
 
-None of these apply, the fix is local, small and in the safe/verified-judgment tier → **overlooked**. Fix it in this MR as a **separate commit** (`chore(qodana): fix pre-existing <rule> in <file>`), with the same build/test/push loop as 9d (it counts toward the 3-iteration cap). Everything else is **collected, not fixed**.
+None of these apply, the fix is local, small and in the safe/verified-judgment tier → **overlooked**. Fix it in this MR as a **separate commit** (`chore(qodana): fix pre-existing <rule> in <file>`), with the same build/test/commit loop as 9d, pushed with the round's single push in 10e (it counts toward the 3-round cap). Everything else is **collected, not fixed**.
 
 **9f — Post ONE MR comment**, after the last iteration:
 
@@ -302,13 +302,21 @@ U=$(jq -r --arg t "$T" '[.[]|select(.created_at>$t)]|sort_by(.created_at)[0].cre
 WIN='.created_at>$t and ($u=="" or .created_at<$u)'
 # ≤ 9 min per call, background, re-launch up to 3× (~25 min total) — same as 9a
 for i in $(seq 1 9); do
-  N=$(glab api "projects/$ENC/merge_requests/$IID/notes?per_page=100&sort=desc" --paginate | jq -s --arg t "$T" --arg u "$U" \
-    "[.[][]|select(.author.username==\"GitLabDuo\" and .system==false and ($WIN) and (.body|startswith(\"started [review session\")|not))]|length")
-  [ "${N:-0}" -gt 0 ] && { sleep 30; echo "DUO_DONE"; break; }   # grace: inline threads land with the summary
+  NOTES=$(glab api "projects/$ENC/merge_requests/$IID/notes?per_page=100&sort=desc" --paginate)
+  DUO="[.[][]|select(.author.username==\"GitLabDuo\" and .system==false and ($WIN))]"
+  # done = Duo's summary note for this window: a general (non-DiffNote) note that is not "started [review session"
+  S=$(jq -s --arg t "$T" --arg u "$U" "$DUO|map(select(.type!=\"DiffNote\" and (.body|startswith(\"started [review session\")|not)))|length" <<<"$NOTES")
+  [ "${S:-0}" -gt 0 ] && { sleep 30; echo "DUO_DONE"; break; }   # inline DiffNotes land 1–2 s after the summary
   sleep 60
 done
 ```
-No review after ~25 min → report "Duo did not review <sha>" and end the Duo phase for this round.
+The **summary note** marks the end of a review. Its wording varies (`I finished my review…`, `I left N …`,
+`I reviewed the changes since my last review…`, `Two earlier threads need no action…`), so key on the note
+type, not the text (verified on bpp-backend !469, 2026-10-27). A summary starting `:warning: Something went
+wrong` means the review failed → report "Duo review of <sha> failed" and treat the round as not reviewed.
+No summary after ~25 min but DiffNotes in the window → handle them and say "Duo review of <sha> may be
+partial (no summary note)". Nothing at all → report "Duo did not review <sha>" and end the Duo phase for
+this round.
 
 **10c — Collect the open findings of this review.** Drop system notes ("approved" / "requested changes") and threads that are resolved or already have a reply from someone other than Duo (a re-run must not reply twice):
 ```bash
@@ -321,7 +329,7 @@ glab api "projects/$ENC/merge_requests/$IID/discussions?per_page=100" --paginate
      resolvable:.notes[0].resolvable, path:.notes[0].position.new_path, line:.notes[0].position.new_line, body:.notes[0].body}"
 ```
 - `kind=inline` → a DiffNote with a position: resolvable, one finding.
-- `kind=summary` → no position, not resolvable, body starts `I finished my review…` / `I left N …`. Its bullets can hold extra findings. "found nothing to comment on" = clean review.
+- `kind=summary` → no position, not resolvable (wording varies, see 10b). Its bullets can hold extra findings. "found nothing to comment on" = clean review.
 - Duo sometimes says its diff was truncated, so re-verify each finding against the current code before acting.
 
 **10d — Handle each finding**, first matching row wins:
@@ -337,11 +345,11 @@ glab api "projects/$ENC/merge_requests/$IID/discussions?per_page=100" --paginate
 glab api --method POST "projects/$ENC/merge_requests/$IID/discussions/$DID/notes" --raw-field "body=$REPLY"
 glab api --method PUT  "projects/$ENC/merge_requests/$IID/discussions/$DID?resolved=true"   # fixed only
 ```
-Fixes follow 9d's loop: edit only the flagged site, build, unit tests, `git add -- <paths>`, read `git diff --cached`, commit `fix(review): <what> (GitLab Duo)`, plain push.
+Fixes follow 9d's loop: edit only the flagged site, build, unit tests, `git add -- <paths>`, read `git diff --cached`, commit `fix(review): <what> (GitLab Duo)`. **No push here** — 10e pushes once per round; a push mid-round opens a new MR version, which closes HEAD's `[T, U)` window before the review is collected. Reply and resolve after that push, citing the pushed sha.
 
 **10e — Combined round (Qodana + Duo).** Each push re-triggers both, so they share one loop:
 1. For HEAD: wait for 9a (qodana job) **and** 10b (Duo review of the same sha).
-2. Fix everything from both in one batch (separate commits are fine), build + unit tests once, push once.
+2. Fix everything from both in one batch (separate commits are fine), build + unit tests once, push once. Then post the Duo replies and resolve the fixed threads, citing the pushed sha.
 3. New HEAD → next round. **Cap: 3 rounds total.** A round with nothing to fix from either source ends the loop.
 4. After the last round: post 9f's Qodana comment, then list every still-unresolved resolvable thread on the MR (any author) — that is what blocks the merge:
    ```bash

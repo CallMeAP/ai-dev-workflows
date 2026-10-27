@@ -42,9 +42,10 @@ mirror must **reverse-render** the local literal paths into placeholders, then v
 `paths.env` and diffing against the live skill. Never push literal `/home/<you>/...` paths into `bpp/skills/` — it breaks
 `install.sh` for every other developer. The canonical repo keeps literal paths; only the mirror is templated.
 
-**Mirror changes go on a `docs/*` branch + MR**, matching how the mirror repo ships (`MIRRORS.md`). The standing
-auto-push approval below applies to the canonical remote and to pushing the `docs/*` branch — not to merging it.
-See **Scope** above for what is excluded.
+**Mirror changes go straight to `main`** (user decision 2026-10-27; until then they went as a `docs/*` branch + MR).
+Commit in a temporary worktree off `origin/main`, never in the mirror checkout itself, and push with an explicit
+refspec. Exception: another developer's skill under `personal-workflows/<owner>/` still goes as a `docs/*` branch +
+MR reviewed by its owner. See **Scope** above for what is excluded.
 
 **Manual convention:** nothing auto-syncs. Any agent or human editing one
 side must mirror the change to the other before finishing.

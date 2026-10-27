@@ -145,10 +145,13 @@ text, the target UI, the step-3 evidence, and this contract:
 
 1. Worktree off the UI's `origin/development`, never the main checkout:
    `git -C <ui> worktree add <ui>.worktrees/<branch> -b <branch> origin/development`, then `npm ci`.
-2. Regenerate clients when the guide says so. The `:dev:` variants (`npm run generate:models:dev:<svc>`;
-   stella-ui `-w bpp-stella-common`) read the deployed dev swagger; the plain ones need
-   `bpp-start-local-stack`. If the regenerated client still lacks the guide's change, the backend is not
-   deployed yet → Draft, say so.
+2. Regenerate clients when the guide says so. The `:dev:` variants (`npm run generate:models:dev:<svc>`)
+   do **not** work: the services expose `api-doc/v1/swagger.json` only when `IsLocal()` (e.g.
+   bpp-vera-connector `Program.cs:299`, bpp-stella `:245`, bpp-auth `:319`), so every dev URL returns 404
+   (checked 2026-10-27). Use the plain scripts against `bpp-start-local-stack`, or export the swagger from
+   a credential-free worktree of the service (`dotnet swagger tofile`) and run the generator with
+   `-i <file>`. Never start a main checkout that holds prod credentials (bpp-vera-connector). If the
+   regenerated client still lacks the guide's change, the backend has not merged it yet → Draft, say so.
 3. Implement the FE to-do items, nothing else.
 4. Checks — all must pass, otherwise open as Draft with the failing output (trimmed) in the description:
    - cockpit: `npm run lint`, `npm run unit-test:ci`, `npx tsc -p tsconfig.app.json --noEmit`

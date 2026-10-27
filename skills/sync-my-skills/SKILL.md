@@ -25,7 +25,7 @@ They are **not** two copies of the same thing. Sending the wrong shape to either
 | Where personal skills go (`gs-*`, `lipsum-stundenliste`, `sync-my-skills`, `audit-my-memories`, `bpp-kanban-loop` [obsolete]) | `skills/<name>/` | `personal-workflows/apittrich/skills/<name>/` — **never** the shared `bpp/skills/` |
 | Someone else's skill (`stella-bump-version-staging-mr` — nangert) | `skills/<name>/` | `personal-workflows/<owner>/skills/<name>/` — keep the owner's path and README; name the owner as reviewer on the MR |
 | Per-skill `README.md` | not used | **required** — see below |
-| How it ships | direct `git push` to `main` (standing approval) | **`docs/*` branch + MR**, never a direct push to `main` |
+| How it ships | direct `git push` to `main` (standing approval) | **direct push to `main`** (standing approval, user decision 2026-10-27) — except someone else's skill, which still goes as `docs/*` branch + MR to its owner |
 
 **The two shared-skill paths differ on purpose.** Canonical keeps a top-level `skills/`; the mirror
 nests them under `bpp/skills/` (moved 2026-09-14), because the mirror also carries `angular/`,
@@ -167,48 +167,43 @@ git -C "$CANONICAL" add "skills/$NAME/"
 git -C "$CANONICAL" commit -m "chore(skills): sync $NAME from personal skills"
 ```
 
-The mirror ships through review, so branch off `origin/main` **first** — never commit the mirror on `main`:
+The mirror goes straight to `main` (user decision 2026-10-27, no MR). The mirror checkout is often on
+another branch or carries unrelated dirt, so commit in a temporary detached worktree off `origin/main`
+— never in the checkout itself:
 
 ```bash
-TOPIC=sync-my-skills-contract           # short kebab topic for the branch
 MIRROR=/home/alex/Entwicklung/lipso/agentic-coding-knowledge
+WT=$MIRROR.worktrees/sync-$(date +%Y%m%d-%H%M%S)
 
 git -C "$MIRROR" fetch -q origin
-git -C "$MIRROR" switch -c "docs/$TOPIC" origin/main
-git -C "$MIRROR" add "personal-workflows/apittrich/skills/$NAME/"   # or bpp/skills/$NAME/ for a shared one
-git -C "$MIRROR" commit -m "docs(skills): sync $NAME from personal skills"
+git -C "$MIRROR" worktree add --detach "$WT" origin/main
+# copy / reverse-render the synced skills into "$WT" (step 5), then:
+git -C "$WT" add "personal-workflows/apittrich/skills/$NAME/"   # or bpp/skills/$NAME/ for a shared one
+git -C "$WT" commit -m "docs(skills): sync $NAME from personal skills"
 ```
 
-`switch -c <b> origin/main` sets the upstream to `origin/main`, so a bare `git push` would target
-`main`. Always push explicitly by refspec (step 7).
+**Exception — someone else's skill** (`personal-workflows/<owner>/…`, e.g. nangert's): keep the old path,
+`git -C "$WT" switch -c "docs/<topic>"`, push that branch and open an MR with the owner as reviewer.
 
 Commit trailer on both: the attribution lines Claude Code supplies for the current session. Never
 hard-code a model name — it goes stale with the next model release.
 
 ### 7. Push both remotes (standing approval)
 
-SYNC.md grants standing approval to push the canonical remote and to push the mirror's `docs/*`
-branch — **not** to merge the MR. **Plain pushes only, never `--force`:**
+SYNC.md grants standing approval to push both remotes straight to `main`. **Plain pushes only, never
+`--force`:**
 
 ```bash
 git -C "$CANONICAL" push                                  # canonical: straight to main
-
-# Mirror: explicit refspec. `switch -c` set the upstream to origin/main, so a bare
-# `git push` here would target main.
-git -C "$MIRROR" push -u origin "HEAD:refs/heads/docs/$TOPIC"
+git -C "$WT" push origin HEAD:refs/heads/main             # mirror: straight to main, explicit refspec
+git -C "$MIRROR" worktree remove "$WT"                    # no --force
 ```
 
-Then open the MR against `main` and stop. `glab mr create` is unreliable here; use the API:
-
-```bash
-P=lipso%2Finternal%2Fagentic-coding-knowledge
-IID=$(glab api --method POST "/projects/$P/merge_requests" \
-  -f source_branch="docs/$TOPIC" -f target_branch=main -f title="$TITLE" \
-  --raw-field "description=$DESC" | jq -r .iid)   # -f description=@file posts the literal path
-glab mr update "$IID" --reviewer apittrich -R lipso/internal/agentic-coding-knowledge
-```
-
-**Never merge the MR.**
+If the mirror push is rejected because `origin/main` moved: `git -C "$WT" pull --rebase origin main` is
+**not** allowed (no rebase) — instead `git -C "$WT" fetch origin && git -C "$WT" merge origin/main`,
+re-run the render-back check, push again. Only for someone else's skill (exception above) open an MR
+via `glab api --method POST "/projects/lipso%2Finternal%2Fagentic-coding-knowledge/merge_requests"`
+(`glab mr create` is unreliable here) with the owner as reviewer, and never merge it yourself.
 
 ### 8. Verify + report
 
@@ -235,7 +230,7 @@ Report: `new: […]`, `updated: […]`, `unchanged: […]`, `skipped (repo newer
 | Scope | top-level `*.md` + all of `skills/**` incl. support scripts; mirror a skill complete or not at all |
 | Secrets | grep copied files, **support scripts included**; read each hit; real credential → STOP (documented patterns are fine) |
 | Commit | explicit `git add <paths>`, the session's attribution trailer |
-| Push | canonical: plain `git push` to `main`. Mirror: `docs/*` branch → `push -u origin HEAD:refs/heads/docs/<topic>` → MR. Never `--force`, never merge |
+| Push | canonical: plain `git push` to `main`. Mirror: temp worktree off `origin/main` → `push origin HEAD:refs/heads/main`. Someone else's skill: `docs/*` + MR to the owner. Never `--force` |
 
 ## Common Mistakes
 
@@ -248,7 +243,7 @@ Report: `new: […]`, `updated: […]`, `unchanged: […]`, `skipped (repo newer
 - **Syncing only the canonical side** → SYNC.md requires the mirror too; both must move together.
 - **Pushing literal `/home/<you>/...` paths into the mirror's shared `bpp/skills/`** → `install.sh` renders placeholders, so a hardcoded path silently installs your machine's layout on someone else's. Reverse-render, then render back and diff.
 - **Blanket-replacing every username with `{{DEV_USER}}`** → reviewer names and "maintained by" attributions are real people, not machine config; replacing them breaks the reviewer logic.
-- **Committing the mirror on `main` / bare `git push` on a `docs/*` branch** → the branch's upstream is `origin/main`, so a bare push lands on `main`. Branch off `origin/main` and push by explicit refspec.
+- **Committing in the mirror checkout itself** → it is often on another branch or has unrelated dirt; use a temp worktree off `origin/main` and push by explicit refspec.
 - **A personal skill published without a README** → the installing developer gets no shell-dialect, layout or verification information at all, and personal skills are exactly the ones authored against one machine. Write it for your own; ask the owner for theirs.
 - **A new shared skill without its `README.md`** → the installing developer has no way to know its placeholders or prerequisites. Write it in the same change.
 - **Putting setup text inside `SKILL.md`** → `install.sh` renders `SKILL.md` into the runtime, so it costs tokens on every invocation. It belongs in the sibling `README.md`, which `install.sh` skips.
@@ -258,7 +253,7 @@ Report: `new: […]`, `updated: […]`, `unchanged: […]`, `skipped (repo newer
 
 - **SYNC.md missing** → STOP; you can't know the mirror rule or push approval.
 - About to `git push --force` on either remote → STOP.
-- About to push, commit, or merge directly on the mirror's `main` → STOP; mirror changes ship as a `docs/*` branch + MR, and you never merge it.
+- About to push someone else's skill (`personal-workflows/<owner>/`, owner ≠ apittrich) straight to the mirror's `main` → STOP; that one still goes as `docs/*` + MR to its owner.
 - A `{{PLACEHOLDER}}` about to reach the **canonical** repo, or a literal `/home/...` path about to reach the mirror's shared `bpp/skills/` → STOP; you have the two contracts swapped.
 - About to write a `bpp-*` skill to the mirror's **top-level** `skills/` → STOP; the mirror's shared root is `bpp/skills/`. The old path is not tracked any more and `install.sh` will not find the skill.
 - About to `git add -A` / commit with unrelated dirty files staged → STOP; explicit paths only.
