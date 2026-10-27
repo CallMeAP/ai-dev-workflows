@@ -7,7 +7,7 @@ description: Use when turning current local work in a BPP .NET repo into a revie
 
 ## Overview
 
-One-shot path from local work → reviewed MR in a BPP GitLab repo. Auto-creates a feature branch when on a protected branch, commits pending changes, **verifies the new public surface the branch adds (controller endpoints, public `I*Service` methods, DTO validation/mapper classes) is covered by tests**, pushes, creates (or reuses) an MR targeting `development` **assigned to yourself**, with the reviewer picked by repo kind (**apittrich** for .NET/backend repos, **chaslauer** for Angular/frontend repos), then runs the **unit** test suite as a regression gate. On green it pings the user that e2e can start; on red it reports the failures and pings — it never runs the e2e/integration suite itself (that's `bpp-run-integration-tests`). Finally a **Qodana watcher** (step 9) and a **GitLab Duo watcher** (step 10) run as one combined loop: per HEAD they wait for the qodana job and Duo's review, fix what the MR introduced, triage pre-existing findings, reply on (and resolve, when fixed) every Duo thread, and post one Qodana summary comment.
+One-shot path from local work → reviewed MR in a BPP GitLab repo. Auto-creates a feature branch when on a protected branch, commits pending changes, **verifies the new public surface the branch adds (controller endpoints, public `I*Service` methods, DTO validation/mapper classes) is covered by tests**, pushes, creates (or reuses) an MR targeting `development` **assigned to yourself**, with the reviewer picked by repo kind (**apittrich** for .NET/backend repos, **chaslauer** for Angular/frontend repos), then runs the **unit** test suite as a regression gate. On green it pings the user that e2e can start; on red it reports the failures and pings — it never runs the e2e/integration suite itself (that's `bpp-run-integration-tests`). Finally a **Qodana watcher** (step 9) and a **GitLab Duo watcher** (step 10) run as one combined loop: per HEAD they wait for the qodana job (and, in round 1, Duo's single initial review), fix what the MR introduced, triage pre-existing findings, reply on (and resolve, when fixed) every Duo thread, and post one Qodana summary comment.
 
 ## When to Use
 
@@ -287,7 +287,7 @@ Clean report → still post the one-liner `Qodana: no new findings (pipeline <id
 
 ### 10. GitLab Duo watcher
 
-Duo (user `GitLabDuo`) reviews **only non-Draft MRs**. Marking an MR ready auto-requests review from `@GitLabDuo`. Duo reviews **again after every push**. Its output per review:
+Duo (user `GitLabDuo`) reviews **only non-Draft MRs**, and **only once**: the initial review when the MR is opened non-draft or marked ready (auto-requested from `@GitLabDuo`). Later pushes do **not** trigger a new review (observed 2026-10-27: no Duo review of a new head after 50 min). A re-review only happens on request (`mergeRequestReviewerRereview` via GraphQL, costs Duo credits) — do that only when the user asks. Its output per review:
 - a non-system note `started [review session N]…` (ignore it);
 - inline **DiffNote** threads (resolvable);
 - a summary note starting `I finished my review…` or `I left N …` (non-resolvable; can hold points that are not inline);
@@ -301,7 +301,7 @@ DRAFT=$(glab api "projects/$ENC/merge_requests/$IID" | jq -r .draft)
 ```
 `true` → skip the Duo phase. Say in the final report: "Duo reviews once the MR is marked ready — re-run `/bpp-create-mr` on this branch then; it reuses the MR and runs the watchers." Do not wait for an undraft.
 
-**10b — Wait for Duo's review of HEAD.** Anchor on the MR diff version for HEAD, not on wall-clock time. The window is `[T, U)`: `T` = `created_at` of HEAD's version, `U` = `created_at` of the next version (empty while HEAD is the newest). Timestamps are GitLab UTC ISO strings (`…Z`), so string comparison is safe.
+**10b — Wait for Duo's initial review** (round 1 only). If Duo already posted a summary note on this MR, skip the wait and go to 10c with the window of the version it reviewed. Otherwise anchor on the MR diff version for HEAD, not on wall-clock time. The window is `[T, U)`: `T` = `created_at` of HEAD's version, `U` = `created_at` of the next version (empty while HEAD is the newest). Timestamps are GitLab UTC ISO strings (`…Z`), so string comparison is safe.
 ```bash
 VERS=$(glab api "projects/$ENC/merge_requests/$IID/versions")
 T=$(jq -r --arg s "$SHA" '[.[]|select(.head_commit_sha==$s)][0].created_at // empty' <<<"$VERS")
@@ -355,8 +355,8 @@ glab api --method PUT  "projects/$ENC/merge_requests/$IID/discussions/$DID?resol
 ```
 Fixes follow 9d's loop: edit only the flagged site, build, unit tests, `git add -- <paths>`, read `git diff --cached`, commit `fix(review): <what> (GitLab Duo)`. **No push here** — 10e pushes once per round; a push mid-round opens a new MR version, which closes HEAD's `[T, U)` window before the review is collected. Reply and resolve after that push, citing the pushed sha.
 
-**10e — Combined round (Qodana + Duo).** Each push re-triggers both, so they share one loop:
-1. For HEAD: wait for 9a (qodana job) **and** 10b (Duo review of the same sha).
+**10e — Combined round (Qodana + Duo).** Every push re-triggers Qodana; Duo reviews only the first non-draft version:
+1. Round 1: wait for 9a (qodana job) **and** 10b (Duo's initial review). Later rounds: wait for 9a only — do not wait for Duo on a new head, and report "Duo reviews only the initial version" instead of "Duo did not review <sha>".
 2. Fix everything from both in one batch (separate commits are fine), build + unit tests once, push once. Then post the Duo replies and resolve the fixed threads, citing the pushed sha.
 3. New HEAD → next round. **Cap: 3 rounds total.** A round with nothing to fix from either source ends the loop.
 4. After the last round: post 9f's Qodana comment, then list every still-unresolved resolvable thread on the MR (any author) — that is what blocks the merge:
@@ -413,8 +413,9 @@ Fixes follow 9d's loop: edit only the flagged site, build, unit tests, `git add 
 - **Suppressing a finding to make the watcher go green** → never. Fix it, or list it with a reason in the MR comment.
 - **Waiting on qodana in one >10 min shell call** → ≤9 min per call, background, re-launch.
 - **Waiting for Duo on a Draft MR** → Duo never runs on drafts. Skip the phase and tell the user to re-run after undrafting.
-- **Taking an older Duo review for the current HEAD** → Duo reviews every push. Anchor on the MR version `created_at` of HEAD, never on "the latest Duo note".
-- **Running Qodana and Duo fix loops separately** → each push re-triggers both. One combined round per HEAD, 3 rounds total.
+- **Waiting for a Duo review of a later push** → Duo reviews only the initial non-draft version. Collect that review once (anchor on its MR version window), then only Qodana per push.
+- **Running Qodana and Duo fix loops separately** → one combined round: Duo's single initial review plus Qodana per push, 3 rounds total.
+- **Duo still shows `requested_changes` after all its threads are resolved** → it does not re-review on its own; add label `duo-bypass` and give the user the `duo-bypass` list URL (they click Bypass; there is no API).
 - **Resolving a thread that was only answered** → resolve only what was fixed in code. Declined findings and design questions stay open for the author.
 - **Fixing a Duo design/rollout point on your own** → ask the user first; it is not a code smell.
 
