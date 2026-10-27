@@ -164,7 +164,15 @@ fi
 
 # Set assignee + reviewer explicitly afterwards — on the freshly created MR AND the reused one.
 glab mr update "$IID" -R "$PROJ" --assignee "$ME" --reviewer "$REVIEWER"
+
+# Group label work-ap: lists all misc MRs in one place (not on bpp-agent MRs, not on promotions).
+LABELS=$(glab api "/projects/$(printf %s "$PROJ" | sed 's#/#%2F#g')/merge_requests/$IID" | jq -r '.labels|join(",")')
+case ",$LABELS," in *,bpp-agent,*) ;; *)
+  glab api --method PUT "/projects/$(printf %s "$PROJ" | sed 's#/#%2F#g')/merge_requests/$IID" -f add_labels=work-ap >/dev/null ;;
+esac
 ```
+
+All `work-ap` MRs: `https://gitlab.com/groups/lipso/clients/brokernet/-/merge_requests?sort=created_date&state=opened&label_name[]=work-ap&first_page_size=100`
 
 Capture the MR `!iid` + web URL for the final report.
 
@@ -372,6 +380,7 @@ Fixes follow 9d's loop: edit only the flagged site, build, unit tests, `git add 
 | Push | `git push -u origin <branch>` |
 | Existing MR? | `glab api .../merge_requests?state=opened&source_branch=<b>&target_branch=development` |
 | Create MR | `glab api --method POST "/projects/<enc>/merge_requests" -f source_branch=… -f target_branch=development -f title=…` |
+| Label | `add_labels=work-ap` on every MR except `bpp-agent` ones |
 | Set assignee+reviewer (always follow up) | `glab mr update <iid> -R lipso/clients/brokernet/<repo> --assignee <me> --reviewer <apittrich\|chaslauer>` |
 | Unit tests | `dotnet test <sln> --filter "Category!=LocalIntegration&Category!=Integration"` |
 | Ping | `PushNotification(status="proactive", message="…")` |
