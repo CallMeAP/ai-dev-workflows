@@ -177,36 +177,32 @@ All `work-ap` MRs: `https://gitlab.com/groups/lipso/clients/brokernet/-/merge_re
 
 Capture the MR `!iid` + web URL for the final report.
 
-### 6b. Endpoint migration guide — separate MR in `bpp-endpoint-migration-guides`
+### 6b. Endpoint migration guide — direct push to `main` of `bpp-endpoint-migration-guides`
 
 Only when the branch changes a DTO / API contract (see the repo's `CLAUDE.md` guide rule) or the work
 includes a guide. Guides never go into the backend repo: they live in `bpp-endpoint-migration-guides`
 (`main` only), folder `<REPO>/`. A guide file sitting in the backend working tree (an old
 `endpoint-migration-guides/` path) is moved there, not committed.
 
+**No MR in the guides repo — push straight to `main`** (user, 2026-10-27: avoids the Duo
+requested_changes/Bypass round-trip on docs-only changes). A guide for a backend MR that is not merged yet
+is still pushed now; its first line says so.
+
 ```bash
 G=~/Entwicklung/bpp/bpp-endpoint-migration-guides; GPROJ=lipso/clients/brokernet/bpp-endpoint-migration-guides
-GENC=$(printf %s "$GPROJ" | sed 's#/#%2F#g')
 git -C "$G" fetch -q origin main
-# next free number in <REPO>/ — on main AND in every open guides MR
-N=$( { git -C "$G" ls-tree --name-only "origin/main:$REPO" 2>/dev/null
-       for i in $(glab api "/projects/$GENC/merge_requests?state=opened&per_page=100" | jq -r '.[].iid'); do
-         glab api "/projects/$GENC/merge_requests/$i/diffs?per_page=100" | jq -r '.[].new_path'
-       done | grep "^$REPO/" | sed 's#.*/##'; } | grep -oE '^__[0-9]+' | tr -d _ | sort -n | tail -1)
+N=$(git -C "$G" ls-tree --name-only "origin/main:$REPO" 2>/dev/null | grep -oE '^__[0-9]+' | tr -d _ | sort -n | tail -1)
 N=$(( ${N:-0} + 1 ))
-git -C "$G" worktree add "$G.worktrees/$BRANCH" -b "$BRANCH" origin/main
-# write "$G.worktrees/$BRANCH/$REPO/__${N}_$(date +%F)_<kebab-topic>-migration-guide_[].md"
-# (quote the path: [ ] are glob characters), commit it, git push -u origin "$BRANCH"
-GIID=$(glab api --method POST "/projects/$GENC/merge_requests" \
-  -f source_branch="$BRANCH" -f target_branch=main -f labels=work-ap \
-  -f title="docs($REPO): <topic> migration guide" \
-  --raw-field "description=Endpoint migration guide for $PROJ!$IID" | jq -r '.iid // empty')
-glab mr update "$GIID" -R "$GPROJ" --assignee "$ME" --reviewer "$REVIEWER"
+W="$G.worktrees/guide-$REPO-$N"; git -C "$G" worktree add --detach "$W" origin/main
+# write "$W/$REPO/__${N}_$(date +%F)_<kebab-topic>-migration-guide_[].md" (quote the path: [ ] are glob characters);
+# first line "> For $PROJ!$IID (not yet merged)" + blank line while the backend MR is open
+git -C "$W" add -- "$REPO/__${N}_"*; git -C "$W" commit -m "docs($REPO): <topic> migration guide (for $PROJ!$IID)"
+git -C "$W" push origin HEAD:refs/heads/main      # rejected (main moved) -> fetch, merge origin/main, re-check $N, push again; never --force
+git -C "$G" worktree remove "$W"
 ```
 
-Then add `Endpoint migration guide: <guides MR web URL>` to the backend MR description. The backend MR
-is not merged without its guide MR. The number is final only at merge: if another guide took `__$N`
-first, rename to the next free number before merging.
+Then add `Endpoint migration guide: https://gitlab.com/$GPROJ/-/blob/main/<path>` to the backend MR
+description (URL-encode `[` `]` as `%5B` `%5D`). A later change to the guide is another direct push.
 
 ### 7. Unit tests (regression gate)
 
@@ -413,7 +409,7 @@ Fixes follow 9d's loop: edit only the flagged site, build, unit tests, `git add 
 | Existing MR? | `glab api .../merge_requests?state=opened&source_branch=<b>&target_branch=development` |
 | Create MR | `glab api --method POST "/projects/<enc>/merge_requests" -f source_branch=… -f target_branch=development -f title=…` |
 | Label | `add_labels=work-ap` on every MR except `bpp-agent` ones |
-| Guide MR (DTO/API change) | `bpp-endpoint-migration-guides`, folder `<repo>/`, target `main`, label `work-ap` (step 6b) |
+| Guide (DTO/API change) | `bpp-endpoint-migration-guides`, folder `<repo>/`, direct push to `main`, no MR (step 6b) |
 | Set assignee+reviewer (always follow up) | `glab mr update <iid> -R lipso/clients/brokernet/<repo> --assignee <me> --reviewer <apittrich\|chaslauer>` |
 | Unit tests | `dotnet test <sln> --filter "Category!=LocalIntegration&Category!=Integration"` |
 | Ping | `PushNotification(status="proactive", message="…")` |
@@ -438,7 +434,7 @@ Fixes follow 9d's loop: edit only the flagged site, build, unit tests, `git add 
 - **Assigning the MR to the reviewer** → the author keeps the assignee slot (they push the fixes and drive it to merge); the other person goes in `--reviewer` only.
 - **Using the backend reviewer on a frontend MR** → Angular repos are reviewed by `chaslauer`, .NET repos by `apittrich`. Derive it from the repo, don't default blindly.
 - **Duplicating an MR** → query open MRs for the source branch first; a push already updates an existing one.
-- **Committing an endpoint migration guide into the backend repo** → guides live in `bpp-endpoint-migration-guides/<repo>/`; open the guide MR there (step 6b) and link it.
+- **Committing an endpoint migration guide into the backend repo** → guides live in `bpp-endpoint-migration-guides/<repo>/`; push it straight to `main` there (step 6b) and link it.
 - **`--force` push** → never.
 - **Editing tests to go green** → out of scope; report red and stop.
 - **Pinging e2e-ready when tests are red** → only ping "start e2e" on green.
