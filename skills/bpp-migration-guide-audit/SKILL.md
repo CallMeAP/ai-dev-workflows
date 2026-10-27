@@ -155,7 +155,7 @@ text, the target UI, the step-3 evidence, and this contract:
 3. Implement the FE to-do items, nothing else.
 4. Checks — all must pass, otherwise open as Draft with the failing output (trimmed) in the description:
    - cockpit: `npm run lint`, `npm run unit-test:ci`, `npx tsc -p tsconfig.app.json --noEmit`
-   - stella-ui: `npm run lint`, `npm run typecheck:common`, `npm test -w bpp-stella-web`, `npm test -w bpp-stella-app`
+   - stella-ui: `npm run lint`, `npm run typecheck:common`, `npm test -w bpp-stella-web`, `npm test -w bpp-stella-app -- --watch=false --browsers=ChromeHeadless` (plain `npm test` there starts Karma in watch mode with a visible Chrome window and never exits)
 5. Cockpit i18n keys belong in bpp-backend — the subagent does not edit bpp-backend; it lists the missing
    keys under "Backend i18n follow-up" and the MR is Draft until they exist.
 6. Commit, `git push -u origin <branch>`, then create the MR via the API (`glab mr create` is broken here):
