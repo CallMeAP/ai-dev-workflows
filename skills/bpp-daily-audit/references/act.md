@@ -175,7 +175,7 @@ Write `escalations/<YYYY-MM-DD-HHMM>-<repo>-<slug>.md`:
 <which escalate-regardless rule applies, or why the debate could not settle it>
 
 ## What it needs
-<the concrete follow-up: an endpoint migration guide, a bpp-shared bump + fleet pin, a migration,
+<the concrete follow-up: an endpoint migration guide (MR in bpp-endpoint-migration-guides), a bpp-shared bump + fleet pin, a migration,
 a cherry-pick to development, a human decision on X>
 
 ## Debate record

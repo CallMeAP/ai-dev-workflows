@@ -174,7 +174,8 @@ report and queued first next run.
   ranges. Treat counts as a lower bound; read the raw file when it matters.
 - **Advancing the ledger on a partial run** — only advance per repo/branch that actually completed.
 - **Opening an MR for a DTO change** — DTO/API contract changes are on the escalate-regardless list
-  (they need an endpoint migration guide and FE coordination). See `references/adjudication.md`.
+  (they need an endpoint migration guide in `bpp-endpoint-migration-guides` and FE coordination).
+  See `references/adjudication.md`.
 - **Letting a debate consensus override the escalate-regardless list** — it cannot. The list wins.
 - **Auditing the whole 268-ticket board** — the board is only a spec source and a status-change
   trigger, never an iteration target.

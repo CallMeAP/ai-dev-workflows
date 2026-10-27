@@ -99,7 +99,8 @@ which side is right and why. `needs-human` is for genuine ambiguity, not for avo
 never `targeted-mr`:**
 
 1. **An EF Core migration is required.** Schema changes need review, ordering and a deploy plan.
-2. **A DTO or API contract change.** These require an endpoint migration guide and FE coordination
+2. **A DTO or API contract change.** These require an endpoint migration guide (an MR in
+   `bpp-endpoint-migration-guides`, folder `<repo>/`) and FE coordination
    (`npm run generate:models`); shipping one silently breaks the GUI's generated models.
 3. **Any change inside `bpp-shared`.** It ships as a NuGet package; a fix there is a fleet-wide pin
    bump, not a targeted MR.

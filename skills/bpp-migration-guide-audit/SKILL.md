@@ -7,9 +7,10 @@ description: Use when checking whether BPP endpoint migration guides have been a
 
 ## Overview
 
-Backend repos document breaking API changes as `endpoint-migration-guides/__<n>_<date>_<slug>_[ ].md`; the
-guide is done when its filename ends `_[X].md`. This skill finds every guide that is not `[X]` on
-`origin/development`, decides with cited evidence whether each target UI already applied it, and then
+All endpoint migration guides of the backend repos live in one repo, `bpp-endpoint-migration-guides`
+(`main` only, never promoted), one folder per backend repo: `<repo>/__<n>_<date>_<slug>_[].md`. The
+guide is done when its filename ends `_[X].md`. This skill finds every guide that is not `[X]` on that
+repo's `origin/main`, decides with cited evidence whether each target UI already applied it, and then
 either marks it done (applied) or opens a UI MR for chaslauer (not applied).
 
 **Core rule: a verdict is evidence, not a guess.** Every `applied` / `not-applied` cites `file:line` or a
@@ -20,11 +21,11 @@ commit on the UI's `origin/development`. Anything less is `unclear`, and `unclea
 | Mode | Writes | Go needed |
 |---|---|---|
 | `report` (default) | none | no |
-| `apply` | rename commits in backend repos + UI MRs | yes — the user's explicit go, **or** the go the user gave `bpp-promote-dev-to-staging` for its run |
+| `apply` | one rename commit on `main` of `bpp-endpoint-migration-guides` + UI MRs | yes — the user's explicit go, **or** the go the user gave `bpp-promote-dev-to-staging` for its run |
 
 When the go comes from `bpp-promote-dev-to-staging`, `apply` acts only on the rows that skill printed in
 its step-4 preview (it passes them in); never re-derive verdicts or add rows. Just before each write,
-re-check that row: the guide is still open/unmarked at the same path on `origin/development` (step 1) and
+re-check that row: the guide is still open/unmarked at the same path on the guides repo's `origin/main` (step 1) and
 the step-4 dedupe still finds no open UI MR. If anything changed, skip the row and report it as
 `changed since preview`.
 
@@ -32,9 +33,10 @@ the step-4 dedupe still finds no open UI MR. If anything changed, skip the row a
 
 | Field | Value |
 |---|---|
-| Guide state read from | `origin/<branch>` of the backend repo, `<branch>` = `development` (never a working copy) |
+| Guides repo | `lipso/clients/brokernet/bpp-endpoint-migration-guides`, enc `lipso%2Fclients%2Fbrokernet%2Fbpp-endpoint-migration-guides`, local clone `~/Entwicklung/bpp/bpp-endpoint-migration-guides` |
+| Guide state read from | `origin/main` of the guides repo (never a working copy) |
 | UI state read from | `origin/development` of the UI repo (local checkouts sit on feature branches) |
-| Done-marker commit | ONE per backend repo, on `development`, commits API `move`, message `docs(migration-guides): mark applied guides done [X]` + one body line per guide with its UI evidence |
+| Done-marker commit | ONE per run, directly on `main` of the guides repo (protected; maintainers may push), commits API `move`, message `docs(migration-guides): mark applied guides done [X]` + one body line per guide with its UI evidence |
 | UI MR target | `development` of the UI repo |
 | UI MR reviewer / assignee | `reviewer_ids=[2027196]` (chaslauer) / `assignee_id` = `glab api user \| jq .id` |
 | UI MR title | `feat(<area>): apply <backend repo> migration guide #<n> — <topic>` (prefix `Draft: ` when checks fail) |
@@ -45,21 +47,22 @@ the step-4 dedupe still finds no open UI MR. If anything changed, skip the row a
 
 ### 1. List guides (deterministic)
 
-Refresh `bpp-project-index` if the manifest is older than 24 h, then:
+Refresh `bpp-project-index` if the manifest is older than 24 h (the UI checkouts come from it), then:
 
 ```bash
-bash ~/.claude/skills/bpp-migration-guide-audit/list-guides.sh            # fetches origin/development
-bash ~/.claude/skills/bpp-migration-guide-audit/list-guides.sh --no-fetch # report from cached refs
+bash ~/.claude/skills/bpp-migration-guide-audit/list-guides.sh            # fetches the guides repo's origin/main
+bash ~/.claude/skills/bpp-migration-guide-audit/list-guides.sh --no-fetch # report from the cached ref
 ```
 
-TSV `repo  status  path  stem`. `open` = `_[].md` or `_[ ].md` (both forms exist). `unmarked` = no
-marker at all — audit it like an open guide and say "unmarked" in the report. `unscanned` lines on
-stderr (no local checkout) go into the report too. The repo list is never hard-coded; the script scans
-every active backend/unlisted manifest row.
+TSV `repo  status  path  stem`. `repo` is the folder name (= the backend repo), `path` is the path inside
+the guides repo. `open` = `_[].md` or `_[ ].md` (both forms are accepted). `unmarked` = no marker at
+all — audit it like an open guide and say "unmarked" in the report. No clone → the script fails with the
+`git clone` command to run. Every folder is scanned; the repo list is never hard-coded.
 
 ### 2. Read each guide, decide the target UI(s)
 
-`git -C <repo> show "origin/development:<path>"`. FE sections have no single template — match headings
+`git -C ~/Entwicklung/bpp/bpp-endpoint-migration-guides show "origin/main:<path>"` (line 1 of a moved guide is
+`> Moved from <repo>:<path> @ <sha>`; skip it). FE sections have no single template — match headings
 and bullets case-insensitively on `fe|frontend|consumer|to-do|checklist|gui` (`## FE to-do`,
 `## Migration Steps (FE)`, `## Frontend Migration Checklist`, `## FE / consumer to-do`,
 `## Required FE action (Stella-App)`, `**Frontend action:**` bullets, …).
@@ -101,7 +104,7 @@ A guide with two target UIs is `applied` only when both are.
 Per `not-applied` (guide, UI), list open MRs in the UI repo
 (`glab api "/projects/<ui enc>/merge_requests?state=opened&per_page=100"`) and skip when any of these hit:
 
-- the description contains the guide's repo-relative path **or** its `__<n>_<date>` stem (numbers repeat: backend has two `__102`, vera two `__1`);
+- the description contains the guide's path in the guides repo, its old in-repo path, **or** its `__<n>_<date>` stem together with the backend repo name (numbers are unique per folder only; every folder has a `__1`);
 - the title matches `migration guide #<n>` **and** names the backend repo;
 - the guide itself links a UI MR (`<ui-repo>!NNNN`, `<ui-repo> !NNNN`) whose state is `opened`.
 
@@ -112,30 +115,32 @@ A hit becomes action `existing !iid`.
 ```
 repo | guide (stem_slug) | target UI | verdict | evidence (file:line / commit) | action
 bpp-backend | __112_2026-10-09_arag-… | cockpit | applied | model …dto.model.ts:18; util …:18; 50cb61636 | mark [X]
-bpp-vera-connector | __1_2026-06-10_vera-authz-… | stella-ui | not-applied | vera-customer-sync.service.ts:19 old route | UI MR
+bpp-vera-connector | __10_2026-06-10_vera-authz-… | stella-ui | not-applied | vera-customer-sync.service.ts:19 old route | UI MR
 bpp-auth | __8_2026-10-22_… | cockpit | in-flight | guide links cockpit !1268 (opened) | none
 ```
 
-Then the `unscanned` repos. In `report` mode stop here.
+Then any `list-guides.sh` stderr line other than the `# guides=` header (fetch failure). In `report` mode stop here.
 
-### 6. Apply — mark applied guides `[X]` (one commit per backend repo)
+### 6. Apply — mark applied guides `[X]` (one commit per run, guides repo `main`)
 
-Only `applied` / `no-ui-impact` guides. JSON on stdin — the filenames hold brackets and spaces, so never
-`-f` fields. A `move` without `content` keeps the content (GitLab commits API docs). Exception: bpp-file
-guides also carry `- [ ] Endpoint Migration Guide:` on line 1 — flip that one line to `- [X]` and pass
-the content with the move.
+Only `applied` / `no-ui-impact` guides, all folders in one commit. JSON on stdin — the filenames hold
+brackets and spaces, so never `-f` fields. A `move` without `content` keeps the content (GitLab commits
+API docs). Exception: `bpp-file/` guides also carry a `- [ ] Endpoint Migration Guide:` line (line 3 in
+moved guides, under the `> Moved from` line) — flip that one line to `- [X]` and pass the content with
+the move.
 
 ```bash
 ACTIONS='[]'
-for f in "${APPLIED[@]}"; do            # repo-relative paths from step 1
+ENC=lipso%2Fclients%2Fbrokernet%2Fbpp-endpoint-migration-guides
+for f in "${APPLIED[@]}"; do            # paths in the guides repo, from step 1
   new=$(printf %s "$f" | sed -E 's/_\[ ?\]\.md$/_[X].md/; t; s/\.md$/_[X].md/')   # open or unmarked
   ACTIONS=$(jq -c --arg o "$f" --arg n "$new" '. + [{action:"move", previous_path:$o, file_path:$n}]' <<<"$ACTIONS")
 done
-jq -n --arg m "$MSG" --argjson a "$ACTIONS" '{branch:"development", commit_message:$m, actions:$a}' \
+jq -n --arg m "$MSG" --argjson a "$ACTIONS" '{branch:"main", commit_message:$m, actions:$a}' \
   | glab api --method POST "/projects/$ENC/repository/commits" -H 'Content-Type: application/json' --input -
 ```
 
-`$MSG` = the fixed subject, blank line, one line per guide `<stem_slug>: <UI> — <best evidence>`.
+`$MSG` = the fixed subject, blank line, one line per guide `<repo>/<stem_slug>: <UI> — <best evidence>`.
 Verify afterwards with `list-guides.sh` (fetch) that those paths now read `done`.
 
 ### 7. Apply — one UI MR per not-applied (guide, UI)
@@ -166,24 +171,26 @@ glab api --method POST "/projects/$UI_ENC/merge_requests" \
   -f description="$DESC" -F "assignee_id=$ME" -F 'reviewer_ids=[2027196]'
 ```
 
-`$DESC` contains, in order: link to the guide
-(`https://gitlab.com/<backend path_with_namespace>/-/blob/development/<path, each segment @uri-encoded>`),
-the guide's FE to-do list, what was implemented, check results, and verbatim:
+`$DESC` contains, in order: the guide's folder link plus its filename
+(`https://gitlab.com/lipso/clients/brokernet/bpp-endpoint-migration-guides/-/tree/main/<repo>` — a blob
+link breaks when the marker flips), the guide's FE to-do list, what was implemented, check results, and
+verbatim:
 
-> When this MR is merged, mark the guide done in `<backend repo>`: rename `<current path>` -> `<new path>`
+> When this MR is merged, mark the guide done in `bpp-endpoint-migration-guides`: rename `<current path>` -> `<new path>`
 
-with both repo-relative paths spelled out, e.g. `BPP.VeraConnector.NET/BPP.VeraConnector.NET.App/endpoint-migration-guides/__1_2026-06-10_vera-authz-middleware-consolidation_[].md`
--> `BPP.VeraConnector.NET/BPP.VeraConnector.NET.App/endpoint-migration-guides/__1_2026-06-10_vera-authz-middleware-consolidation_[X].md` (keep the guide's real suffix, `_[]` or `_[ ]`). The next audit run also does this automatically once
+with both paths spelled out, e.g. `bpp-vera-connector/__10_2026-06-10_vera-authz-middleware-consolidation_[].md`
+-> `bpp-vera-connector/__10_2026-06-10_vera-authz-middleware-consolidation_[X].md` (keep the guide's real suffix, `_[]` or `_[ ]`). The next audit run also does this automatically once
 the MR is merged.
 
 ## Common mistakes
 
 - **Reading the local UI checkout** → it is on a feature branch; the verdict must come from `origin/development`.
-- **Dedupe on `#<n>`** → numbers repeat per repo and across repos; use the full path or `__<n>_<date>` stem plus repo.
+- **Dedupe on `#<n>`** → numbers are unique per folder only and repeat across folders; use the full path or `__<n>_<date>` stem plus repo.
+- **Reading a backend repo's old `endpoint-migration-guides/` folder** → the guides moved to `bpp-endpoint-migration-guides`; that repo's `origin/main` is the only source.
 - **Skipping `unmarked` guides** → no marker is still not done; report and audit it.
 - **"Applied" from a generated model alone** → regenerated clients prove the swagger changed, not that the feature uses it; need level 2.
 - **Acting on `unclear` or `in-flight`** → report only.
-- **One commit per guide** → one per backend repo, all its applied guides in one `actions[]`.
+- **One commit per guide or per folder** → one per run on the guides repo's `main`, all applied guides in one `actions[]`.
 - **`-f` fields for the rename** → brackets/spaces break; JSON on stdin.
 - **Committing cockpit i18n into bpp-backend from the UI subagent** → out of scope; list it (see `bpp-check-translation-keys`).
 

@@ -34,7 +34,7 @@ first (read-only refresh, ~7 s), then filter.
 
 The promotion candidate set is:
 
-> `state=active`, tags ∌ `generated-output,excluded-manual`, and
+> `state=active`, tags ∌ `generated-output,excluded-manual,guides-store`, and
 > `class ∈ {backend, frontend, docs}` **or** (`class=unlisted` and name matches `^bpp-|^brokernet-.*-ui$`)
 
 Background on the set (owned by the index, summarised here):
@@ -47,6 +47,8 @@ Background on the set (owned by the index, summarised here):
   fixing that CI first. `servo-ui` and `servo-hw-connector` stay in scope.
 - **`bpp-audit-reports`** (tag `generated-output`) — generated output of the `bpp-daily-audit` skill
   (reports, escalations, finding ledger). Single `main` branch, no product code, never promoted.
+- **`bpp-endpoint-migration-guides`** (tag `guides-store`) — the endpoint migration guides of all
+  backend repos. Single `main` branch, never promoted; the migration-guide audit (step 3b) reads it.
 - **`brokernet-document-cms`, `callidus-bvs-ui`, `servo-ui`** — the former "always-include extras". The
   first has no `-ui$` suffix so the name filter misses it; the other two live in **subgroups**
   (`callidus/`, `servo/`) and a group listing without `include_subgroups=true` returns neither
@@ -197,7 +199,7 @@ MANIFEST=~/.claude/bpp-fleet/manifest.tsv
 declare -A ENC
 while IFS=$'\t' read -r repo enc; do
   ENC[$repo]="$enc"
-done < <(awk -F'\t' '!/^#/ && $6=="active" && $5!~/generated-output|excluded-manual/ \
+done < <(awk -F'\t' '!/^#/ && $6=="active" && $5!~/generated-output|excluded-manual|guides-store/ \
   && ($4=="backend" || $4=="frontend" || $4=="docs" || ($4=="unlisted" && $1 ~ /^bpp-|^brokernet-.*-ui$/)) \
   {print $1 "\t" $3}' "$MANIFEST")
 
@@ -305,7 +307,7 @@ done
 
 Only when `[ "$SRC" = development ]`. Never for staging → main.
 
-Run `bpp-migration-guide-audit` in `report` mode against `origin/development`. Keep its rows (`repo | guide path | target UI | verdict | action`) as `AUDIT_ROWS`: they go into the step-4 preview, and the one "go" covers exactly those rows and nothing else. A backend repo with `mark [X]` rows but `NDIFFS = 0` is listed under "Will create MR for" as `(audit [X] renames only)`, because the rename commit gives it a diff. If the audit fails, put the error in the preview and carry on. It never blocks the promotion MRs.
+Run `bpp-migration-guide-audit` in `report` mode (guides from `bpp-endpoint-migration-guides` `origin/main`, UI state from `origin/development`). Keep its rows (`repo | guide path | target UI | verdict | action`) as `AUDIT_ROWS`: they go into the step-4 preview, and the one "go" covers exactly those rows and nothing else. The `[X]` renames land on `main` of `bpp-endpoint-migration-guides`, not in a backend repo, so they never create or change a promotion MR. If the audit fails, put the error in the preview and carry on. It never blocks the promotion MRs.
 
 ### 4. Preview — STOP and wait for "go"
 
@@ -316,7 +318,6 @@ Will create MR for:
   bpp-backend             (3 commits, 12 files)
   bpp-auth                (1 commit, 2 files)
   brokernet-hotel-ui      (2 commits, 5 files)  + patch-version bump 4.0.1 → 4.0.2
-  bpp-file                (audit [X] renames only)
   ...
 
 Skipping (no content diffs):
@@ -333,9 +334,9 @@ No stage branch (expected):
   ...
 
 Migration-guide audit (dev→staging only; UI MRs target development):
-  mark [X]   bpp-backend __112_2026-10-09_…   (cockpit applied)
-  UI MR      bpp-vera-connector __1_2026-06-10_… → bpp-stella-ui
-  report     bpp-auth __8_2026-10-22_…   (in-flight, cockpit !1268)
+  mark [X]   bpp-backend/__112_2026-10-09_…   (cockpit applied)
+  UI MR      bpp-vera-connector/__10_2026-06-10_… → bpp-stella-ui
+  report     bpp-auth/__8_2026-10-22_…   (in-flight, cockpit !1268)
 
 Reply "go" to create MRs.
 ```
@@ -343,8 +344,6 @@ Reply "go" to create MRs.
 ### 4b. Apply the migration-guide audit (development → staging only, after go, before step 5)
 
 Run `bpp-migration-guide-audit` in `apply` mode with the user's go from step 4, passing `AUDIT_ROWS`: it acts only on those previewed rows (re-checked per row, changed rows are skipped and reported). Its UI MRs target the UI's `development`: they are NOT promotion MRs, get no deployment label and no bump.
-
-Then, for every backend repo that got a rename commit, re-run the step-2 compare for that repo so `NDIFFS` and the compare payload used by step 5 include the renames (a repo that had no other diffs now gets its promotion MR). If it already has an open promotion MR (step 3), the commit rides in it.
 
 If the audit fails, report it in step 7 and continue. It never blocks the promotion MRs.
 
@@ -424,7 +423,7 @@ UPDATE ui_configs SET version_number = '0.1.0', updated_at = now(), updated_by_n
 UPDATE ui_configs SET version_number = '1.33.0', updated_at = now(), updated_by_name = 'release', updated_by_type = 'system' WHERE ui_type = 'stella' AND is_soft_deleted = false;
 ```
 
-For development → staging, add a **"Migration-guide audit"** section of its own: guides marked `[X]` (with the commit), UI MRs opened (URLs, Draft or not), existing MRs reused, `in-flight` / `unclear` rows, and any audit error. Keep it separate from the promotion MR list.
+For development → staging, add a **"Migration-guide audit"** section of its own: guides marked `[X]` (with the commit on `bpp-endpoint-migration-guides` `main`), UI MRs opened (URLs, Draft or not), existing MRs reused, `in-flight` / `unclear` rows, and any audit error. Keep it separate from the promotion MR list.
 
 Note: `detailed_merge_status` stays `checking` for a while after bulk creation and `has_conflicts:false` is NOT authoritative while checking — report mergeability as un-computed rather than clean.
 

@@ -95,6 +95,7 @@ and `#extra <name> <path>` for *additional* checkouts of a repo that already has
 | Tag | Repo | Why |
 |---|---|---|
 | `generated-output` | `bpp-audit-reports` | generated output of `bpp-daily-audit` (reports, escalations, ledger). Single `main` branch, no product code — never promoted, and auditing it is a self-audit loop. |
+| `guides-store` | `bpp-endpoint-migration-guides` | endpoint migration guides of all backend repos, one folder per repo. Single `main` branch, no product code — never promoted, never audited; `bpp-migration-guide-audit` reads it directly. |
 | `scaffold` | `bpp-shared-template` | template projects, no product code. Excluded by the audit; the promotion sweep keeps it and reports "no staging branch". |
 | `shared-source` | `bpp-shared` | the source of `BPP.Shared.NET`, not a consumer of it. |
 | `excluded-manual` | `servo-backend` | excluded from every automated sweep by user decision 2026-09-18. Its `development`→`staging` diff is 2024 legacy (dev idle since 2024-12-11, staging since 2024-05-24) and its build job fails on a pre-existing CI defect — `invalid tag "…/servo-backend/:4.0.0": invalid reference format`, an unset image-name variable. Re-including it means fixing the repo's CI first. `servo-ui` and `servo-hw-connector` are NOT excluded. |
@@ -106,14 +107,14 @@ and flattening them into one boolean would silently change three skills' behavio
 
 | Skill | Filter | Set size |
 |---|---|---|
-| `bpp-promote-dev-to-staging` | `state=active`, tags ∌ `generated-output,excluded-manual`, and `class ∈ {backend,frontend,docs}` **or** (`class=unlisted` and name matches `^bpp-|^brokernet-.*-ui$`) | 37 (measured 2026-09-18) |
+| `bpp-promote-dev-to-staging` | `state=active`, tags ∌ `generated-output,excluded-manual,guides-store`, and `class ∈ {backend,frontend,docs}` **or** (`class=unlisted` and name matches `^bpp-|^brokernet-.*-ui$`) | 37 (measured 2026-09-18) |
 | `bpp-daily-audit` | same, plus tags ∌ `scaffold` | 37 — same as promote, not a typo: the only `scaffold` repo (`bpp-shared-template`) is `class=infra` and is already dropped by the class filter |
 | `bpp-bump-shared-version` | `state=active`, name matches `^bpp-`, tags ∌ `shared-source` | 24 |
 
 ```bash
 MANIFEST=~/.claude/bpp-fleet/manifest.tsv
 # promote / audit candidate set → name TAB enc
-awk -F'\t' '!/^#/ && $6=="active" && $5!~/generated-output|excluded-manual/ \
+awk -F'\t' '!/^#/ && $6=="active" && $5!~/generated-output|excluded-manual|guides-store/ \
   && ($4=="backend" || $4=="frontend" || $4=="docs" || ($4=="unlisted" && $1 ~ /^bpp-|^brokernet-.*-ui$/)) \
   {print $1 "\t" $3}' "$MANIFEST"
 ```
@@ -178,6 +179,7 @@ policy_tags() {
   case "$1" in
     servo-backend)              echo excluded-manual ;;
     bpp-audit-reports)          echo generated-output ;;
+    bpp-endpoint-migration-guides) echo guides-store ;;
     bpp-shared-template)        echo scaffold ;;
     bpp-shared)                 echo shared-source ;;
     *)                          echo - ;;
