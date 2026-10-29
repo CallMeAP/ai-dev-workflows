@@ -1,13 +1,13 @@
 ---
 name: bpp-cleanup-merged-worktrees
-description: Use when cleaning up finished git worktrees under ~/Entwicklung/bpp whose branches are already merged — phrases like "clean up merged worktrees", "remove stale worktrees", "prune finished .wt-* folders", "delete merged worktree branches", "worktree cleanup". Discovers stray `.wt-*` dirs plus every repo's linked worktrees, classifies each as REMOVE (ancestor of origin/development + clean) / LANDED (squash- or post-merge, patch-identity proven automatically) / REMOVE-AFTER-SCAFFOLD (merged, dirt is only local scaffolding — removed on user go) / KEEP (real dirt, unmerged, unproven, at-tip, detached, or git error), prints a read-only plan first (no fetch unless `--fetch`), then removes only the worktree paths the user approved — `apply <path>…` for REMOVE/LANDED, `apply-scaffold <path>…` for scaffold rows, each re-verified — with `git worktree remove` + `git branch -d` — never `--force`; `-D` only as the fallback for a proven LANDED row.
+description: Use when cleaning up finished git worktrees under ~/Entwicklung/bpp and ~/Entwicklung/brokernet whose branches are already merged — phrases like "clean up merged worktrees", "remove stale worktrees", "prune finished .wt-* folders", "delete merged worktree branches", "worktree cleanup". Discovers stray `.wt-*` dirs plus every repo's linked worktrees, classifies each as REMOVE (ancestor of origin/development + clean) / LANDED (squash- or post-merge, patch-identity proven automatically) / REMOVE-AFTER-SCAFFOLD (merged, dirt is only local scaffolding — removed on user go) / KEEP (real dirt, unmerged, unproven, at-tip, detached, or git error), prints a read-only plan first (no fetch unless `--fetch`), then removes only the worktree paths the user approved — `apply <path>…` for REMOVE/LANDED, `apply-scaffold <path>…` for scaffold rows, each re-verified — with `git worktree remove` + `git branch -d` — never `--force`; `-D` only as the fallback for a proven LANDED row.
 ---
 
 # bpp-cleanup-merged-worktrees
 
 ## Overview
 
-Safely reclaim disk + mental space by removing git worktree folders under `~/Entwicklung/bpp`
+Safely reclaim disk + mental space by removing git worktree folders under `~/Entwicklung/bpp` and `~/Entwicklung/brokernet` (both by default; `BASE=<root>` limits a run to one)
 whose branch content is **already in** `origin/development` **and** whose tree is spotless. Everything
 else is kept and reported. The skill is destructive-by-invocation but conservative-by-construction:
 it always prints a **read-only plan first**, removes only the worktree paths the user approved and only
@@ -120,4 +120,4 @@ The script ships as `cleanup.sh` beside this file. It is not inlined: Claude Cod
 - A dirty file classifies as REAL-CHANGE, cherry shows `+`, the proof says NOT proven, the HEAD is detached, or any git command errored → KEEP. If you find yourself rationalizing removal anyway, stop.
 - You are about to print the contents of an `appsettings*.local.json`, `*DebugTestConsts.cs` or other secrets file. Names only.
 - `git worktree remove` refused (locked / in use) → leave it; do not escalate to `--force`.
-- The candidate resolves to a main checkout (a repo root under `~/Entwicklung/bpp`) or a path outside `~/Entwicklung/bpp` → it must never be a removal target.
+- The candidate resolves to a main checkout (a repo root under either root) or a path outside both roots → it must never be a removal target.

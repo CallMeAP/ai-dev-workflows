@@ -1,7 +1,21 @@
 #!/usr/bin/env bash
 # bpp-cleanup-merged-worktrees — MODE: plan [--fetch] (default) | apply <worktree>... | apply-scaffold <worktree>...
 set -uo pipefail
-BASE=/home/alex/Entwicklung/bpp
+ROOTS=(/home/alex/Entwicklung/bpp /home/alex/Entwicklung/brokernet)
+if [ -z "${BASE:-}" ]; then   # no BASE given → run once per root; apply paths are routed to the root they live under
+  mode="${1:-plan}"
+  case "$mode" in
+    apply|apply-scaffold)
+      shift; rc=0
+      [ $# -eq 0 ] && { BASE="${ROOTS[0]}" bash "$0" "$mode"; exit $?; }
+      for p in "$@"; do inroot=0; for b in "${ROOTS[@]}"; do case "$p" in "$b"/*) inroot=1;; esac; done
+        [ $inroot = 0 ] && echo "SKIP $p  (outside ${ROOTS[*]})"; done
+      for b in "${ROOTS[@]}"; do sel=(); for p in "$@"; do case "$p" in "$b"/*) sel+=("$p");; esac; done
+        [ ${#sel[@]} -gt 0 ] && { BASE="$b" bash "$0" "$mode" "${sel[@]}" || rc=$?; }; done
+      exit $rc ;;
+    *) for b in "${ROOTS[@]}"; do echo "### ROOT $b  (… in the paths below = $b)"; BASE="$b" bash "$0" "$@"; echo; done; exit 0 ;;
+  esac
+fi
 IDLE_DAYS="${IDLE_DAYS:-7}"   # a .claude/worktrees candidate must be untouched this long before it is even classified
 SECRET_RE='(^|/)(appsettings[^/]*\.local\.json|[^/]*DebugTestConsts\.cs|\.env[^/]*|[^/]*\.(pfx|p12|pem|key))$'
 WIRING_RE='ProjectReference|BPP\.Shared|BppShared|Exists\(|Condition=|ItemGroup|PropertyGroup|</?Project|<!--|-->|^[[:space:]]*$'
