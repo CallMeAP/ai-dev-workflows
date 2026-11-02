@@ -78,6 +78,12 @@ ver_date() { local v=${1%%+*}; echo "${v%%-*}"; }
 echo "Latest bpp-shared: $LATEST (commit $SHA, date $(ver_date "$LATEST"))"
 ```
 
+**Version scheme since 2026-11-02: `<yyyy.MM.dd>.<pipeline-iid>+<sha>`** (4 numeric parts). NuGet ignores the
+`+<sha>` build metadata, so the old `<date>+<sha>` made two publishes on the same day the same version, and CI
+restored the older one (2026.11.2+5001c85c resolved to 2026.11.2+44b51d1a). The downgrade guard therefore sorts on
+all four parts (`-k4,4n`). If a red consumer pipeline reports a missing shared type right after a bump, check
+first whether the registry holds two packages that differ only after `+`.
+
 **Do not filter on `-development` (or any other suffix).** Current packages carry no suffix
 (`2026.9.28+b09c735b`). A suffix filter does not fail on that — it silently returns an older package
 and the whole fleet gets bumped to a stale version while the run reports success. The only safe
@@ -184,7 +190,7 @@ for repo in "${LOCAL_REPOS[@]}"; do
   local_date=$(ver_date "$current")
   latest_date=$(ver_date "$LATEST")
   newer=$(printf '%s\n%s\n' "$local_date" "$latest_date" \
-    | sort -t. -k1,1n -k2,2n -k3,3n | tail -1)
+    | sort -t. -k1,1n -k2,2n -k3,3n -k4,4n | tail -1)
   if [ "$newer" = "$local_date" ] && [ "$local_date" != "$latest_date" ]; then
     SKIPPED+=("$repo: newer-local ($current)"); continue
   fi
@@ -231,7 +237,7 @@ for repo in "${REMOTE_ONLY[@]}" "${API_LOCAL[@]}"; do
   remote_date=$(ver_date "$current")
   latest_date=$(ver_date "$LATEST")
   newer=$(printf '%s\n%s\n' "$remote_date" "$latest_date" \
-    | sort -t. -k1,1n -k2,2n -k3,3n | tail -1)
+    | sort -t. -k1,1n -k2,2n -k3,3n -k4,4n | tail -1)
   if [ "$newer" = "$remote_date" ] && [ "$remote_date" != "$latest_date" ]; then
     SKIPPED+=("$repo: newer-remote ($current)"); continue
   fi
