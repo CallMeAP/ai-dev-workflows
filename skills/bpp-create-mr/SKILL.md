@@ -40,6 +40,33 @@ REPO=$(git remote get-url origin | sed -E 's#.*/brokernet/##; s#\.git$##')   # e
 PROJ="lipso/clients/brokernet/${REPO}"
 ```
 
+## MR trains that depend on an unmerged bpp-shared MR
+
+Use this when one change needs a bpp-shared MR **and** one or more consumer MRs (backend, stella, vera, connectors, …). Typical cases: a new entity, enum, migration, util or exception type in shared that consumers use straight away.
+
+**Start the consumer MRs immediately. Do not wait for the shared MR to merge.** Build them locally against the shared *worktree*. Their CI stays red until shared is merged and published and `BppSharedVersion` is bumped. That is expected and fine (user decision 2026-11-02).
+
+1. **Shared first, in its own worktree.**
+   - Run `git -C bpp-shared worktree add -b <branch> ../bpp-shared.worktrees/<slug> origin/development`.
+   - Commit there, push, and open the shared MR.
+   - Never switch the main `bpp-shared` checkout to the feature branch. Other sessions and repos build against it.
+2. **Each consumer gets its own worktree, on the same branch name.** Point its build at the shared worktree with a **local-only** edit of the consumer's `Directory.Build.props`. In the `<!-- apittrich -->` ItemGroup, change both the `Exists(...)` condition and the `ProjectReference Include` from `/home/alex/Entwicklung/bpp/bpp-shared/…` to `/home/alex/Entwicklung/bpp/bpp-shared.worktrees/<slug>/BPP.Shared.NET/BPP.Shared.NET/BPP.Shared.NET.csproj`.
+   - Leave `BppSharedVersion` alone.
+   - **Never stage or commit this edit.** Commit with explicit paths only and check `git diff --cached --name-only` before every commit.
+   - `bpp-cleanup-merged-worktrees` classifies this edit as LOCAL-SCAFFOLDING.
+3. **Verify locally.** Build, run the unit tests (step 7) and, where the repo has them, the e2e tests. Everything runs against the shared worktree. Consumer MRs can be pushed and opened in parallel with the shared MR.
+4. **MR descriptions:**
+   - Every consumer MR links the shared MR and states: "CI is red until bpp-shared !N is merged and published and `BppSharedVersion` is bumped; validated locally against the shared branch."
+   - The shared MR lists all consumer MRs.
+   - Give the user one group list URL, e.g. `source_branches[]=<branch>`.
+5. **Watchers while shared is unpublished.** The consumer's Qodana report is contaminated, because the shared types it uses are missing from the restored package. Classify the findings and comment, but fix nothing based on that report (see step 9a). The Duo watcher runs as normal.
+6. **Changes requested on the shared MR mid-train.** Commit them in the shared worktree. Consumers pick them up on the next local build because of the ProjectReference. Re-run each affected consumer's build and tests before replying.
+7. **After the shared merge.**
+   - Run `bpp-bump-shared-version`, which commits the bump on each consumer branch.
+   - Revert the local `Directory.Build.props` edit with `git checkout -- <path>`, the only reset allowed for this file because it was never committed.
+   - Re-run the pipelines. CI must turn green before the consumer MRs merge.
+8. **Migrations in the shared MR.** If `development` gained migrations meanwhile, merge `origin/development` into the shared branch and re-scaffold the migration per bpp-shared's CLAUDE.md snapshot rules. Then rebuild every consumer.
+
 ## Workflow
 
 ### 1. Preflight
