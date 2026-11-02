@@ -54,6 +54,7 @@ Use this when one change needs a bpp-shared MR **and** one or more consumer MRs 
    - Leave `BppSharedVersion` alone.
    - **Never stage or commit this edit.** Commit with explicit paths only and check `git diff --cached --name-only` before every commit.
    - `bpp-cleanup-merged-worktrees` classifies this edit as LOCAL-SCAFFOLDING.
+   - **In a MAIN checkout** (e.g. the vera prod e2e, which must run from main), also disable the `<!-- klaffi -->` ItemGroup's `Exists(...)`. Its relative `../../../bpp-shared/…` ref resolves to the main bpp-shared there, so the build pulls in both shared projects and fails with CS0234. In a worktree that relative path resolves to nothing, so it is harmless.
 3. **Verify locally.** Build, run the unit tests (step 7) and, where the repo has them, the e2e tests. Everything runs against the shared worktree. Consumer MRs can be pushed and opened in parallel with the shared MR.
 4. **MR descriptions:**
    - Every consumer MR links the shared MR and states: "CI is red until bpp-shared !N is merged and published and `BppSharedVersion` is bumped; validated locally against the shared branch."
