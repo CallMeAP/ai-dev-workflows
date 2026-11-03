@@ -171,9 +171,11 @@ for d in "$HOME"/Entwicklung/bpp/*/ "$HOME"/Entwicklung/brokernet/*/; do
 done
 LC_ALL=C sort -o "$WORK/local.tsv" "$WORK/local.tsv"
 
-# 4. Union, keyed on path_with_namespace
+# 4. Union, keyed on path_with_namespace — minus EOL repos (archived for good, never listed again,
+#    even if a stray checkout or a repos.md row resurfaces). Add a repo here only on the user's word.
+EOL='lipso/clients/brokernet/bpp-message-dispatcher'   # EOL + archived, local checkout removed 2026-11-03
 { cut -f2 "$WORK/gitlab.tsv"; cut -f2 "$WORK/reposmd.tsv"; cut -f1 "$WORK/local.tsv"; } \
-  | LC_ALL=C sort -u > "$WORK/union.txt"
+  | LC_ALL=C sort -u | grep -vxF "$EOL" > "$WORK/union.txt"
 
 policy_tags() {
   case "$1" in
@@ -416,6 +418,7 @@ refreshed first or the run reports that it was not.
   run; keep the last good manifest.
 - About to touch `~/Entwicklung/lipso/agentic-coding-knowledge` with a git command → STOP. Read via
   `glab api`, write via the commits API.
-- About to delete a local checkout because the repo is archived or `gone` → STOP. Report only.
+- About to delete a local checkout because the repo is archived or `gone` → STOP. Report only. Only the
+  user's explicit word removes one — then also add it to the `EOL` list in step 4.
 - About to edit the hand-written tables in `project_index.md` → STOP. Only the `AUTO:GITLAB-ONLY` block
   belongs to this skill.
