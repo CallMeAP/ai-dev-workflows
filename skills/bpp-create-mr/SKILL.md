@@ -192,7 +192,8 @@ else
 fi
 
 # Set assignee + reviewer explicitly afterwards — on the freshly created MR AND the reused one.
-glab mr update "$IID" -R "$PROJ" --assignee "$ME" --reviewer "$REVIEWER"
+# "+" adds: a bare --reviewer replaces the list and drops the auto-requested GitLabDuo.
+glab mr update "$IID" -R "$PROJ" --assignee "$ME" --reviewer "+$REVIEWER"
 
 # Group label work-ap: lists all misc MRs in one place (not on bpp-agent MRs, not on promotions).
 LABELS=$(glab api "/projects/$(printf %s "$PROJ" | sed 's#/#%2F#g')/merge_requests/$IID" | jq -r '.labels|join(",")')
@@ -393,7 +394,7 @@ glab api "projects/$ENC/merge_requests/$IID/discussions?per_page=100" --paginate
      resolvable:.notes[0].resolvable, path:.notes[0].position.new_path, line:.notes[0].position.new_line, body:.notes[0].body}"
 ```
 - `kind=inline` → a DiffNote with a position: resolvable, one finding.
-- `kind=summary` → no position, not resolvable (wording varies, see 10b). Its bullets can hold extra findings. "found nothing to comment on" = clean review.
+- `kind=summary` → no position, not resolvable (wording varies, see 10b). Its bullets can hold extra findings. "found nothing to comment on" = clean review. **Never reply on it:** a reply turns it into a resolvable, unresolved thread that blocks the merge (verified on mail !73 and shared !259).
 - Duo sometimes says its diff was truncated, so re-verify each finding against the current code before acting.
 
 **10d — Handle each finding**, first matching row wins:
@@ -403,7 +404,7 @@ glab api "projects/$ENC/merge_requests/$IID/discussions?per_page=100" --paginate
 | Code issue in this MR's own code (bug, missing check, dead code/loop, small refactor, stale doc/XML doc) | fix it, reply with what changed + commit sha | **yes** |
 | Design, rollout or product question (e.g. "prod rollout risk", "should X be behind a toggle") | no code change; ask the user (AskUserQuestion, concrete options, recommended first). Then fix and resolve, or reply with the user's decision and leave it open | only if fixed |
 | Wrong or not applicable | reply with the reason and `file:line` evidence | **no** — the author resolves |
-| Point only in the summary note | handle it by the rows above; reply in the summary discussion (not resolvable) | – |
+| Point only in the summary note | handle it by the rows above; answer in a new top-level MR note, never as a reply in the summary discussion | – |
 
 ```bash
 glab api --method POST "projects/$ENC/merge_requests/$IID/discussions/$DID/notes" --raw-field "body=$REPLY"
@@ -438,7 +439,7 @@ Fixes follow 9d's loop: edit only the flagged site, build, unit tests, `git add 
 | Create MR | `glab api --method POST "/projects/<enc>/merge_requests" -f source_branch=… -f target_branch=development -f title=…` |
 | Label | `add_labels=work-ap` on every MR except `bpp-agent` ones |
 | Guide (DTO/API change) | `bpp-endpoint-migration-guides`, folder `<repo>/`, direct push to `main`, no MR (step 6b) |
-| Set assignee+reviewer (always follow up) | `glab mr update <iid> -R lipso/clients/brokernet/<repo> --assignee <me> --reviewer <apittrich\|chaslauer>` |
+| Set assignee+reviewer (always follow up) | `glab mr update <iid> -R lipso/clients/brokernet/<repo> --assignee <me> --reviewer +<apittrich\|chaslauer>` (`+` keeps GitLabDuo) |
 | Unit tests | `dotnet test <sln> --filter "Category!=LocalIntegration&Category!=Integration"` |
 | Ping | `PushNotification(status="proactive", message="…")` |
 | MR pipelines (qodana lives only here) | `glab api "projects/<enc>/merge_requests/<iid>/pipelines"` → pick `sha == HEAD` |
