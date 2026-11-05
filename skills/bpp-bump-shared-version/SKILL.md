@@ -45,6 +45,7 @@ A repo is **skipped + reported** (never auto-fixed) when:
 5. **Downgrade guard**: current version is *newer* than `LATEST` (semver-style compare on the bare `YYYY.M.D` portion — build metadata and any pre-release suffix stripped, see `ver_date` in step 1). Reported as `skipped (newer-local)` / `skipped (newer-remote)`.
 6. **A clean local clone on `development` always takes the local flow**, never the API. The API commit is used for a local clone only when its tree is dirty on unrelated files, or for a targeted bump the user asked for by name; the checkout is left untouched and ends up 1 commit behind `origin/development` (a later `git pull --ff-only` catches it up, because the props file itself is clean).
 7. Discovery could not inspect a repo (tree/props fetch failed, e.g. missing `development` branch) → reported under **Unverified** — these are potential missed consumers; the run continues but the summary must call them out.
+8. bpp-agent on `development` is skipped + reported while `/home/alex/Entwicklung/bpp/handovers/2026-11-04-bpp-agent-combined-train/BUMP-HOLD-bpp-agent` exists. This is a hold, not a failure: bpp-shared !259 deletes the bus contracts agent `development` still uses, and the bump reaches the agent on its train branch (!116). Remove the file when !116 is merged. This applies to the local flow, the API flow and a targeted bump of bpp-agent `development` alike.
 
 Skipped repos do NOT abort the run. Continue to the next repo.
 
@@ -135,7 +136,11 @@ Non-consumers (no props / no `<BppSharedVersion>`) are expected: Java services (
 
 ```bash
 declare -a LOCAL_REPOS REMOTE_ONLY API_LOCAL
+BUMP_HOLD=/home/alex/Entwicklung/bpp/handovers/2026-11-04-bpp-agent-combined-train/BUMP-HOLD-bpp-agent   # skip rule 8
 for repo in "${CONSUMERS[@]}"; do
+  if [ "$repo" = "bpp-agent" ] && [ -e "$BUMP_HOLD" ]; then
+    SKIPPED+=("bpp-agent: bump-hold ($BUMP_HOLD)"); continue
+  fi
   if [ "${LOCALPATH[$repo]}" != "-" ] && [ -e "${LOCALPATH[$repo]}/.git" ]; then
     LOCAL_REPOS+=("$repo")
   else
