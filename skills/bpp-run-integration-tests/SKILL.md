@@ -26,7 +26,7 @@ Both `bpp-backend` and `bpp-vera-connector` follow the same pattern:
 - Base class marked `[Category("Integration")]` → all subclasses inherit
 - `[SetUpFixture] GlobalTestSetup` performs health-probe + JWT login + DB guard
 - `bpp-backend` e2e suites are stage-aware — same `[Category("Integration")]`, env-driven via `ASPNETCORE_ENVIRONMENT` (`local-integration` locally, `{branch}-integration` in CI)
-- `[Explicit]` tests (e.g. JsReport) are intentionally opt-in — leave alone
+- `[Explicit]` is opt-in, but **a category filter counts as opting in**. An `[Explicit]` fixture that also carries `Integration`/`LocalIntegration` RUNS under the Step 4 filter (verified 2026-11-09). An `[Explicit]` fixture with no category (e.g. the ARAG live probes) stays out.
 
 Other BPP .NET repos likely follow the same pattern. Run discovery to confirm.
 
@@ -118,7 +118,13 @@ dotnet test <project>.csproj --filter "Category=Integration|Category=LocalIntegr
 
 Capture: pass/fail counts, names of failed tests, full stack traces.
 
-`[Explicit]` tests stay skipped — that's intentional. Don't add `--filter Explicit` or similar.
+`[Explicit]` fixtures **with** an integration category run under this filter. As of 2026-11-09 there are two, so expect them in the results:
+- bpp-backend `JsReportIntegrationTestBase`, which renders real PDFs against jsreport.dev and needs the `SeedSql/04` template links in the local DB.
+- bpp-shared `BppContextWishesAndNeedsAnalysisDeleteTests`, which runs raw SQL against local PG.
+
+Classify a red one there as opt-in/env first, not as a regression. Re-check the list with:
+`grep -rlE '^\s*\[Explicit' --include=*.cs | xargs grep -lE 'Category\(("(Local)?Integration"|E2eTestCategories\.(Local)?Integration\))'`. A bare `E2eTestCategories\.` would also match the `AragLive`/`AragLiveBinding` fixtures, which the Step 4 filter never selects.
+Explicit fixtures **without** a category never run. Don't add `--filter Explicit` or similar to force them.
 
 **When a repo has many e2e suites, run one project at a time and space them ≥60s apart — never run them all at once.** Each module's `[SetUpFixture] GlobalTestSetup` logs in several personas at boot; running suites concurrently (`dotnet test <sln> --filter Category=Integration`) or back-to-back bursts those logins past **bpp-auth's** rate limit. bpp-auth login has **no retry**, so a whole suite dies in `OneTimeSetUp` with `bpp-auth login fehlgeschlagen (429)` and reports e.g. `Failed: 345, Passed: 0` in ~4s — looks like a mass regression but is pure throttling. Drive it with a spaced loop, e.g.:
 
@@ -181,6 +187,7 @@ Leave any test edits unstaged for the user to review.
 - **Running the suite against a stale schema** → every suite goes red for the wrong reason and looks like a mass regression. Run the migration pre-check first.
 - **Auto-fixing tests to make them green** when production regressed → masks the real bug. Always classify the failure first.
 - **Forcing `[Explicit]` tests to run** — they are opt-in for a reason.
+- **Believing `[Explicit]` keeps a test out of a category run.** It doesn't, if the fixture has the category: see Step 4. Read the fixture's attributes before calling its red a regression.
 - **Looping indefinitely** — respect the 3-run cap.
 - **Committing fixes silently** — never. Leave changes for user review.
 - **Grepping only the literal `Category("Integration")`, or only ONE constant class** → misses suites tagged via a constant. There are two: `E2eTestCategories` (the majority, 959 uses — all 8 bpp-backend module suites plus nine connector/service repos) and `IntegrationTestCategories` (219). Matching only the latter classified nine repos and all of bpp-backend as unit-only in a 2026-09-18 sweep. Always match both names.
