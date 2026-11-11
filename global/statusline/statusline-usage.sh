@@ -33,4 +33,16 @@ if [ -n "$tp" ] && [ -d "${tp%.jsonl}/subagents" ]; then
   done < <(find "${tp%.jsonl}/subagents" -name 'agent-*.jsonl' -mmin -2 2>/dev/null)
 fi
 agents=""; [ $((sub+wfa)) -gt 0 ] && agents=" - agents $sub + wf $wfa"
-printf '%s%s - 5h %s - 7d %s%s' "${model:-?}" "${effort:+ ($effort)}" "$(pct five_hour)" "$(pct seven_day)" "$agents"
+# Model icon + colour (by model id) and a 5-step effort bar (low..max).
+mid=$(jq -r '.model.id // empty' <<<"$input" 2>/dev/null)
+case "$mid" in
+  *fable*)  icon='✦'; col='38;5;75'  ;;  # blue
+  *opus*)   icon='✳'; col='38;5;141' ;;  # purple
+  *sonnet*) icon='✻'; col='38;5;209' ;;  # orange
+  *haiku*)  icon='✿'; col='38;5;114' ;;  # green
+  *)        icon='◇'; col='38;5;250' ;;  # other / unknown
+esac
+case "$effort" in low) n=1 ;; medium) n=2 ;; high) n=3 ;; xhigh) n=4 ;; max) n=5 ;; *) n=0 ;; esac
+bar=""; steps=(▂ ▃ ▅ ▆ █)
+if [ "$n" -gt 0 ]; then for i in 0 1 2 3 4; do if [ $i -lt $n ]; then bar+="${steps[$i]}"; else bar+='░'; fi; done; bar=" $bar"; fi
+printf '\033[%sm%s %s\033[0m%s%s - 5h %s - 7d %s%s' "$col" "$icon" "${model:-?}" "$bar" "${effort:+ ($effort)}" "$(pct five_hour)" "$(pct seven_day)" "$agents"

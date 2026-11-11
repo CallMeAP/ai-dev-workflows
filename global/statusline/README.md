@@ -3,12 +3,13 @@
 `statusline-usage.sh` is a Claude Code status line command. It prints one line, for example:
 
 ```
-Opus 5.5 (medium) - 5h unlimited - 7d 30% - agents 1 + wf 2
+✳ Opus 5.5 ▂▃░░░ (medium) - 5h unlimited - 7d 30% - agents 1 + wf 2
 ```
 
 | Part | Source (the status line stdin JSON) |
 |---|---|
-| `Opus 5.5` | `model.display_name` |
+| `✳ Opus 5.5` | icon + colour by `model.id`: Fable ✦ blue, Opus ✳ purple, Sonnet ✻ orange, Haiku ✿ green, other ◇ grey (ANSI 256 colours); name from `model.display_name` |
+| `▂▃░░░` | effort bar, 1-5 steps for low, medium, high, xhigh, max |
 | `(medium)` | `effort.level` of the current session; left out when absent |
 | `5h …` / `7d …` | `rate_limits.five_hour` / `seven_day` `.used_percentage`; `unlimited` when `rate_limits` is present but the window is missing (the 5h window was dropped 2026-11); `?%` before the first API response |
 | `agents N + wf M` | counted from the session's transcript folder (`transcript_path` without `.jsonl` + `/subagents`): background subagents whose `.meta.json` lacks `"finished":true`, and workflow agents with a `started` but no `result` line in their workflow's `journal.jsonl`. Only agent transcripts written in the last 2 min count, so a stopped agent still counts for up to 2 min and an agent silent for 2 min (a long test run) is not counted. Left out when both are 0. |
@@ -44,5 +45,5 @@ mkdir -p ~/.claude/state
 ```bash
 echo '{"model":{"display_name":"Opus 5.5"},"effort":{"level":"medium"},"rate_limits":{"seven_day":{"used_percentage":30}}}' \
   | ~/.claude/statusline-usage.sh; echo
-# expected: Opus 5.5 (medium) - 5h unlimited - 7d 30%
+# expected (plus colour codes): ◇ Opus 5.5 ▂▃░░░ (medium) - 5h unlimited - 7d 30%  (◇ because the example has no model.id)
 ```
