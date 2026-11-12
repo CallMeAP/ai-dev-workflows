@@ -269,14 +269,14 @@ PF=$(mktemp)
 git diff --name-only origin/development...HEAD | grep -E 'CypressSql/|GuiE2eTest'
 if [ -s "$PF" ]; then
   cat "$PF"                                                      # the patterns searched — goes into the report
-  git -C "$C" grep -n -F -f "$PF" origin/development -- cypress Config; echo "git grep exit $?"
+  git -C "$C" grep -n -F -f "$PF" origin/development -- cypress config; echo "git grep exit $?"
 else
   echo "no patterns extracted"                                   # git grep -f <empty> exits 1 like "no hit"
 fi
 ```
 
 `git grep` exit 0 = hits, 1 = no hit, 128 = error (fix the command, rerun; an error is not "no impact").
-`bpp-cypress` keeps everything under `cypress/` and `Config/`; its seed data lives in bpp-backend, so a
+`bpp-cypress` keeps everything under `cypress/` and `config/`; its seed data lives in bpp-backend, so a
 changed `CypressSql/` or `GuiE2eTest` file counts as a hit on the specs using that login or data.
 
 A hit is a lead, not proof: open the spec and confirm it uses THIS route / field / selector / login.
