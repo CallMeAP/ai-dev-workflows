@@ -1,6 +1,6 @@
 ---
 name: bpp-cleanup-merged-worktrees
-description: Use when cleaning up finished git worktrees under ~/Entwicklung/bpp and ~/Entwicklung/brokernet whose branches are already merged — phrases like "clean up merged worktrees", "remove stale worktrees", "prune finished .wt-* folders", "delete merged worktree branches", "worktree cleanup". Discovers stray `.wt-*` dirs plus every repo's linked worktrees, classifies each as REMOVE (ancestor of origin/development + clean) / LANDED (squash- or post-merge, patch-identity proven automatically) / REMOVE-AFTER-SCAFFOLD (merged, dirt is only local scaffolding — removed on user go) / KEEP (real dirt, unmerged, unproven, at-tip, detached, or git error), prints a read-only plan first (no fetch unless `--fetch`), then removes only the worktree paths the user approved — `apply <path>…` for REMOVE/LANDED, `apply-scaffold <path>…` for scaffold rows, each re-verified — with `git worktree remove` + `git branch -d` — never `--force`; `-D` only as the fallback for a proven LANDED row.
+description: Use when cleaning up finished git worktrees under ~/Entwicklung/bpp and ~/Entwicklung/brokernet whose branches are already merged — phrases like "clean up merged worktrees", "remove stale worktrees", "prune finished .wt-* folders", "delete merged worktree branches", "worktree cleanup". Discovers stray `.wt-*` dirs plus every repo's linked worktrees, classifies each as REMOVE (ancestor of origin/development + clean) / LANDED (squash- or post-merge, patch-identity proven automatically) / REMOVE-AFTER-SCAFFOLD (merged, dirt is only local scaffolding — removed on user go) / KEEP (real dirt, unmerged, unproven, at-tip, detached, or git error), prints a read-only plan first (no fetch unless `--fetch`), then removes only the worktree paths the user approved — `apply <path>…` for REMOVE/LANDED, `apply-scaffold <path>…` for scaffold rows, each re-verified — with `git worktree remove` + `git branch -d` — never `--force`; `-D` only as the fallback for a proven LANDED row. Also a disk-reclaim STALE mode (`stale.sh`) for "free disk", "too many worktrees", "remove idle/stale worktrees even if unmerged": removes clean worktrees whose HEAD is on a remote and that are idle for N days, keeping their branches; bpp-agent and bpp-document-analysis excluded.
 ---
 
 # bpp-cleanup-merged-worktrees
@@ -38,6 +38,7 @@ a manifest-driven loop could only ever be less complete.
 | REMOVE | clean, HEAD ancestor of dev, dev advanced past it (behind>0) | `apply <path>…` (approved paths only): `worktree remove` + `branch -d` |
 | LANDED | clean, merged MR, `git cherry` all `-`, and (two-dot diff empty **or** merge-tree == dev tree **or** every branch-touched file still differing is a version dev's own history once had) | `apply <path>…` (approved paths only): `worktree remove` + `branch -d`, fallback `-D` (proof re-run first) |
 | REMOVE-AFTER-SCAFFOLD | REMOVE/LANDED except every dirty file is LOCAL-SCAFFOLDING | nothing; `apply-scaffold <path>…` only on the user's explicit go |
+| STALE (`stale.sh`) | clean, HEAD on a remote, idle ≥ N days — merge state irrelevant | `stale.sh apply <path>…`: `worktree remove`, branch KEPT |
 | KEEP | any REAL-CHANGE dirt, cherry `+`, unproven, no merged MR, at dev tip, detached, locked/fresh Claude worktree, git error | nothing — reported with evidence |
 
 **LOCAL-SCAFFOLDING** (uncommitted, never meant to ship; everything else is REAL-CHANGE):
@@ -86,6 +87,35 @@ The script ships as `cleanup.sh` beside this file. It is not inlined: Claude Cod
 - After the user's go on specific REMOVE/LANDED rows: `… cleanup.sh apply <worktree> [<worktree>…]` — no paths ⇒ refuses, prints the plan
 - After the user's go on specific REMOVE-AFTER-SCAFFOLD rows: `… cleanup.sh apply-scaffold <worktree> [<worktree>…]`
 - Reuse the helpers: `source ~/.claude/skills/bpp-cleanup-merged-worktrees/cleanup.sh` stops before reading any argument as a mode
+
+## STALE mode — reclaim disk from idle, pushed worktrees (merged or not)
+
+Use when disk is the goal, not merge hygiene. Most worktrees are KEEP above simply because their branch is
+unmerged or detached, yet deleting the *folder* loses nothing when the tree is clean and HEAD is on a remote.
+Script: `stale.sh` beside this file (2026-11-12: 103 worktrees, 14 GB freed this way).
+
+| Candidate when ALL hold | Never |
+|---|---|
+| `git status --porcelain` empty | dirty, locked, main checkout |
+| HEAD reachable from a remote-tracking ref (`git branch -r --contains HEAD`) | unpushed HEAD (the only copy) |
+| no file outside `.git/bin/obj/node_modules/.angular/dist` changed within `--days N` (default 7) | repos bpp-agent, bpp-document-analysis, any path containing `/bpp-agent` |
+
+Steps:
+1. `bash ~/.claude/skills/bpp-cleanup-merged-worktrees/stale.sh plan [--days N] [--exclude repo1,repo2]` — read-only;
+   prints every candidate (size, last change, branch), per-repo totals, and writes the list to
+   `~/.claude/state/stale-worktrees.tsv`. Default excludes `bpp-agent,bpp-document-analysis`; `--exclude` replaces
+   that list, so always keep both in it. Run `plan --fetch` of the main mode first if remote refs may be stale.
+2. Show the totals; ask (AskUserQuestion) which scope: all candidates / skip some repos / only build output / nothing.
+   Also offer "only build output" (delete `bin obj node_modules .angular` in idle worktrees) when the user wants the
+   worktrees kept — that is usually most of the size.
+3. On the go: `stale.sh apply <path>…` with exactly the approved paths (e.g. `cut -f2` of the list file, filtered).
+   Each path is re-checked right before removal; `git worktree remove` (no `--force`) + `prune`.
+   **Branches are kept** — no `branch -d/-D`, the branch may carry an open MR.
+4. Report REMOVED/SKIP counts and `df -h /home` before/after.
+
+Never in STALE mode: removing a dirty or unpushed worktree, touching bpp-agent or bpp-document-analysis
+worktrees, deleting branches, or "the next active task's worktree" (e.g. an empty feature worktree a paused
+workflow will need — it is idle by mtime but planned work; check handovers/RESUME files and ask).
 
 ## Output
 
