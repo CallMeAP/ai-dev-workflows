@@ -32,7 +32,19 @@ if [ -n "$tp" ] && [ -d "${tp%.jsonl}/subagents" ]; then
     fi
   done < <(find "${tp%.jsonl}/subagents" -name 'agent-*.jsonl' -mmin -2 2>/dev/null)
 fi
-agents=""; [ $((sub+wfa)) -gt 0 ] && agents=" - agents $sub + wf $wfa"
+# Labels: "bg" = background subagents (Agent tool), "wf" = agents running inside workflows (a workflow
+# usually runs its stages one agent at a time, so one running workflow often shows "wf 1").
+agents=""; [ $((sub+wfa)) -gt 0 ] && agents="🤖 bg agents $sub · wf agents $wfa"
+# Cost at API prices: this session from Claude Code's own estimate (cost.total_cost_usd); all recorded
+# sessions from ~/.claude/state/cost-total.json, refreshed in the background at most every 10 min.
+usd() { awk -v v="$1" 'BEGIN { if (v == "") print "?"; else if (v >= 1000) printf "$%.1fk", v/1000; else printf "$%.2f", v }'; }
+scost=$(jq -r '.cost.total_cost_usd // empty' <<<"$input" 2>/dev/null)
+tfile="$HOME/.claude/state/cost-total.json"
+if [ ! -f "$tfile" ] || [ -n "$(find "$tfile" -mmin +10 2>/dev/null)" ]; then
+  (flock -n 9 || exit 0; nice python3 -I "$HOME/.claude/statusline-cost-total.py" >/dev/null 2>&1) 9>"$HOME/.claude/state/cost-total.lock" &
+fi
+tcost=$(jq -r '.total_usd // empty' "$tfile" 2>/dev/null)
+cost="💰 session $(usd "$scost") · all $(usd "$tcost")"
 # Model icon + colour (by model id) and a 5-step effort bar (low..max).
 mid=$(jq -r '.model.id // empty' <<<"$input" 2>/dev/null)
 case "$mid" in
@@ -45,4 +57,7 @@ esac
 case "$effort" in low) n=1 ;; medium) n=2 ;; high) n=3 ;; xhigh) n=4 ;; max) n=5 ;; *) n=0 ;; esac
 bar=""; steps=(▂ ▃ ▅ ▆ █)
 if [ "$n" -gt 0 ]; then for i in 0 1 2 3 4; do if [ $i -lt $n ]; then bar+="${steps[$i]}"; else bar+='░'; fi; done; bar=" $bar"; fi
-printf '\033[%sm%s %s\033[0m%s%s - 5h %s - 7d %s%s' "$col" "$icon" "${model:-?}" "$bar" "${effort:+ ($effort)}" "$(pct five_hour)" "$(pct seven_day)" "$agents"
+# One part per line: model + effort, plan limits, cost, running agents (only while some run).
+printf '\033[%sm%s %s\033[0m%s%s\n⏳ 5h %s · 7d %s\n%s' "$col" "$icon" "${model:-?}" "$bar" "${effort:+ ($effort)}" "$(pct five_hour)" "$(pct seven_day)" "$cost"
+[ -n "$agents" ] && printf '\n%s' "$agents"
+exit 0
