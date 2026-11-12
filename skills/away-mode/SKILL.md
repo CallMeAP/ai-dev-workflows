@@ -56,6 +56,7 @@ at launch, minus `/wf_<id>`). Shell variables do not persist between calls — w
 
 | Event | Do |
 |---|---|
+| **Every** mail body | Starts with `🤖`, and carries the usage line: Claude plan (`~/.claude/state/usage.json`) and Codex 5h/week % when a Codex-backed run is active (eval driver log, else the newest `~/.codex/sessions/**/rollout-*.jsonl` `rate_limits`). |
 | **Any** mail this session sends into the thread | Its `id` → `sent-ids.txt` in the same step — otherwise the next tick reads it as the user. |
 | `PHASE_DONE` line | First copy every auto-decision reported in that phase's `result` lines of `<W>/<wf>/journal.jsonl` into `decisions.md`. Then `send_message` with `replyThreadId`: workflow, phase → next, `failed=N` if > 0, one-line result, `decisions.md` lines after the number in `decisions-mailed.txt` (decision, options, choice, why, "reply to override"), ETA. `noresult=N`: N agents never reported — treat them as failed. A `#n` phase within 15 min of the last mail for that workflow (a throttled pipeline looks like a loop) → no own mail, it joins the next one. Update `decisions-mailed.txt`. |
 | Workflow completion notification | Copy the last phase's `result`-line decisions first, then the same mail with the result (MR links, tests, pipeline). Start the next queued workflow only if the away-mode request named it or the active handover queues it with the user's go; otherwise mail `[ACTION NEEDED]`. Remove the id from `watch.txt`. |
