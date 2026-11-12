@@ -82,26 +82,40 @@ new `backup/<branch>-<YYYYMMDD-HHMM>` branch. The snapshot holds HEAD's commits,
 built with a temporary index, so HEAD, the real index and the working files stay exactly as they were.
 Write the handover (step 4) first; re-run this step if the handover changes afterwards.
 
+**Secret-type config files never go into a backup**, even when git tracks them. Many repos track
+`appsettings.local.json` with empty secrets that are filled in locally; a filled copy counts as an edited
+file. So every changed path matching `SECRET_FILES` is put back to its committed version in the snapshot
+(or left out if it is new), and the same names are skipped in the handover folder. List what was left out in RESUME.md.
+
 ```bash
 R=<repo or worktree>; H=<handover dir>          # the dir holding RESUME.md
+SECRET_FILES='(^|/)(appsettings[^/]*\.local\.json|[^/]*\.local\.json|\.env(\.[^/]*)?|[^/]*secrets?[^/]*|[^/]*\.(pem|key|p12|pfx|jks|keystore))$'
 cd "$R"
 BR=$(git rev-parse --abbrev-ref HEAD); [ "$BR" = HEAD ] && BR="detached-$(git rev-parse --short HEAD)"
 B="backup/${BR//\//-}-$(date +%Y%m%d-%H%M)"
 IDX=$(mktemp); cp "$(git rev-parse --git-path index)" "$IDX"
 GIT_INDEX_FILE="$IDX" git add -A                 # tracked + untracked, .gitignore respected; files untouched
-find "$H" -type f -size -5M ! -name '*.dump' ! -name '*.partial' | while IFS= read -r f; do
+GIT_INDEX_FILE="$IDX" git diff --cached --name-only HEAD | grep -E "$SECRET_FILES" \
+  | grep -vE '\.(example|template)(\.[^/]*)?$' | while IFS= read -r p; do
+  if git cat-file -e "HEAD:$p" 2>/dev/null; then GIT_INDEX_FILE="$IDX" git reset -q HEAD -- "$p"   # committed version
+  else GIT_INDEX_FILE="$IDX" git rm -q --cached -- "$p"; fi                                       # new: leave out
+  echo "left out of backup: $p"
+done
+find "$H" -type f -size -5M ! -name '*.dump' ! -name '*.partial' | grep -vE "$SECRET_FILES" | while IFS= read -r f; do
   h=$(git hash-object -w "$f")
   GIT_INDEX_FILE="$IDX" git update-index --add --cacheinfo "100644,$h,handover/${f#"$H"/}"
 done
 T=$(GIT_INDEX_FILE="$IDX" git write-tree); rm -f "$IDX"
 C=$(git commit-tree "$T" -p HEAD -m "backup: pause snapshot of $BR incl. handover ($(date -Iseconds))")
 git diff --stat HEAD "$C" | tail -3
-git diff HEAD "$C" | grep -inE '(BEGIN [A-Z ]*PRIVATE KEY|glpat-|ghp_|sk-ant-|eyJ[A-Za-z0-9_-]{20,}\.|password\s*[:=]\s*\S{6,}|secret\s*[:=]\s*\S{6,})' | head
+# JSON-aware: also matches "ClientSecret": "…", "ApiKey": "…", Password=… in connection strings
+git diff HEAD "$C" | grep -inE '(BEGIN [A-Z ]*PRIVATE KEY|glpat-|ghp_|sk-ant-|xox[baprs]-|eyJ[A-Za-z0-9_-]{20,}\.)|"?[A-Za-z_]*(password|passwd|pwd|secret|token|apikey|api_key|accesskey|connectionstring)[A-Za-z_]*"?\s*[:=]\s*"?[^"[:space:],;<>{}]{6,}' | head -40
 git push origin "$C:refs/heads/$B" && git ls-remote origin "$B"
 ```
 
 - **Secret scan first.** Read every hit. A real credential value (not a placeholder, test fixture or committed
-  dev default) → do **not** push that repo; record it in RESUME.md and tell the user.
+  dev default) → do **not** push that repo; record it in RESUME.md and tell the user. The scan is a text
+  search, not a guarantee: the `SECRET_FILES` rule is the main protection, the scan the second line.
 - **No size or data surprises:** files over 5 MB, DB dumps and `.partial` files stay out; never customer/prod data.
 - **Auto-created MR:** some hosts open an MR for any new branch. Check
   `merge_requests?source_branch=<B>&state=all` once after the push; close it (or mark it a draft titled
@@ -137,6 +151,7 @@ reboot (e.g. push nothing / restore X / check Y) and **after** (open a session i
 | "I'll commit/stash the WIP on the branch so it's safe" | Never touch the working branch. Snapshot it to a `backup/…` branch with a temporary index (step 5). |
 | "Unpushed commits are safe on disk" | One disk, one copy. Push them to a backup branch. |
 | "The handover folder is not in git, fine" | It goes into each backup snapshot under `handover/`. |
+| "appsettings.local.json is tracked, so backing it up is fine" | A locally filled copy holds real secrets. `SECRET_FILES` keeps the committed version in the snapshot. |
 | "Just stop the workflow now" | Ask first: finish the current step, or stop immediately (step 2.0). |
 | "The workflow can just be resumed later" | Not in a fresh session. Copy script + journal now. |
 | "Results are in the scratchpad, fine" | `/tmp` dies on reboot. Copy them next to RESUME.md. |
