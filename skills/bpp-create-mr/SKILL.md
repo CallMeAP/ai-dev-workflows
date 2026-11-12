@@ -1,13 +1,13 @@
 ---
 name: bpp-create-mr
-description: Use when turning current local work in a BPP .NET repo into a reviewed merge request — phrases like "create an MR", "open a merge request for my changes", "MR my pending work", "push this and make an MR", "create MR and run unit tests". Auto-branches off a protected branch, commits unstaged work, pushes, creates a GitLab MR targeting development assigned to yourself with the repo's reviewer (backend/.NET apittrich, Angular/frontend chaslauer), runs unit tests, and pings when ready for an e2e run. Then watches the MR's Qodana job and GitLab Duo review: auto-fixes findings the MR introduced, fixes overlooked pre-existing ones when local and safe, replies to and resolves fixed Duo threads, and posts one MR comment explaining every Qodana finding left unfixed. Also use to re-run the watchers after undrafting an MR ("watch duo findings", "handle duo review").
+description: Use when turning current local work in a BPP .NET repo into a reviewed merge request — phrases like "create an MR", "open a merge request for my changes", "MR my pending work", "push this and make an MR", "create MR and run unit tests". Auto-branches off a protected branch, commits unstaged work, pushes, creates a GitLab MR targeting development assigned to yourself with the repo's reviewer (backend/.NET apittrich, Angular/frontend chaslauer), checks bpp-cypress for impacted specs (linked bpp-cypress MR when needed), runs unit tests, and pings when ready for an e2e run. Then watches the MR's Qodana job and GitLab Duo review: auto-fixes findings the MR introduced, fixes overlooked pre-existing ones when local and safe, replies to and resolves fixed Duo threads, and posts one MR comment explaining every Qodana finding left unfixed. Also use to re-run the watchers after undrafting an MR ("watch duo findings", "handle duo review").
 ---
 
 # bpp-create-mr
 
 ## Overview
 
-One-shot path from local work → reviewed MR in a BPP GitLab repo. Auto-creates a feature branch when on a protected branch, commits pending changes, **verifies the new public surface the branch adds (controller endpoints, public `I*Service` methods, DTO validation/mapper classes) is covered by tests**, pushes, creates (or reuses) an MR targeting `development` **assigned to yourself**, with the reviewer picked by repo kind (**apittrich** for .NET/backend repos, **chaslauer** for Angular/frontend repos), then runs the **unit** test suite as a regression gate. On green it pings the user that e2e can start; on red it reports the failures and pings — it never runs the e2e/integration suite itself (that's `bpp-run-integration-tests`). Finally a **Qodana watcher** (step 9) and a **GitLab Duo watcher** (step 10) run as one combined loop: per HEAD they wait for the qodana job (and, in round 1, Duo's single initial review), fix what the MR introduced, triage pre-existing findings, reply on (and resolve, when fixed) every Duo thread, and post one Qodana summary comment.
+One-shot path from local work → reviewed MR in a BPP GitLab repo. Auto-creates a feature branch when on a protected branch, commits pending changes, **verifies the new public surface the branch adds (controller endpoints, public `I*Service` methods, DTO validation/mapper classes) is covered by tests**, pushes, creates (or reuses) an MR targeting `development` **assigned to yourself**, with the reviewer picked by repo kind (**apittrich** for .NET/backend repos, **chaslauer** for Angular/frontend repos), greps `bpp-cypress` for specs the change touches and opens a linked `bpp-cypress` MR when needed (step 6c), then runs the **unit** test suite as a regression gate. On green it pings the user that e2e can start; on red it reports the failures and pings — it never runs the e2e/integration suite itself (that's `bpp-run-integration-tests`). Finally a **Qodana watcher** (step 9) and a **GitLab Duo watcher** (step 10) run as one combined loop: per HEAD they wait for the qodana job (and, in round 1, Duo's single initial review), fix what the MR introduced, triage pre-existing findings, reply on (and resolve, when fixed) every Duo thread, and post one Qodana summary comment.
 
 ## When to Use
 
@@ -233,6 +233,124 @@ git -C "$G" worktree remove "$W"
 Then add `Endpoint migration guide: https://gitlab.com/$GPROJ/-/blob/main/<path>` to the backend MR
 description (URL-encode `[` `]` as `%5B` `%5D`). A later change to the guide is another direct push.
 
+### 6c. Cypress impact check — linked MR in `bpp-cypress`
+
+**Every MR, backend-only ones too** (user, 2026-11-12). Skip only when `$REPO` is `bpp-cypress` itself.
+`bpp-cypress` drives the cockpit, the Stella app and the backend APIs end to end, so a renamed route,
+JSON field, selector, i18n key or seeded login breaks its nightly run against dev.
+
+**6c-1 — Grep `bpp-cypress` on `origin/development`** for what the branch touches. Take patterns from
+removed **and** added lines: a rename breaks the old name. Run it from the main MR's worktree (cwd =
+`$REPO`, as in steps 1–6); only the `git -C "$C"` calls touch `bpp-cypress`.
+
+```bash
+C=~/Entwicklung/bpp/bpp-cypress; CPROJ=lipso/clients/brokernet/bpp-cypress
+git -C "$C" fetch -q origin development
+D=$(git diff -U0 origin/development...HEAD)
+PF=$(mktemp)
+{
+  # endpoint routes: [Route]/[Http*] literals split at {param} / [controller] + Angular route paths
+  grep -E '^[-+].*\[(Route|Http(Get|Post|Put|Patch|Delete))\("' <<<"$D" | grep -oE '\("[^"]+' \
+    | sed -E 's/^\("//; s/\{[^}]*\}|\[[^]]*\]/\n/g' | sed -E 's#^/+##; s#/+$##'
+  grep -E "^[-+].*path: *'" <<<"$D" | grep -oE "path: *'[^']+" | sed "s/path: *'//"
+  # DTO/JSON fields: C# auto-properties (camelCased), [JsonPropertyName]/[JsonProperty] names, TS fields
+  grep -E '^[-+]\s*public [^(=]+ [A-Z][A-Za-z0-9]* \{ *get' <<<"$D" \
+    | sed -E 's/.* ([A-Z][A-Za-z0-9]*) \{.*/\1/; s/^./\L&/'
+  grep -oE '\[JsonProperty(Name)?\("[^"]+' <<<"$D" | sed -E 's/.*\("//'
+  git diff -U0 origin/development...HEAD -- '*.ts' ':!*.spec.ts' \
+    | grep -E '^[-+]\s*(readonly )?[a-z][A-Za-z0-9]*\??: [^=]*;$' | sed -E 's/^[-+]\s*(readonly )?([a-z][A-Za-z0-9]*).*/\2/'
+  # i18n keys (de.json/en.json lines), data-cy selectors (any quoting, [attr.data-cy]), seeded logins
+  git diff -U0 origin/development...HEAD -- '*i18n*/*.json' '*assets/i18n/*' \
+    | grep -E '^[-+]\s*"[^"]+":' | sed -E 's/^[-+]\s*"([^"]+)".*/\1/'
+  grep -oE "data-cy\]?=[\"']+[^\"']+" <<<"$D" | sed -E "s/.*=[\"']+//"
+  grep -oE '[A-Za-z0-9._+-]+@go-plattform\.at' <<<"$D"
+} | grep -vxE '.{0,3}|id|name|type|value|status|data' | sort -u > "$PF"
+# seeded test data: bpp-backend CypressSql/ seeds (05 = the e2e login) and the GuiE2eTest seed endpoints
+git diff --name-only origin/development...HEAD | grep -E 'CypressSql/|GuiE2eTest'
+if [ -s "$PF" ]; then
+  cat "$PF"                                                      # the patterns searched — goes into the report
+  git -C "$C" grep -n -F -f "$PF" origin/development -- cypress Config; echo "git grep exit $?"
+else
+  echo "no patterns extracted"                                   # git grep -f <empty> exits 1 like "no hit"
+fi
+```
+
+`git grep` exit 0 = hits, 1 = no hit, 128 = error (fix the command, rerun; an error is not "no impact").
+`bpp-cypress` keeps everything under `cypress/` and `Config/`; its seed data lives in bpp-backend, so a
+changed `CypressSql/` or `GuiE2eTest` file counts as a hit on the specs using that login or data.
+
+A hit is a lead, not proof: open the spec and confirm it uses THIS route / field / selector / login.
+The grep rows are starting aids, as in step 4; read the diff for anything they miss (a changed response
+shape, a record's positional DTO parameter, a `routerLink`/`navigate` target, a removed page, a moved button).
+
+- **Confirmed hit, or new user-visible behaviour** (new page, button, dialog, flow, mail — a background
+  job that sends mail counts) → a `bpp-cypress` MR is required (6c-2…6c-4).
+- **Neither** → no MR. The report gets the one line `Cypress: no impact` plus the patterns searched
+  (the content of `$PF`, or `no patterns extracted` when it is empty).
+
+**6c-2 — Branch in a `bpp-cypress` worktree**, same branch name as the main MR, off `origin/development`.
+Never the main `bpp-cypress` checkout; no stash, reset or amend.
+
+```bash
+CW="$C.worktrees/$(printf %s "$BRANCH" | tr / -)"
+git -C "$C" worktree add -b "$BRANCH" "$CW" origin/development
+( cd "$CW" && npm ci )
+```
+
+Update every spec the change breaks **and** add a spec for new user-visible behaviour. A new spec goes
+to `cypress/e2e/<job>/<area>/<name>.cy.ts`, the job picked by which seeded login must own the data
+(`bpp-cypress` `CLAUDE.md`, *Where a spec goes*). Test logins and mail recipients are only
+`cypress-*@go-plattform.at`: the Lettermint sink rule `^(cypress|e2e)-[^@]+@go-plattform\.at$` routes
+those to the sink on dev/staging; any other address gets real mail.
+
+**6c-3 — Run only the affected specs, locally.** Against the LOCAL stack only, never dev or staging.
+The local stack must serve this branch's code (backend / cockpit from the main MR's worktree; cockpit
+via `npm start`, not `start-test`), with the `05` Cypress seed applied (`bpp-cypress` `README.md`,
+*What a real run needs*).
+
+```bash
+cd "$CW"
+export BPP_E2E_PASSWORD=<local seeded password>   # shell only, never commit it
+npm run typecheck && npm run check:layout && npm run check:strict-flows
+npm run cy:run:local -- --spec "cypress/e2e/<job>/<area>/<name>.cy.ts,cypress/e2e/<job>/<area>/<other>.cy.ts"
+```
+
+Never `cy:run:development` / `cy:run:staging`. Red → fix the spec or the main MR's code. Never skip a
+spec, never drop an assertion to get green.
+
+**6c-4 — Commit, push, open the linked MR.** Explicit paths only, read `git diff --cached` first.
+
+```bash
+git -C "$CW" add -- "${SPEC_FILES[@]}"; git -C "$CW" commit -m "test(e2e): <what> (for $PROJ!$IID)"
+git -C "$CW" push -u origin "$BRANCH"     # a new-branch push may auto-open an MR — the lookup below reuses it
+CENC=$(printf %s "$CPROJ" | sed 's#/#%2F#g')
+CIID=$(glab api "/projects/$CENC/merge_requests?state=opened&source_branch=${BRANCH}&target_branch=development" | jq -r '.[0].iid // empty')
+CDESC="Merge after $PROJ!$IID is merged and deployed to dev (the nightly Cypress schedule runs against dev).
+
+Main MR: https://gitlab.com/$PROJ/-/merge_requests/$IID
+
+$(git -C "$CW" log --format='- %s' origin/development..HEAD)"
+if [ -z "$CIID" ]; then
+  CIID=$(glab api --method POST "/projects/$CENC/merge_requests" -f source_branch="$BRANCH" -f target_branch=development \
+    -f title="$(git -C "$CW" log -1 --format=%s)" --raw-field "description=$CDESC" | jq -r '.iid // empty')
+else
+  glab api --method PUT "/projects/$CENC/merge_requests/$CIID" --raw-field "description=$CDESC" >/dev/null
+fi
+glab mr update "$CIID" -R "$CPROJ" --assignee "$ME" --reviewer "+chaslauer"
+glab api --method PUT "/projects/$CENC/merge_requests/$CIID" -f add_labels=work-ap >/dev/null
+
+# cross-link: append the Cypress MR to the main MR's description (skip if already there)
+ENC=$(printf %s "$PROJ" | sed 's#/#%2F#g')
+MDESC=$(glab api "/projects/$ENC/merge_requests/$IID" | jq -r .description)
+grep -qF "$CPROJ/-/merge_requests/$CIID" <<<"$MDESC" || glab api --method PUT "/projects/$ENC/merge_requests/$IID" \
+  --raw-field "description=$MDESC
+
+Cypress: https://gitlab.com/$CPROJ/-/merge_requests/$CIID (merge after this MR is merged and deployed to dev)" >/dev/null
+```
+
+Same quirks as step 6: no `glab mr create`, `+` on `--reviewer` keeps GitLabDuo, always pin `-R`.
+Capture the Cypress `!iid` + URL for the report.
+
 ### 7. Unit tests (regression gate)
 
 Run unit tests only — exclude integration suites (they need the local stack and burn bpp-auth logins):
@@ -252,6 +370,8 @@ If no `.sln`, run each `*.Tests.csproj` with the same `--filter`. Capture pass/f
     message="<repo> !<iid> ready — unit tests green, start e2e run")
   ```
   Then report the MR URL + test summary in-session.
+- **Both cases** → the report carries the Cypress line from step 6c: the linked `bpp-cypress` MR URL
+  (plus the specs run locally and their result), or `Cypress: no impact` with the patterns searched.
 - **Red** → do NOT signal e2e-ready. Report failing tests in-session and ping:
   ```
   PushNotification(status="proactive",
@@ -438,6 +558,7 @@ Fixes follow 9d's loop: edit only the flagged site, build, unit tests, `git add 
 | Existing MR? | `glab api .../merge_requests?state=opened&source_branch=<b>&target_branch=development` |
 | Create MR | `glab api --method POST "/projects/<enc>/merge_requests" -f source_branch=… -f target_branch=development -f title=…` |
 | Label | `add_labels=work-ap` on every MR except `bpp-agent` ones |
+| Cypress impact (every MR) | `git -C ~/Entwicklung/bpp/bpp-cypress grep -n -F -f <patterns> origin/development -- cypress config`; hit/new UI → linked MR, same branch, `work-ap`, `chaslauer`, `cy:run:local -- --spec …` (step 6c) |
 | Guide (DTO/API change) | `bpp-endpoint-migration-guides`, folder `<repo>/`, direct push to `main`, no MR (step 6b) |
 | Set assignee+reviewer (always follow up) | `glab mr update <iid> -R lipso/clients/brokernet/<repo> --assignee <me> --reviewer +<apittrich\|chaslauer>` (`+` keeps GitLabDuo) |
 | Unit tests | `dotnet test <sln> --filter "Category!=LocalIntegration&Category!=Integration"` |
@@ -464,6 +585,8 @@ Fixes follow 9d's loop: edit only the flagged site, build, unit tests, `git add 
 - **Using the backend reviewer on a frontend MR** → Angular repos are reviewed by `chaslauer`, .NET repos by `apittrich`. Derive it from the repo, don't default blindly.
 - **Duplicating an MR** → query open MRs for the source branch first; a push already updates an existing one.
 - **Committing an endpoint migration guide into the backend repo** → guides live in `bpp-endpoint-migration-guides/<repo>/`; push it straight to `main` there (step 6b) and link it.
+- **Skipping the Cypress grep because the change is backend-only** → `bpp-cypress` calls backend routes and reads JSON fields directly; a backend rename breaks the nightly dev run. Run 6c on every MR.
+- **Running Cypress against dev or staging to verify the linked MR** → only `npm run cy:run:local -- --spec …` against the local stack; the deployed stages run the nightly suite.
 - **`--force` push** → never.
 - **Editing tests to go green** → out of scope; report red and stop.
 - **Pinging e2e-ready when tests are red** → only ping "start e2e" on green.
