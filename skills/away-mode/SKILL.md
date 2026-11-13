@@ -17,6 +17,17 @@ at launch, minus `/wf_<id>`). Shell variables do not persist between calls — w
 
 ## Steps
 
+0. **Gmail check first, every time:** `ToolSearch("select:mcp__claude_ai_Gmail__send_message,mcp__claude_ai_Gmail__get_thread,mcp__claude_ai_Gmail__get_message")`.
+   - Loaded → go on.
+   - "No matching deferred tools" → this session never loaded the claude.ai connectors. That happened on
+     2026-11-13: a session started with `--resume` at 15:07 had no `mcp-logs-claude-ai-*` entry at all, while
+     `claude mcp list` showed `claude.ai Gmail … ✔ Connected` for the account. Run `timeout 60 claude mcp list`
+     to tell the two cases apart. Connected there → the session has to load it again: the user runs `/mcp`
+     (reconnect claude.ai Gmail) or restarts with `claude --resume`. Not connected → the user re-adds Gmail
+     under claude.ai Settings → Connectors. Claude cannot reconnect either case itself.
+   - Say this to the user in chat **before** going on. Ask them to fix it and re-run `/away-mode`. If they
+     don't, fall back to `PushNotification` for phase ends, completions and gates (no reply channel, no inbox
+     cron), and log the fallback in `decisions.md`.
 1. **Questions mode OFF:** invoke the `interactive-questions-mode-off` skill (never edit CLAUDE.md yourself).
 2. **State files in `$S`:** `watch.txt` (run ids of the workflows **this session launched** and that still run),
    empty `emitted.txt`, `sent-ids.txt`, `handled-ids.txt`, `decisions.md`, `decisions-mailed.txt` (`0`), `thread.txt`.
