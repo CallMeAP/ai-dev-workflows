@@ -339,9 +339,9 @@ jq -n --arg msg "docs(repos): add $new_names discovered by bpp-project-index" \
 ## `--clone`: checking out what is missing
 
 Target root: `~/Entwicklung/bpp/{name}` for every repo (single dev root since 2026-11-15).
-That is a *default*, not an assertion — `bpp-document-analysis-dashboard` legitimately lives under
-`brokernet/`, and because the local scan is keyed on the `origin` URL it is found there and never
-re-cloned.
+That is a *default*, not an assertion — a checkout whose folder name differs from the repo name (e.g.
+`brokernet-app` = `bpp-stella-ui`) is still found, because the local scan is keyed on the `origin` URL, and
+is never re-cloned.
 
 ```bash
 MAX_CLONE=${MAX_CLONE:-10}
