@@ -14,7 +14,7 @@
 set -uo pipefail
 export LC_ALL=C   # stable sort/comm ordering
 
-UI_REPO="${UI_REPO:-$HOME/Entwicklung/brokernet/brokernet-cockpit-ui}"
+UI_REPO="${UI_REPO:-$HOME/Entwicklung/bpp/brokernet-cockpit-ui}"
 BE_REPO="${BE_REPO:-$HOME/Entwicklung/bpp/bpp-backend}"
 REF="origin/development"
 DE_PATH="BPP.Backend.NET/BPP.Backend.NET.App/wwwroot/i18n/de.json"

@@ -7,7 +7,7 @@
 # not locked, not a main checkout. Removal = `git worktree remove` (never --force) + prune.
 # Local branches are KEPT (no branch -d/-D) — the branch may hold an open MR.
 set -uo pipefail
-ROOTS=(/home/alex/Entwicklung/bpp /home/alex/Entwicklung/brokernet)
+ROOTS=(/home/alex/Entwicklung/bpp)
 DAYS=7; EXCLUDE="bpp-agent,bpp-document-analysis"
 LIST="${STALE_LIST:-$HOME/.claude/state/stale-worktrees.tsv}"
 
