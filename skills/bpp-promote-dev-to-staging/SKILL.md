@@ -338,6 +338,10 @@ Migration-guide audit (dev→staging only; UI MRs target development):
   UI MR      bpp-vera-connector/__10_2026-06-10_… → bpp-stella-ui
   report     bpp-auth/__8_2026-10-22_…   (in-flight, cockpit !1268)
 
+After creation, conflicting MRs (new and reused) are back-merged automatically
+($TGT into $SRC, step 6b): version-only conflicts pushed directly, others only
+when the repo checks are green.
+
 Reply "go" to create MRs.
 ```
 
@@ -371,7 +375,7 @@ Omit empty categories. Pass it via `-f description="$DESC"` on the POST. If the 
 
 ### 6. Create MRs
 
-Only for repos with `NDIFFS[$repo] > 0` AND no existing open MR.
+Only for repos with `NDIFFS[$repo] > 0` AND no existing open MR. Declare `declare -A MR_IID` before the loop.
 
 **Repos in the bump table first get the patch-version bump** (see "Version bump" section above — guard, bump, commit on `$SRC`), then the MR:
 
@@ -389,12 +393,58 @@ for repo in "${REPOS[@]}"; do
   iid=$(echo "$result" | jq -r '.iid // empty')
   url=$(echo "$result" | jq -r '.web_url // empty')
   if [ -n "$iid" ]; then
+    MR_IID[$repo]=$iid                 # step 6b checks it
     echo "✓ ${repo}!${iid}  ${url}"
   else
     echo "✗ ${repo}  ERROR: ${result}" >&2
   fi
 done
 ```
+
+### 6b. Conflict check and auto-resolve
+
+Runs for every promotion MR of this run: the ones created in step 6 **and** the reused open ones from step 3. Covered by the user's single "go" from step 4 (user decision 2026-11-16), which is why the preview says so. No second confirmation.
+
+**Why conflicts happen in this fleet:** commits that landed on `$TGT` directly (hotfix / `release/*` branches, version bumps) and were never merged back into `$SRC`. Precedents: `brokernet-varias-sign` !89 (pom project version only, resolved by back-merge `cec54ce`, kept `11.0.2`); `brokernet-cockpit-ui` !1336 (staging-only `release/BRO-999-staging` Firmenbuchabfrage dialog vs newer development code).
+
+**1. Get an authoritative status.** `has_conflicts:false` means nothing while `detailed_merge_status` is `checking` / `preparing` / `unchecked`. Poll until it leaves those states, bounded (about 2 min per MR). Wait with `timeout N tail -f /dev/null`, never a `cat /dev/zero` trick:
+
+```bash
+declare -A MERGE_STATUS
+for repo in "${!EXISTING_MR[@]}"; do MR_IID[$repo]="${EXISTING_MR[$repo]}"; done
+for repo in "${!MR_IID[@]}"; do        # MR_IID = created (step 6) + reused (step 3) iids
+  enc="${ENC[$repo]}"; iid="${MR_IID[$repo]}"; status=checking; tries=0
+  while [ "$tries" -lt 12 ]; do
+    status=$(glab api "/projects/${enc}/merge_requests/${iid}" | jq -r '.detailed_merge_status')
+    case "$status" in checking|preparing|unchecked|approvals_syncing) ;; *) break ;; esac
+    tries=$((tries + 1)); timeout 10 tail -f /dev/null || true
+  done
+  MERGE_STATUS[$repo]="$status"       # still checking after the bound → report "un-computed", never "clean"
+done
+```
+
+Equivalent local check (no waiting, works without the MR): `git fetch origin "$SRC" "$TGT" && git merge-tree --write-tree origin/"$TGT" origin/"$SRC"` — exit code 1 plus `CONFLICT` lines means conflicts. Use it to confirm a `conflict` status, or when GitLab stays in `checking`.
+
+**2. Resolve by back-merge, never rebase.** For each MR with `detailed_merge_status=conflict` (or a conflicting `merge-tree`):
+
+- Workspace: a fresh worktree off `origin/$SRC` from the manifest's `local_path` checkout (`cut -f1,7` of the manifest), never the main checkout's working tree. No local checkout → `git clone --filter=blob:none` into the scratchpad.
+- `git merge --no-ff origin/"$TGT" -m "Merge branch '$TGT' into '$SRC'"`, then list the conflicts with `git diff --name-only --diff-filter=U`.
+- No amend, rebase, reset, stash or force. Stage files explicitly by path (`git add <file>`). Commit trailer per the session's attribution rule.
+
+**Class A — version-anchor-only conflict:** every conflicting hunk is only the version line of a bump-table anchor (`package.json` `.version`, the `pom.xml` project `<version>` after `</parent>`, `Directory.Build.props` `<BppSharedVersion>`). Take the **higher** version (semver compare, e.g. `printf '%s\n' "$VER_SRC" "$VER_TGT" | sort -V | tail -1`; it must stay above `$TGT`'s so the image tag is new), resolve, commit, then verify `git merge-tree --write-tree origin/"$TGT" HEAD` exits 0. Push to `$SRC` directly (user decision 2026-11-16). Precedent: varias-sign !89 → `cec54ce`.
+
+**Class B — any other conflict:** resolve keeping both sides' intent: integrate `$TGT`'s change into `$SRC`'s code; where both changed the same thing, keep `$SRC`'s structure and add `$TGT`'s behaviour (`$SRC` wins genuine ties). Version-anchor lines inside a Class B merge follow the Class A rule. Then run the repo checks, never skipping a test:
+
+| Repo | Checks |
+|---|---|
+| `brokernet-cockpit-ui` | `npm ci`, `npm run lint`, `npx tsc -p tsconfig.app.json --noEmit`, `npm run unit-test:ci` |
+| `bpp-stella-ui` | the check list of `bpp-migration-guide-audit` |
+| .NET repos | `dotnet build` + unit tests (`--filter "Category!=Integration&Category!=LocalIntegration"`) |
+| other | the repo's lint/build/unit-test commands from its CI file |
+
+Push to `$SRC` **only when every check is green.** Otherwise do not push: leave the worktree, and report the MR, the conflicting files and the failing check. Precedent: cockpit !1336.
+
+**3. Re-check after the push.** Pushing to `$SRC` updates the MR by itself. Re-poll its `detailed_merge_status` (same bound) and report the result: `mergeable`, still `conflict`, or un-computed.
 
 ### 7. Report
 
@@ -427,6 +477,8 @@ For development → staging, add a **"Migration-guide audit"** section of its ow
 
 Note: `detailed_merge_status` stays `checking` for a while after bulk creation and `has_conflicts:false` is NOT authoritative while checking — report mergeability as un-computed rather than clean.
 
+Add a **"Conflicts (step 6b)"** section: per MR its final `detailed_merge_status`; for each back-merge the class (A/B), the merge commit pushed to `$SRC` and the version kept; for each unpushed Class B the MR, conflicting files, failing check and worktree path.
+
 The report's last line is always the group-wide list of open MRs for this direction:
 
 ```bash
@@ -453,6 +505,9 @@ echo "Open $TITLE MRs: https://gitlab.com/groups/lipso/clients/brokernet/-/merge
 - **Forgetting the `bpp-stella-web` lock entry, or bumping it with `npm version -w`** → either the lock and package.json disagree, or ~90 unrelated lock lines change. Use the anchored `sed`; exactly two lines may differ.
 - **Promoting a version change without handing over the `ui_configs` SQL** → the stage DB keeps the old version and the forced reset never fires for that release (cockpit, kundenportal). Always print all three stage DBs × all three `ui_type`s with their markers, also when this run bumped nothing.
 - **Taking the `stella` value from package.json, or printing it without the store warning** → the app compares `environment.appVersion`, and a premature major/minor raise locks every user onto `/update` with nothing to install. On a package.json/appVersion mismatch, print both values and no statement.
+- **Reporting an MR as clean from `has_conflicts:false` while `checking`** → poll `detailed_merge_status` (step 6b) or run `git merge-tree`; reused MRs need the check too.
+- **Resolving a promotion conflict by rebasing or merging `$SRC` into `$TGT`** → always back-merge `origin/$TGT` into `$SRC` in a worktree; the MR picks it up.
+- **Taking the lower version in a Class A conflict** → the image tag already exists on `$TGT` and deploy is skipped; take the higher one.
 - **Double-bumping on re-run** → always apply the idempotency guard (source vs target version differ = already bumped).
 - **Missing servo-ui / callidus-bvs-ui** → both live in subgroups; a group listing without `include_subgroups=true` never returns them (verified 2026-09-14: 57 projects, zero of them). They reach this skill as ordinary `bpp-project-index` manifest rows with subgroup-encoded `enc` values — never rebuild an encoded path from the repo name.
 - **Rebuilding the repo set here instead of reading the manifest** → the name filter + extras drift from `bpp/repos.md` in both directions (repos in the list the filter misses, repos in the group the list omits). `bpp-project-index` does the union on every refresh — read it. If the manifest is stale or `#source` says `gitlab=unreachable`, flag it in the preview instead of silently proceeding.
@@ -463,5 +518,7 @@ echo "Open $TITLE MRs: https://gitlab.com/groups/lipso/clients/brokernet/-/merge
 - Compare API errored on a repo whose branches both exist → do NOT silently skip; abort with error.
 - About to label a staging→main MR `staging-deployment` (or vice versa) → STOP, check the direction table.
 - The migration-guide audit opened a second MR for a guide that already had an open UI MR → STOP; report both `!iid`s to the user and fix the dedupe before the next run.
+- About to push a Class B back-merge with a red, skipped or un-run check → STOP; do not push, report MR + files + failing check.
+- About to resolve a conflict in the main checkout's working tree, or with rebase / reset / force → STOP; worktree + merge only.
 - The migration-guide audit is running for staging → main → STOP; it belongs to development → staging only.
 - Considering creating an MR for a repo the manifest filter did not return → STOP, exclude it. Fix the classification in `bpp/repos.md` via `bpp-project-index`, never by special-casing a repo here.
