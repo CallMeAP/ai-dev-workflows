@@ -40,7 +40,9 @@ To force a qodana run against current development, per repo:
 4. Poll the pipeline with a **bounded bash sleep-loop inside a single Bash call** — never "wait" across turns (waiting agents go idle instead of polling).
 5. The probe MR **becomes the fix MR**: push the classified fixes onto the same branch, **remove the probe marker line first** (README/PROJECT.md must end byte-identical to development), then un-draft it — or **close** it if the fresh report is clean.
 
-No-report repos (probe is pointless — record + skip): `bpp-shared-template` (no `QODANA_TOKEN`), `bpp-agent` (scaffold, no MR pipelines).
+No-report repos (probe is pointless — record + skip): `bpp-shared-template` (no `QODANA_TOKEN`).
+
+`bpp-agent` now runs Qodana on MRs. Its development baseline is **12 known false positives, 0 real findings** — proven on bpp-agent !116 (note 4238503679, pipeline #3070456278), left without code change or suppression pending the user's go: `EntityFramework.UnsupportedServerSideFunctionCall` ×7 (`Guid.CompareTo` keyset conditions — `ToQueryString()` shows EF Core 10/Npgsql translates them server-side), `TypeWithSuspiciousEqualityIsUsedInRecord.Global` ×4 (`ProposalEvalCase` record with `List<>` members; every record-equality use compares an object with itself; must stay a record for `with`), `UnusedAutoPropertyAccessor.Local` ×1 (`ApprovalsBeforeAfterDiffUtil` `Change` getter, read by `JsonSerializer` and asserted in tests). Count these as skipped, never "fix" them.
 
 ## THE dominant false-positive class: unresolved bpp-shared
 
