@@ -88,7 +88,8 @@ Rationale for that split:
 | 8 | `default_branch` | e.g. `development`, `main`, `-` |
 
 Header lines carry provenance: `#generated <iso8601>`, `#source gitlab=ok|unreachable reposmd=ok|unreachable`,
-and `#extra <name> <path>` for *additional* checkouts of a repo that already has a canonical one.
+`#extra <name> <path>` for *additional* checkouts of a repo that already has a canonical one, and
+`#renamed <old> <new> <repos.md | checkout path>` for an old path that is still referenced after a rename.
 
 ### Policy tags (fleet decisions, owned by this skill)
 
@@ -111,13 +112,15 @@ and flattening them into one boolean would silently change three skills' behavio
 | `bpp-daily-audit` | same, plus tags ∌ `scaffold` | 37 — same as promote, not a typo: the only `scaffold` repo (`bpp-shared-template`) is `class=infra` and is already dropped by the class filter |
 | `bpp-bump-shared-version` | `state=active`, name matches `^bpp-`, tags ∌ `shared-source` | 24 |
 
+Each set is implemented in `refresh.sh` (offline, prints `name TAB enc`):
+
 ```bash
-MANIFEST=~/.claude/bpp-fleet/manifest.tsv
-# promote / audit candidate set → name TAB enc
-awk -F'\t' '!/^#/ && $6=="active" && $5!~/generated-output|excluded-manual|guides-store/ \
-  && ($4=="backend" || $4=="frontend" || $4=="docs" || ($4=="unlisted" && $1 ~ /^bpp-|^brokernet-.*-ui$/)) \
-  {print $1 "\t" $3}' "$MANIFEST"
+bash ~/.claude/skills/bpp-project-index/refresh.sh candidates promote   # or: audit | bump
 ```
+
+Columns by number for consumers that filter themselves: name=1, path_with_namespace=2, enc=3, class=4,
+tags=5, state=6, local_path=7, default_branch=8. Copy the awk from `do_candidates` in `refresh.sh`, not
+from memory.
 
 The `class=unlisted and name matches …` clause is not decoration: it is what keeps `bpp-cypress` and
 `bpp-db-migrator` in the sweeps while `repos.md` still omits them. Dropping it un-sweeps active repos.
@@ -126,158 +129,63 @@ The `class=unlisted and name matches …` clause is not decoration: it is what k
 
 Requires `glab` (authenticated: `glab auth status`) + `jq`. One pass, ~7 s.
 
-### 1–4. Build the manifest
+The code ships as `refresh.sh` beside this file. It is not inlined: Claude Code substitutes positional
+placeholders (dollar sign + digit) in skill text when the skill is invoked with arguments; on 2026-11-16
+that turned every awk field reference into the word `refresh` and broke the run. Keep dollar-digit
+sequences out of this file. Run it by path:
 
-```bash
-MANIFEST_DIR=~/.claude/bpp-fleet; MANIFEST="$MANIFEST_DIR/manifest.tsv"; mkdir -p "$MANIFEST_DIR"
-WORK=$(mktemp -d)
-GROUP=lipso%2Fclients%2Fbrokernet
-KNOW=lipso%2Finternal%2Fagentic-coding-knowledge
+| Command | Does |
+|---|---|
+| `bash ~/.claude/skills/bpp-project-index/refresh.sh` | refresh, then index (the default) |
+| `… refresh.sh refresh` | steps 1–5: rebuild the manifest, print the deltas |
+| `… refresh.sh report` | step 5 only, from the existing manifest — offline |
+| `… refresh.sh index` | step 6 only |
+| `… refresh.sh candidates promote\|audit\|bump` | consumer filter sets |
+| `… refresh.sh reposmd-diff` | `--write` preview |
+| `… refresh.sh clone-preview` / `clone <name>…` | `--clone` preview / clone after "go" |
+| `source …/refresh.sh` | helpers only (`do_refresh`, `do_report`, `policy_tags`, …); stops before reading a mode |
 
-# 1. GitLab listing — include_subgroups is mandatory, archived=false is mandatory
-GITLAB_STATE=ok
-glab api "/groups/${GROUP}/projects?include_subgroups=true&archived=false&per_page=100&simple=true" --paginate 2>/dev/null \
-  | jq -r '.[] | [.path, .path_with_namespace, (.default_branch // "-")] | @tsv' \
-  | LC_ALL=C sort -u > "$WORK/gitlab.tsv"
-[ -s "$WORK/gitlab.tsv" ] || GITLAB_STATE=unreachable
+### 1–4. Build the manifest (`refresh`)
 
-# 2. repos.md — class comes from the section heading it sits under
-REPOSMD_STATE=ok
-glab api "projects/${KNOW}/repository/files/bpp%2Frepos.md/raw?ref=main" > "$WORK/repos.md" 2>/dev/null
-awk '
-  /^##[ ]/ { sect = substr($0, 4); next }
-  /^\|[^|]+\| *https:\/\/gitlab\.com\// {
-    split($0, f, "|"); name = f[2]; link = f[3]
-    gsub(/^[ \t]+|[ \t]+$/, "", name); gsub(/^[ \t]+|[ \t]+$/, "", link)
-    sub(/^https:\/\/gitlab\.com\//, "", link)
-    cls = "other"
-    if (sect ~ /^Backend/)       cls = "backend"
-    else if (sect ~ /^Frontend/) cls = "frontend"
-    else if (sect ~ /^Dokument/) cls = "docs"
-    else if (sect ~ /^Infra/)    cls = "infra"
-    print name "\t" link "\t" cls
-  }' "$WORK/repos.md" | LC_ALL=C sort -u > "$WORK/reposmd.tsv"
-[ -s "$WORK/reposmd.tsv" ] || REPOSMD_STATE=unreachable
+1. **GitLab listing** of `lipso/clients/brokernet` — `include_subgroups=true` and `archived=false` are
+   both mandatory. An empty listing marks the run `gitlab=unreachable`.
+2. **`repos.md`** via `glab api …/repository/files/bpp%2Frepos.md/raw?ref=main`; a row's class comes from
+   the section heading it sits under (`Backend…` / `Frontend…` / `Dokument…` / `Infra…`).
+3. **Local checkouts** under `~/Entwicklung/bpp/*/` (skipping `*.worktrees`), keyed on the `origin` URL
+   reduced to `path_with_namespace` — never on the folder name.
+4. **Union** of the three, keyed on `path_with_namespace`, minus the `EOL` list at the top of
+   `refresh.sh` (archived for good; add a repo there only on the user's word). Every path *not* in the live
+   listing is probed with `/projects/<enc>`: `archived`, `active`, or `gone` (404) — never assumed.
+   **Renames:** when the probe answers with a *different* `path_with_namespace`, the old path is folded
+   onto the new one — in the union, in the `repos.md` class table (the new row inherits the old row's
+   class) and in the checkout map. The new row gets the new project's `state` and default branch; the old
+   row is dropped, so no duplicate names and no stale row. Each old path that is still referenced is
+   recorded as a comment line `#renamed <old> <new> <repos.md | checkout path>` (comment lines are
+   ignored by consumers; the 8-column contract is unchanged).
+   Canonical checkout = the folder whose basename equals the repo name; any other becomes `#extra`.
+   A name collision across subgroups prints a `WARN`.
+   **Never overwrites a good manifest** when the listing was unreachable, nor with a 0-row body.
 
-# 3. Local checkouts — keyed on the ORIGIN URL, never on the folder name
-: > "$WORK/local.tsv"
-for d in "$HOME"/Entwicklung/bpp/*/; do
-  n=$(basename "$d"); case "$n" in *.worktrees) continue;; esac
-  [ -e "$d/.git" ] || continue
-  u=$(git -C "$d" remote get-url origin 2>/dev/null) || continue
-  [ -n "$u" ] || continue
-  p=$(printf '%s' "$u" | sed -E 's#\.git$##; s#^git@[^:]+:##; s#^ssh://[^@]*@?[^/]+/##; s#^https?://([^@/]+@)?[^/]+/##')
-  printf '%s\t%s\t%s\n' "$p" "${d%/}" "$n" >> "$WORK/local.tsv"
-done
-LC_ALL=C sort -o "$WORK/local.tsv" "$WORK/local.tsv"
+### 5. Report the deltas (always, even on a plain refresh; `report` reprints them offline)
 
-# 4. Union, keyed on path_with_namespace — minus EOL repos (archived for good, never listed again,
-#    even if a stray checkout or a repos.md row resurfaces). Add a repo here only on the user's word.
-EOL='lipso/clients/brokernet/bpp-message-dispatcher'   # EOL + archived, local checkout removed 2026-11-03
-{ cut -f2 "$WORK/gitlab.tsv"; cut -f2 "$WORK/reposmd.tsv"; cut -f1 "$WORK/local.tsv"; } \
-  | LC_ALL=C sort -u | grep -vxF "$EOL" > "$WORK/union.txt"
-
-policy_tags() {
-  case "$1" in
-    servo-backend)              echo excluded-manual ;;
-    bpp-audit-reports)          echo generated-output ;;
-    bpp-endpoint-migration-guides) echo guides-store ;;
-    bpp-shared-template)        echo scaffold ;;
-    bpp-shared)                 echo shared-source ;;
-    *)                          echo - ;;
-  esac
-}
-
-: > "$WORK/manifest.body"; : > "$WORK/extra.txt"
-while read -r pathns; do
-  name=${pathns##*/}
-  enc=$(printf %s "$pathns" | sed 's#/#%2F#g')
-
-  gl=$(awk -F'\t' -v p="$pathns" '$2==p {print $3; exit}' "$WORK/gitlab.tsv")
-  if [ -n "$gl" ]; then
-    state=active; defbr="$gl"
-  else                      # not in the live listing → archived, or gone. Probe, never assume.
-    meta=$(glab api "/projects/${enc}" 2>/dev/null \
-      | jq -r 'if .id then ((if .archived then "archived" else "active" end) + "\t" + (.default_branch // "-")) else empty end')
-    if [ -n "$meta" ]; then state=${meta%%$'\t'*}; defbr=${meta##*$'\t'}
-    else state=gone; defbr="-"; fi
-  fi
-
-  cls=$(awk -F'\t' -v p="$pathns" '$2==p {print $3; exit}' "$WORK/reposmd.tsv"); [ -n "$cls" ] || cls=unlisted
-
-  # canonical checkout: prefer the folder whose basename == repo name; others become #extra
-  lp=$(awk -F'\t' -v p="$pathns" -v n="$name" '$1==p && $3==n {print $2; exit}' "$WORK/local.tsv")
-  [ -n "$lp" ] || lp=$(awk -F'\t' -v p="$pathns" '$1==p {print $2; exit}' "$WORK/local.tsv")
-  [ -n "$lp" ] || lp="-"
-  awk -F'\t' -v p="$pathns" -v c="$lp" -v n="$name" '$1==p && $2!=c {print "#extra\t" n "\t" $2}' \
-    "$WORK/local.tsv" >> "$WORK/extra.txt"
-
-  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-    "$name" "$pathns" "$enc" "$cls" "$(policy_tags "$name")" "$state" "$lp" "$defbr" >> "$WORK/manifest.body"
-done < "$WORK/union.txt"
-
-dupes=$(cut -f1 "$WORK/manifest.body" | LC_ALL=C sort | uniq -d)
-[ -n "$dupes" ] && echo "WARN — name collision across subgroups, consumers key on name: $dupes" >&2
-
-# Never overwrite a good manifest with a degraded one.
-if [ "$GITLAB_STATE" = unreachable ] && [ -s "$MANIFEST" ]; then
-  echo "DEGRADED — GitLab unreachable; keeping the existing manifest ($(grep -m1 '^#generated' "$MANIFEST"))" >&2
-else
-  { echo "#generated $(date -Iseconds)"
-    echo "#source gitlab=$GITLAB_STATE reposmd=$REPOSMD_STATE"
-    cat "$WORK/extra.txt"
-    printf '#name\tpath_with_namespace\tenc\tclass\ttags\tstate\tlocal_path\tdefault_branch\n'
-    LC_ALL=C sort "$WORK/manifest.body"
-  } > "$MANIFEST"
-fi
-```
-
-### 5. Report the four deltas (always, even on a plain refresh)
-
-```bash
-# a) in GitLab, missing from repos.md  → candidates for --write
-awk -F'\t' '!/^#/ && $4=="unlisted" && $6=="active" {print "  " $1 "\t" $2 "\t(" $8 ")"}' "$MANIFEST"
-# b) fleet repo with no local checkout → candidates for --clone
-awk -F'\t' '!/^#/ && $7=="-" && $6=="active" && $4!~/^(infra|unlisted)$/ {print "  " $1}' "$MANIFEST"
-# c) checked out locally but archived/gone in GitLab
-awk -F'\t' '!/^#/ && $7!="-" && $6!="active" {print "  " $1 "\t" $6 "\t" $7}' "$MANIFEST"
-# d) extra checkouts of the same repo
-grep '^#extra' "$MANIFEST"
-```
+- **a)** in GitLab, missing from `repos.md` (`class=unlisted`, active) → candidates for `--write`
+- **b)** fleet repo with no local checkout (active, class not `infra`/`unlisted`) → candidates for `--clone`
+- **c)** checked out locally but archived/gone in GitLab
+- **d)** extra checkouts of the same repo (`#extra`)
+- **e)** renames: `renamed <old> -> <new>`, with the fix — a `repos.md` row on the old path needs a
+  hand edit (`--write` is append-only), a checkout whose origin uses the old path gets the hint
+  `git remote set-url origin <new url>`. Report these **loudly**; a rename is the most likely reason a
+  repo shows up `unlisted`.
 
 (c) is **informational only.** An archived repo is intact and still readable — never delete a checkout,
 never remove a `repos.md` row on the strength of it. `gone` (a 404) is the one that deserves a loud line:
-renamed, moved namespace, or deleted. Check before acting.
+moved out of reach or deleted (a rename shows up in (e) instead). Check before acting.
 
-### 6. `project_index.md` — rewrite only when the content changed
+### 6. `project_index.md` — rewrite only when the content changed (`index`)
 
 The index file is tracked in `bpp-backend`, so an unconditional rewrite leaves that repo dirty on every
-invocation. Generate the section, compare, write only on a difference, and report the dirty file.
-
-```bash
-INDEX=/home/alex/Entwicklung/bpp/bpp-backend/dev/apittrich/project_index.md
-{
-  echo '<!-- BEGIN AUTO:GITLAB-ONLY — generated by bpp-project-index refresh; do not edit by hand -->'
-  echo "## GitLab-only (not checked out locally) — auto-generated, refreshed $(date +%Y-%m-%d)"
-  echo
-  echo 'Repos in GitLab with no local checkout. Clone target: `~/Entwicklung/bpp/{name}` for every repo.'
-  echo
-  echo '| Repo | GitLab path | Class | Default branch |'
-  echo '|---|---|---|---|'
-  awk -F'\t' '!/^#/ && $7=="-" && $6=="active" {printf "| %s | `%s` | %s | %s |\n", $1, $2, $4, $8}' "$MANIFEST"
-  echo '<!-- END AUTO:GITLAB-ONLY -->'
-} > "$WORK/section.md"
-
-awk '/BEGIN AUTO:GITLAB-ONLY/{s=1} s{print} /END AUTO:GITLAB-ONLY/{s=0}' "$INDEX" > "$WORK/section.old"
-if ! diff -q <(grep -v 'refreshed 20' "$WORK/section.old") <(grep -v 'refreshed 20' "$WORK/section.md") >/dev/null; then
-  awk -v section="$WORK/section.md" '
-    /BEGIN AUTO:GITLAB-ONLY/ { while ((getline line < section) > 0) print line; skip=1; next }
-    /END AUTO:GITLAB-ONLY/   { skip=0; next }
-    !skip
-  ' "$INDEX" > "$WORK/index.new" && mv "$WORK/index.new" "$INDEX"
-  echo "project_index.md updated — bpp-backend now has an uncommitted change; the user decides when to commit."
-fi
-```
+invocation. `index` generates the `AUTO:GITLAB-ONLY` section (active repos with no checkout), compares it
+with the current block, writes only on a difference, and says when it left `bpp-backend` dirty.
 
 The `refreshed <date>` line is stripped from the comparison on purpose — otherwise the date alone would
 dirty the file daily. The **hand-written tables are user-maintained: source of truth, never edited by
@@ -313,7 +221,10 @@ Rules:
    is rejected, re-fetch and retry **once**, then report. Verified against the GitLab Commits API docs:
    `last_commit_id` is honoured on `update` actions.
 
+Preview first with `bash ~/.claude/skills/bpp-project-index/refresh.sh reposmd-diff`. After "go":
+
 ```bash
+KNOW=lipso%2Finternal%2Fagentic-coding-knowledge; WORK=$(mktemp -d)
 FILE=bpp/repos.md
 meta=$(glab api "projects/${KNOW}/repository/files/bpp%2Frepos.md?ref=main")
 last=$(echo "$meta" | jq -r '.last_commit_id')
@@ -344,15 +255,13 @@ That is a *default*, not an assertion — a checkout whose folder name differs f
 is never re-cloned.
 
 ```bash
-MAX_CLONE=${MAX_CLONE:-10}
-awk -F'\t' '!/^#/ && $7=="-" && $6=="active" && $4!~/^(infra|unlisted)$/ {print $1 "\t" $2}' "$MANIFEST" \
-  | head -n "$MAX_CLONE" \
-  | while IFS=$'\t' read -r name pathns; do
-      root=~/Entwicklung/bpp
-      [ -e "$root/$name/.git" ] && { echo "SKIP $name — already there"; continue; }
-      git clone "https://gitlab.com/${pathns}.git" "$root/$name" && echo "CLONED $name → $root/$name"
-    done
+bash ~/.claude/skills/bpp-project-index/refresh.sh clone-preview              # MAX_CLONE=10 by default
+bash ~/.claude/skills/bpp-project-index/refresh.sh clone <name> [<name>…]     # only after "go"
 ```
+
+`clone` takes only names from the preview set, skips a folder that already has `.git`, and clones to
+`~/Entwicklung/bpp/{name}` over HTTPS.
+
 
 - **Preview the list and the count first.** Wait for "go".
 - `class=unlisted` and `class=infra` are **not** cloned: an unclassified repo may be CI infra, a
@@ -406,6 +315,14 @@ refreshed first or the run reports that it was not.
 - **Treating `default_branch` as proof a stage branch exists** → it is not a promise that `staging`
   exists; consumers that need a stage branch probe it explicitly.
 - **Letting a lookup trigger network calls** → lookups must stay instant and offline-safe.
+- **Keeping a renamed repo's old path as its own row** → 2026-11-16: `repos.md` still named
+  `brokernet-fiab-connector` (now `bpp-fiab-connector`) and the old non-`templates/` path of
+  `bpp-shared-template`; the new paths showed as `unlisted` and the old rows were stale. Fold the old path
+  onto the new one (refresh does this), report `renamed old -> new`, and get `repos.md` fixed. Same for a
+  checkout whose `origin` still uses the old path: GitLab's redirect hides it until it breaks — report
+  `git remote set-url origin <new url>`.
+- **Inlining awk or bash positional variables in this file** → skill args replace dollar-digit
+  placeholders; code lives in `refresh.sh`.
 
 ## Red flags — STOP
 
