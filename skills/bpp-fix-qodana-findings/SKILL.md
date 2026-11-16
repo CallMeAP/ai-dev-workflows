@@ -19,7 +19,8 @@ Playbook for turning Qodana MR-pipeline findings into reviewable fix MRs across 
 4. **Confirmed false positives → inline suppression with a reason**, narrowest scope, at the site: C# `// ReSharper disable once <InspectionId>` (or `[SuppressMessage(..., Justification = "...")]` where an attribute fits) / TS `// noinspection <InspectionId>`, each with a one-line German reason (why it is a false positive). **No new `qodana.yaml` inspection excludes and no Qodana baseline** for false positives. Path excludes for generated/migration trees stay as config hygiene.
 5. **Auto-merge to `development`** when ALL hold: pipeline green (build, unit tests, qodana), the MR's fresh report holds no findings except the inline-suppressed false positives (i.e. empty), and **no unresolved discussion** — resolve every handled thread (reply first, then resolve) so the MR becomes mergeable. Merge via API with `should_remove_source_branch=true` (feature branch only; never touch `development`).
 6. **GitLab Duo requires a Bypass** (`requested_changes`, no API to bypass): **close the MR** with a note, then **push the same commits straight to `development`** (fast-forward or `git merge --no-ff` of the branch onto fresh `origin/development`, never force) and verify the dev pipeline.
-7. Anything not mergeable under 5/6 (red pipeline, residual genuine findings after the 3-round cap, open threads that need the user) stays open and is reported.
+7. **Clean up after every auto-merge or direct dev push:** remove that repo's Qodana fix worktree and local branch with `bpp-cleanup-merged-worktrees` — plan first, then `apply` only the merged Qodana worktree paths (never `--force`; worktrees of other work stay untouched).
+8. Anything not mergeable under 5/6 (red pipeline, residual genuine findings after the 3-round cap, open threads that need the user) stays open and is reported.
 
 ## Fetching results
 
