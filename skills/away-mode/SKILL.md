@@ -65,6 +65,12 @@ at launch, minus `/wf_<id>`). Shell variables do not persist between calls — w
 
 ## While away
 
+**Never wait for a mail reply** (user, 2026-11-16). Every open decision takes the recommended option right
+away, and the work, including implementation, starts at once. Mails only notify: each choice is listed in the
+next mail, and a later reply overrides it as a follow-up change. Only the hard gates below stop and wait:
+writes to production or dev/staging DBs, secrets, merges or other outward/irreversible actions the user has
+not authorised.
+
 | Event | Do |
 |---|---|
 | **Every** mail body | Starts with `🤖`, and carries the usage line: Claude plan (`~/.claude/state/usage.json`) and Codex 5h/week % when a Codex-backed run is active (eval driver log, else the newest `~/.codex/sessions/**/rollout-*.jsonl` `rate_limits`). |
