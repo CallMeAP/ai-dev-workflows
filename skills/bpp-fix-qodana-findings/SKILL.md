@@ -9,6 +9,18 @@ description: Use when fetching or fixing Qodana code-smell findings in BPP repos
 
 Playbook for turning Qodana MR-pipeline findings into reviewable fix MRs across the BPP fleet — distilled from the 2026-07-12 12-repo fleet run (11 MRs, ~250 real fixes, ~600 confirmed false positives). The core lesson: **a large share of BPP Qodana findings are scan artifacts, not code debt.** Classify first, fix second, and always ship the skipped-findings table so reviewers see what was deliberately left.
 
+## Fleet-run policy (user decisions 2026-11-16) — overrides older guidance below
+
+**Goal: a clean Qodana report per repo** — every genuine finding fixed, every confirmed false positive hidden in code, nothing left in the report.
+
+1. **Before any scan:** refresh `bpp-project-index` (must list `bpp-ccc-connector` and `bpp-fiab-connector`), then run `bpp-pull-all-dev` so every local checkout is on current `development`.
+2. **Scope:** every fleet repo with a qodana job, **except `bpp-agent`** (another Claude instance owns its Qodana work) **and `bpp-document-analysis`** (standing no-touch rule).
+3. **Report source:** the fix MR per repo IS the probe — branch from fresh `origin/development`, open the MR, its first pipeline gives the current report; fix, push, re-scan, repeat (verify loop below).
+4. **Confirmed false positives → inline suppression with a reason**, narrowest scope, at the site: C# `// ReSharper disable once <InspectionId>` (or `[SuppressMessage(..., Justification = "...")]` where an attribute fits) / TS `// noinspection <InspectionId>`, each with a one-line German reason (why it is a false positive). **No new `qodana.yaml` inspection excludes and no Qodana baseline** for false positives. Path excludes for generated/migration trees stay as config hygiene.
+5. **Auto-merge to `development`** when ALL hold: pipeline green (build, unit tests, qodana), the MR's fresh report holds no findings except the inline-suppressed false positives (i.e. empty), and **no unresolved discussion** — resolve every handled thread (reply first, then resolve) so the MR becomes mergeable. Merge via API with `should_remove_source_branch=true` (feature branch only; never touch `development`).
+6. **GitLab Duo requires a Bypass** (`requested_changes`, no API to bypass): **close the MR** with a note, then **push the same commits straight to `development`** (fast-forward or `git merge --no-ff` of the branch onto fresh `origin/development`, never force) and verify the dev pipeline.
+7. Anything not mergeable under 5/6 (red pipeline, residual genuine findings after the 3-round cap, open threads that need the user) stays open and is reported.
+
 ## Fetching results
 
 Latest MR pipeline's qodana report per repo (no artifact-zip download needed — direct file endpoint):
@@ -42,7 +54,7 @@ To force a qodana run against current development, per repo:
 
 No-report repos (probe is pointless — record + skip): `bpp-shared-template` (no `QODANA_TOKEN`).
 
-`bpp-agent` now runs Qodana on MRs. Its development baseline is **12 known false positives, 0 real findings** — proven on bpp-agent !116 (note 4238503679, pipeline #3070456278), left without code change or suppression pending the user's go: `EntityFramework.UnsupportedServerSideFunctionCall` ×7 (`Guid.CompareTo` keyset conditions — `ToQueryString()` shows EF Core 10/Npgsql translates them server-side), `TypeWithSuspiciousEqualityIsUsedInRecord.Global` ×4 (`ProposalEvalCase` record with `List<>` members; every record-equality use compares an object with itself; must stay a record for `with`), `UnusedAutoPropertyAccessor.Local` ×1 (`ApprovalsBeforeAfterDiffUtil` `Change` getter, read by `JsonSerializer` and asserted in tests). Count these as skipped, never "fix" them.
+`bpp-agent` now runs Qodana on MRs — **out of scope for fleet runs since 2026-11-16 (another Claude instance owns it)**; the notes below are background only. Its development baseline is **12 known false positives, 0 real findings** — proven on bpp-agent !116 (note 4238503679, pipeline #3070456278), left without code change or suppression pending the user's go: `EntityFramework.UnsupportedServerSideFunctionCall` ×7 (`Guid.CompareTo` keyset conditions — `ToQueryString()` shows EF Core 10/Npgsql translates them server-side), `TypeWithSuspiciousEqualityIsUsedInRecord.Global` ×4 (`ProposalEvalCase` record with `List<>` members; every record-equality use compares an object with itself; must stay a record for `with`), `UnusedAutoPropertyAccessor.Local` ×1 (`ApprovalsBeforeAfterDiffUtil` `Change` getter, read by `JsonSerializer` and asserted in tests). Count these as skipped, never "fix" them.
 
 ## THE dominant false-positive class: unresolved bpp-shared
 
@@ -65,7 +77,7 @@ The qodana CI component analyzes **without restoring the private BPP.Shared.NET 
 ## Never fix
 
 - `RedundantUsingDirective` — hard-skip class. Still **NOT fixed in Qodana 2025.3** (build QDNET-253.31810, image `jetbrains/qodana-dotnet:2025.3`); [QD-13872](https://youtrack.jetbrains.com/issue/QD-13872) was closed **"Incomplete"** with no fix version. Every sampled flagged `using` was actually required (extension methods / attributes / shared namespaces). User directive: never touch using directives based on Qodana.
-- `UnusedAutoPropertyAccessor.Global` / `Unused*` on DTOs/entities — consumed by other repos, JSON/EF serialization, reflection. In bpp-shared these are false positives BY DESIGN (consumers live in other repos). Suppress via qodana.yaml instead.
+- `UnusedAutoPropertyAccessor.Global` / `Unused*` on DTOs/entities — consumed by other repos, JSON/EF serialization, reflection. In bpp-shared these are false positives BY DESIGN (consumers live in other repos). Hide them with an inline suppression + reason (policy 2026-11-16), not via qodana.yaml.
 - `EntityFramework.ModelValidation.UnlimitedStringLength` — real, but = MaxLength decisions + DB migrations → separate ticket, never a smell-sweep edit.
 - Generated code (`*.g.cs`, EF `Migrations/*.Designer.cs`, model snapshots) — exclude via config, never edit.
 - Intent-preserving "redundancies": documented no-op `default:` switch sections, explicit switch arms that document a mapping table. Includes `PatternIsRedundant` on `X or Y or _ =>` mapper arms — the explicit enum values ARE the documented mapping table; never "simplify" a production mapper (vera ×5).
@@ -129,7 +141,7 @@ Caveat on `RedundantSuppressNullableWarningExpression`: `!` is compile-time-only
 Reducing a report to "3 safe fixes, close the rest" under-delivers. Every report classifies into **four fix/act buckets + two pure-skip buckets**:
 - **Fix now** — safe-mechanical tier (verified).
 - **Verified judgment tier** — fixed *after per-site verification*, never blind (e.g. unused private methods/dead injected fields, `ConditionalTernaryEqualBranch`, `PossibleMultipleEnumeration` → materialize, `NonReadonlyMemberInGetHashCode` → init-only, verified `RedundantSuppressNullableWarningExpression` removals). Several are real; don't dismiss the tier.
-- **Config-suppress (qodana.yaml)** — a real deliverable, not a skip: document-and-suppress serialization FPs (`Unused*.Global/.Local` on DTOs/test-helpers, `NotAccessedPositionalProperty.Global`) and exclude generated/migration trees.
+- **Suppress (inline, policy 2026-11-16; formerly qodana.yaml)** — a real deliverable, not a skip: document-and-suppress serialization FPs (`Unused*.Global/.Local` on DTOs/test-helpers, `NotAccessedPositionalProperty.Global`) and exclude generated/migration trees.
 - **Follow-up ticket** — `EntityFramework UnlimitedStringLength` (MaxLength + migration), `CheckNamespace` on a **public** shared type (renaming breaks consumers), possible latent bugs surfaced by an "unused" finding (e.g. a seeded-but-dropped result).
 - Pure-skip only: **Never-fix** (`RedundantUsingDirective`, `Unused*` consumed cross-repo) and — in a contaminated report only (see the 0.1.21 section) — the **bpp-shared-resolver artifacts** (`CS1574`/`NUnit1003`/shared-typed `RedundantCast`/`RedundantNameQualifier`). `*AccordingToAPIContract` is verified-judgment tier, not an artifact.
 
@@ -167,7 +179,6 @@ Both artifacts hold the **identical** finding set (verified 1189==1189). Downloa
 ### Driving a repo to 0 "new" findings (the honest ladder)
 "0 warnings" is achievable, but only by fixing genuine debt + suppressing intentional/FP residual — never blind-fixing (removing a correct `!` reintroduces real `CS8602`; deleting a defensive null-check adds latent bugs). Ladder, most-preferred first, **each entry justified in the MR**:
 1. **Fix** every genuine finding (safe-mechanical + verified-judgment + real `CS8604`/`CS8601` null-flow).
-2. **`qodana.yaml exclude: - name:`** for a whole-class FP (e.g. serialization-consumed `UnusedAutoPropertyAccessor`, all-FluentAssertions `RedundantSuppressNullableWarningExpression`).
-3. **Inline** `// ReSharper disable once <Inspection>` or `[SuppressMessage(…, Justification="…")]` for an individual intentional site.
-4. **qodana baseline** (commit current `qodana.sarif.json` as baseline) for the remaining known-intentional set so they stop counting as "new" — *verify the ci-component actually honors a baseline before relying on it*.
-Re-run the verify loop and confirm **0 new**; document the final split (fixed / excluded / inline-suppressed / baselined).
+2. **Inline** `// ReSharper disable once <Inspection>` / `// noinspection <Inspection>` or `[SuppressMessage(…, Justification="…")]` with a one-line German reason for every confirmed false positive (policy 2026-11-16).
+3. ~~`qodana.yaml exclude: - name:` for a whole-class FP~~ and ~~qodana baseline~~ — **not used any more** for false positives (policy 2026-11-16); only path excludes for generated/migration trees remain.
+Re-run the verify loop and confirm an **empty** report; document the final split (fixed / inline-suppressed with reasons) in the MR.
