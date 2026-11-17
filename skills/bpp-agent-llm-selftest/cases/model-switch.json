@@ -1,0 +1,68 @@
+[
+ {
+  "id": "ms-handover",
+  "chatText": "Merke dir für diesen Test den Code ZEBRA-{{RUN}} und antworte nur mit \"Notiert.\"",
+  "followUps": [
+   {
+    "text": "Meine Lieblingsfarbe ist Petrol. Was ist 17 mal 3?",
+    "expected": {
+     "result": "answer",
+     "anyTerms": [
+      "51"
+     ]
+    }
+   },
+   {
+    "text": "Nenne mir den Code, die Farbe und das Ergebnis von vorhin.",
+    "switchTo": {
+     "provider": "openai-codex",
+     "model": "gpt-6-astra"
+    },
+    "expected": {
+     "result": "answer",
+     "allTerms": [
+      "ZEBRA",
+      "Petrol",
+      "51"
+     ]
+    }
+   }
+  ],
+  "expected": {
+   "result": "answer",
+   "noCard": true
+  },
+  "rubric": "Turn 3 runs on the new model (agent_turn.model) and recalls all three facts.",
+  "channel": "chat",
+  "suite": "model-switch"
+ },
+ {
+  "id": "ms-read-count",
+  "chatText": "Wie viele Kunden habe ich?",
+  "expected": {
+   "result": "answer",
+   "anyTerms": [
+    "Kunden"
+   ],
+   "noCard": true
+  },
+  "rubric": "Same answer quality on the switched model.",
+  "channel": "chat",
+  "suite": "model-switch"
+ },
+ {
+  "id": "ms-read-contracts",
+  "chatText": "Welche Verträge hat Lena Feldhofner?",
+  "expected": {
+   "result": "answer",
+   "anyTerms": [
+    "Vertr",
+    "POL-"
+   ],
+   "noCard": true
+  },
+  "rubric": "Same answer quality on the switched model.",
+  "channel": "chat",
+  "suite": "model-switch"
+ }
+]

@@ -1,0 +1,112 @@
+[
+ {
+  "id": "rd-count-own",
+  "chatText": "Wie viele Kunden habe ich?",
+  "expected": {
+   "result": "answer",
+   "anyTerms": [
+    "Kunden"
+   ],
+   "noCard": true,
+   "toolCalls": [
+    {
+     "path": "/api/customer-search"
+    }
+   ]
+  },
+  "rubric": "Gives the own customer count (own pool, no group), calls them the broker's own.",
+  "channel": "chat",
+  "suite": "read"
+ },
+ {
+  "id": "rd-search",
+  "chatText": "Suche den Kunden Feldhofner.",
+  "expected": {
+   "result": "answer",
+   "anyTerms": [
+    "Feldhofner"
+   ],
+   "noCard": true
+  },
+  "rubric": "Finds Lena Feldhofner, names her, offers the next step; no invented data.",
+  "channel": "chat",
+  "suite": "read"
+ },
+ {
+  "id": "rd-multiturn",
+  "chatText": "Suche den Kunden Zehetgruber.",
+  "followUps": [
+   {
+    "text": "Welche Verträge hat er?",
+    "expected": {
+     "result": "answer",
+     "anyTerms": [
+      "Vertr",
+      "Polizze",
+      "POL-"
+     ]
+    }
+   },
+   {
+    "text": "Und wie heißt seine Versicherung beim ersten Vertrag?",
+    "expected": {
+     "result": "answer"
+    }
+   }
+  ],
+  "expected": {
+   "result": "answer",
+   "anyTerms": [
+    "Zehetgruber"
+   ],
+   "noCard": true
+  },
+  "rubric": "Keeps the customer across turns (er = Georg Zehetgruber), contracts listed from tool data.",
+  "channel": "chat",
+  "suite": "read"
+ },
+ {
+  "id": "rd-einsprung",
+  "chatText": "Öffne mir den Vertrag POL-EV-1121 von Stefan Stadlmayr in BPP.",
+  "expected": {
+   "result": "answer",
+   "anyTerms": [
+    "Stadlmayr",
+    "POL-EV-1121"
+   ],
+   "noCard": true
+  },
+  "rubric": "Answers with a working nested Einsprung link to the contract page (UI suite clicks it).",
+  "channel": "chat",
+  "suite": "read"
+ },
+ {
+  "id": "rd-unknown",
+  "chatText": "Welche Verträge hat Frau Xylophonia Quirrenbach?",
+  "expected": {
+   "result": "answer",
+   "forbiddenTerms": [
+    "POL-"
+   ],
+   "noCard": true
+  },
+  "rubric": "Says the customer was not found, invents nothing, offers a search variant.",
+  "channel": "chat",
+  "suite": "read"
+ },
+ {
+  "id": "rd-claims-open",
+  "chatText": "Hat Lena Feldhofner offene Schäden?",
+  "expected": {
+   "result": "answer",
+   "anyTerms": [
+    "Schad",
+    "Schäd"
+   ],
+   "noCard": true
+  },
+  "rubric": "Reads claims of the right customer; states open vs closed from tool data.",
+  "channel": "chat",
+  "suite": "read"
+ }
+]

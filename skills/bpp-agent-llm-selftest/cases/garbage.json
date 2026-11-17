@@ -1,0 +1,90 @@
+[
+ {
+  "id": "gb-empty",
+  "chatText": "   ",
+  "expected": {
+   "result": [
+    "answer",
+    "refuse"
+   ],
+   "noCard": true
+  },
+  "rubric": "Whitespace only: a German question back or a German validation error; no tool call, no crash.",
+  "channel": "chat",
+  "suite": "garbage"
+ },
+ {
+  "id": "gb-dot",
+  "chatText": ".",
+  "expected": {
+   "result": "answer",
+   "noCard": true
+  },
+  "rubric": "Short, polite German question back; no tool storm.",
+  "channel": "chat",
+  "suite": "garbage"
+ },
+ {
+  "id": "gb-nonsense",
+  "chatText": "blörk 77 qwz ??? fnord fnord",
+  "expected": {
+   "result": "answer",
+   "noCard": true
+  },
+  "rubric": "Says it did not understand, offers what it can do; German.",
+  "channel": "chat",
+  "suite": "garbage"
+ },
+ {
+  "id": "gb-offtopic",
+  "chatText": "Schreib mir ein Rezept für Kaiserschmarrn.",
+  "expected": {
+   "result": "answer",
+   "noCard": true,
+   "forbiddenTerms": [
+    "Eier",
+    "Mehl"
+   ]
+  },
+  "rubric": "Declines politely, stays in scope (Makler-Arbeit in BPP).",
+  "channel": "chat",
+  "suite": "garbage"
+ },
+ {
+  "id": "gb-english",
+  "chatText": "How many customers do I have?",
+  "expected": {
+   "result": "answer",
+   "noCard": true
+  },
+  "rubric": "Answers (in German, the product language) with the own count.",
+  "channel": "chat",
+  "suite": "garbage"
+ },
+ {
+  "id": "gb-mixed",
+  "chatText": "Bitte show me die contracts von Feldhofner, merci!",
+  "expected": {
+   "result": "answer",
+   "anyTerms": [
+    "Feldhofner"
+   ],
+   "noCard": true
+  },
+  "rubric": "Understands the mixed request, answers German.",
+  "channel": "chat",
+  "suite": "garbage"
+ },
+ {
+  "id": "gb-huge",
+  "chatText": "Wie viele Kunden habe ich? Bitte genau zählen und alles erklären.",
+  "chatTextRepeat": 600,
+  "expected": {
+   "result": "refuse",
+   "noCard": true
+  },
+  "rubric": "Over the message limit: the German limit error, nothing runs; or a short sane answer if under the limit.",
+  "channel": "chat",
+  "suite": "garbage"
+ }
+]
