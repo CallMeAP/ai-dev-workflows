@@ -45,6 +45,15 @@ a judge, one report and a fix stage. Every script lives in `scripts/` and reads 
 
 There is no critic suite: the critic was removed from the product (D-961).
 
+## Questions mode for long runs
+
+A full run takes hours and asks many small questions (stack choices, retries, which failing case to reword).
+Before an unattended run, tell the developer to switch questions off with `/interactive-questions-mode-off`,
+so the run picks the recommended option, logs it and keeps going instead of waiting for an answer.
+**The mode is global and persists across sessions:** tell the developer, in the same message, to turn it
+back on with `/interactive-questions-mode-on` when the run is done, and remind them again in the final report
+if it is still off. Hard safety gates (secrets, writes outside the demo DB, merges) still stop either way.
+
 ## Run
 
 ### 0 Setup (once per stack)

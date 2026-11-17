@@ -35,6 +35,15 @@ and `compare.env.example`. Run them through their interpreter. Env: `SELFTEST_EN
 - **Iterations**: at most `MAX_ITER` (default 5) tuning iterations per run; also stop after 2 rejected candidates in a row.
 - Exit 3/4: write the report with what ran, say which stop fired. Rerun the same command after a reset: finished cases are skipped.
 
+## Questions mode for long runs
+
+A full run takes hours and asks many small questions (stack choices, retries, which failing case to reword).
+Before an unattended run, tell the developer to switch questions off with `/interactive-questions-mode-off`,
+so the run picks the recommended option, logs it and keeps going instead of waiting for an answer.
+**The mode is global and persists across sessions:** tell the developer, in the same message, to turn it
+back on with `/interactive-questions-mode-on` when the run is done, and remind them again in the final report
+if it is still off. Hard safety gates (secrets, writes outside the demo DB, merges) still stop either way.
+
 ## Run
 
 ### 1 Challenger setup (ask first)
