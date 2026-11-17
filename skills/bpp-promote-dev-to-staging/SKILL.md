@@ -74,7 +74,7 @@ Background on the set (owned by the index, summarised here):
 | Description | short generated change summary (see "MR change summary" below) |
 | Assignee / Reviewer | none |
 
-These defaults are for promotion MRs. The UI MRs opened by the migration-guide audit (steps 3b and 4b) follow `bpp-migration-guide-audit` instead (reviewer chaslauer, target `development`, no deployment label).
+These defaults are for promotion MRs. The UI MRs opened by the migration-guide audit (steps 3b and 4b) follow `bpp-migration-guide-audit` instead (reviewer GitLabDuo only — chaslauer only on user confirm, target `development`, no deployment label).
 
 ## Version bump (extra step for the repos in the bump table)
 

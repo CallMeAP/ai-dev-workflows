@@ -1,13 +1,13 @@
 ---
 name: bpp-create-mr
-description: Use when turning current local work in a BPP .NET repo into a reviewed merge request — phrases like "create an MR", "open a merge request for my changes", "MR my pending work", "push this and make an MR", "create MR and run unit tests". Auto-branches off a protected branch, commits unstaged work, pushes, creates a GitLab MR targeting development assigned to yourself with the repo's reviewer (backend/.NET apittrich, Angular/frontend chaslauer), checks bpp-cypress for impacted specs (linked bpp-cypress MR when needed), runs unit tests, and pings when ready for an e2e run. Then watches the MR's Qodana job and GitLab Duo review: auto-fixes findings the MR introduced, fixes overlooked pre-existing ones when local and safe, replies to and resolves fixed Duo threads, and posts one MR comment explaining every Qodana finding left unfixed. Also use to re-run the watchers after undrafting an MR ("watch duo findings", "handle duo review").
+description: Use when turning current local work in a BPP .NET repo into a reviewed merge request — phrases like "create an MR", "open a merge request for my changes", "MR my pending work", "push this and make an MR", "create MR and run unit tests". Auto-branches off a protected branch, commits unstaged work, pushes, creates a GitLab MR targeting development assigned to yourself with the repo's reviewer (backend/.NET apittrich; Angular/frontend and bpp-cypress: GitLabDuo only, chaslauer only on user confirm), checks bpp-cypress for impacted specs (linked bpp-cypress MR when needed), runs unit tests, and pings when ready for an e2e run. Then watches the MR's Qodana job and GitLab Duo review: auto-fixes findings the MR introduced, fixes overlooked pre-existing ones when local and safe, replies to and resolves fixed Duo threads, and posts one MR comment explaining every Qodana finding left unfixed. Also use to re-run the watchers after undrafting an MR ("watch duo findings", "handle duo review").
 ---
 
 # bpp-create-mr
 
 ## Overview
 
-One-shot path from local work → reviewed MR in a BPP GitLab repo. Auto-creates a feature branch when on a protected branch, commits pending changes, **verifies the new public surface the branch adds (controller endpoints, public `I*Service` methods, DTO validation/mapper classes) is covered by tests**, pushes, creates (or reuses) an MR targeting `development` **assigned to yourself**, with the reviewer picked by repo kind (**apittrich** for .NET/backend repos, **chaslauer** for Angular/frontend repos), greps `bpp-cypress` for specs the change touches and opens a linked `bpp-cypress` MR when needed (step 6c), then runs the **unit** test suite as a regression gate. On green it pings the user that e2e can start; on red it reports the failures and pings — it never runs the e2e/integration suite itself (that's `bpp-run-integration-tests`). Finally a **Qodana watcher** (step 9) and a **GitLab Duo watcher** (step 10) run as one combined loop: per HEAD they wait for the qodana job (and, in round 1, Duo's single initial review), fix what the MR introduced, triage pre-existing findings, reply on (and resolve, when fixed) every Duo thread, and post one Qodana summary comment.
+One-shot path from local work → reviewed MR in a BPP GitLab repo. Auto-creates a feature branch when on a protected branch, commits pending changes, **verifies the new public surface the branch adds (controller endpoints, public `I*Service` methods, DTO validation/mapper classes) is covered by tests**, pushes, creates (or reuses) an MR targeting `development` **assigned to yourself**, with the reviewer picked by repo kind (**apittrich** for .NET/backend repos; Angular/frontend repos and bpp-cypress get no human reviewer by default, **chaslauer** only when the user confirms), greps `bpp-cypress` for specs the change touches and opens a linked `bpp-cypress` MR when needed (step 6c), then runs the **unit** test suite as a regression gate. On green it pings the user that e2e can start; on red it reports the failures and pings — it never runs the e2e/integration suite itself (that's `bpp-run-integration-tests`). Finally a **Qodana watcher** (step 9) and a **GitLab Duo watcher** (step 10) run as one combined loop: per HEAD they wait for the qodana job (and, in round 1, Duo's single initial review), fix what the MR introduced, triage pre-existing findings, reply on (and resolve, when fixed) every Duo thread, and post one Qodana summary comment.
 
 ## When to Use
 
@@ -24,7 +24,7 @@ Not for: bulk dev→staging promotion (`bpp-promote-dev-to-staging`), running e2
 | Push remote | `origin` (the cwd repo — **never** `glab-base`) |
 | Target branch | `development` |
 | Assignee | **yourself** — the authenticated glab user (`glab api user \| jq -r .username`). Never another person; the author drives the MR until merge |
-| Reviewer | by repo kind: `apittrich` for .NET/backend repos, `chaslauer` for Angular/frontend repos (`brokernet-cockpit-ui`, `bpp-stella-ui`/`go-stella`, `*-ui`) |
+| Reviewer | by repo kind: `apittrich` for .NET/backend repos; Angular/frontend repos (`brokernet-cockpit-ui`, `bpp-stella-ui`/`go-stella`, `*-ui`) and bpp-cypress get **no human reviewer** (GitLabDuo only). Add `chaslauer` only when the user confirms it for that MR (rule 2026-11-17) |
 | Protected branches | `development`, `staging`, `main`, `master` |
 | New branch prefix | `feature/` + kebab slug from the diff |
 | Commit message | auto-generated, conventional (`feat:`/`fix:`/`chore:` …) from the diff |
@@ -173,7 +173,7 @@ Never `--force`. A push to an existing MR's source branch updates that MR automa
 ```bash
 ME=$(glab api user | jq -r .username)                 # assignee is always the author
 case "$REPO" in                                        # reviewer follows the stack
-  brokernet-cockpit-ui|bpp-stella-ui|go-stella|*-ui) REVIEWER=chaslauer ;;
+  brokernet-cockpit-ui|bpp-stella-ui|go-stella|*-ui) REVIEWER="" ;;   # no default human reviewer; chaslauer only on user confirm (2026-11-17)
   *) REVIEWER=apittrich ;;
 esac
 
@@ -193,7 +193,7 @@ fi
 
 # Set assignee + reviewer explicitly afterwards — on the freshly created MR AND the reused one.
 # "+" adds: a bare --reviewer replaces the list and drops the auto-requested GitLabDuo.
-glab mr update "$IID" -R "$PROJ" --assignee "$ME" --reviewer "+$REVIEWER"
+if [ -n "$REVIEWER" ]; then glab mr update "$IID" -R "$PROJ" --assignee "$ME" --reviewer "+$REVIEWER"; else glab mr update "$IID" -R "$PROJ" --assignee "$ME"; fi
 
 # Group label work-ap: lists all misc MRs in one place (not on bpp-agent MRs, not on promotions).
 LABELS=$(glab api "/projects/$(printf %s "$PROJ" | sed 's#/#%2F#g')/merge_requests/$IID" | jq -r '.labels|join(",")')
@@ -336,7 +336,7 @@ if [ -z "$CIID" ]; then
 else
   glab api --method PUT "/projects/$CENC/merge_requests/$CIID" --raw-field "description=$CDESC" >/dev/null
 fi
-glab mr update "$CIID" -R "$CPROJ" --assignee "$ME" --reviewer "+chaslauer"
+glab mr update "$CIID" -R "$CPROJ" --assignee "$ME"   # no default reviewer; add --reviewer "+chaslauer" only on user confirm
 glab api --method PUT "/projects/$CENC/merge_requests/$CIID" -f add_labels=work-ap >/dev/null
 
 # cross-link: append the Cypress MR to the main MR's description (skip if already there)
@@ -558,9 +558,9 @@ Fixes follow 9d's loop: edit only the flagged site, build, unit tests, `git add 
 | Existing MR? | `glab api .../merge_requests?state=opened&source_branch=<b>&target_branch=development` |
 | Create MR | `glab api --method POST "/projects/<enc>/merge_requests" -f source_branch=… -f target_branch=development -f title=…` |
 | Label | `add_labels=work-ap` on every MR except `bpp-agent` ones |
-| Cypress impact (every MR) | `git -C ~/Entwicklung/bpp/bpp-cypress grep -n -F -f <patterns> origin/development -- cypress config`; hit/new UI → linked MR, same branch, `work-ap`, `chaslauer`, `cy:run:local -- --spec …` (step 6c) |
+| Cypress impact (every MR) | `git -C ~/Entwicklung/bpp/bpp-cypress grep -n -F -f <patterns> origin/development -- cypress config`; hit/new UI → linked MR, same branch, `work-ap`, no human reviewer (chaslauer only on user confirm), `cy:run:local -- --spec …` (step 6c) |
 | Guide (DTO/API change) | `bpp-endpoint-migration-guides`, folder `<repo>/`, direct push to `main`, no MR (step 6b) |
-| Set assignee+reviewer (always follow up) | `glab mr update <iid> -R lipso/clients/brokernet/<repo> --assignee <me> --reviewer +<apittrich\|chaslauer>` (`+` keeps GitLabDuo) |
+| Set assignee+reviewer (always follow up) | `glab mr update <iid> -R lipso/clients/brokernet/<repo> --assignee <me> --reviewer +apittrich` on .NET repos only (`+` keeps GitLabDuo); UI/cypress: no human reviewer unless the user confirms chaslauer |
 | Unit tests | `dotnet test <sln> --filter "Category!=LocalIntegration&Category!=Integration"` |
 | Ping | `PushNotification(status="proactive", message="…")` |
 | MR pipelines (qodana lives only here) | `glab api "projects/<enc>/merge_requests/<iid>/pipelines"` → pick `sha == HEAD` |
@@ -580,9 +580,9 @@ Fixes follow 9d's loop: edit only the flagged site, build, unit tests, `git add 
 - **Letting `glab` pick `glab-base`** → MR lands in bpp-shared. Always pin `-R lipso/clients/brokernet/<repo>` from `origin`.
 - **MR'ing from a protected branch** → `development→development` is empty / rejected. Auto-create a `feature/*` branch first.
 - **Including integration tests in the gate** → they need the local stack and trip bpp-auth's 429; this skill is unit-only (`Category!=LocalIntegration&Category!=Integration`).
-- **Using `glab mr create`** → unreliable here, and it drops `--reviewer`/`--assignee` at creation time. Create via `glab api --method POST …/merge_requests`, then always follow up with `glab mr update <iid> --assignee "$ME" --reviewer "$REVIEWER" -R lipso/clients/brokernet/<repo>` (on new and reused MRs).
+- **Using `glab mr create`** → unreliable here, and it drops `--reviewer`/`--assignee` at creation time. Create via `glab api --method POST …/merge_requests`, then always follow up with `glab mr update <iid> --assignee "$ME" --reviewer "+$REVIEWER" -R lipso/clients/brokernet/<repo>` (skip `--reviewer` when `$REVIEWER` is empty, i.e. UI/cypress repos; on new and reused MRs).
 - **Assigning the MR to the reviewer** → the author keeps the assignee slot (they push the fixes and drive it to merge); the other person goes in `--reviewer` only.
-- **Using the backend reviewer on a frontend MR** → Angular repos are reviewed by `chaslauer`, .NET repos by `apittrich`. Derive it from the repo, don't default blindly.
+- **Using the backend reviewer on a frontend MR** → .NET repos are reviewed by `apittrich`; Angular repos and bpp-cypress get no human reviewer by default (GitLabDuo only). Add `chaslauer` only when the user confirms it for that MR (2026-11-17). Derive it from the repo, don't default blindly.
 - **Duplicating an MR** → query open MRs for the source branch first; a push already updates an existing one.
 - **Committing an endpoint migration guide into the backend repo** → guides live in `bpp-endpoint-migration-guides/<repo>/`; push it straight to `main` there (step 6b) and link it.
 - **Skipping the Cypress grep because the change is backend-only** → `bpp-cypress` calls backend routes and reads JSON fields directly; a backend rename breaks the nightly dev run. Run 6c on every MR.

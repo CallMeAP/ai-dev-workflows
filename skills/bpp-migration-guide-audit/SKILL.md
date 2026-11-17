@@ -11,7 +11,7 @@ All endpoint migration guides of the backend repos live in one repo, `bpp-endpoi
 (`main` only, never promoted), one folder per backend repo: `<repo>/__<n>_<date>_<slug>_[].md`. The
 guide is done when its filename ends `_[X].md`. This skill finds every guide that is not `[X]` on that
 repo's `origin/main`, decides with cited evidence whether each target UI already applied it, and then
-either marks it done (applied) or opens a UI MR for chaslauer (not applied).
+either marks it done (applied) or opens a UI MR (not applied; GitLabDuo only, chaslauer only on user confirm).
 
 **Core rule: a verdict is evidence, not a guess.** Every `applied` / `not-applied` cites `file:line` or a
 commit on the UI's `origin/development`. Anything less is `unclear`, and `unclear` never triggers a write.
@@ -38,7 +38,7 @@ the step-4 dedupe still finds no open UI MR. If anything changed, skip the row a
 | UI state read from | `origin/development` of the UI repo (local checkouts sit on feature branches) |
 | Done-marker commit | ONE per run, directly on `main` of the guides repo (protected; maintainers may push), commits API `move`, message `docs(migration-guides): mark applied guides done [X]` + one body line per guide with its UI evidence |
 | UI MR target | `development` of the UI repo |
-| UI MR reviewer / assignee | `reviewer_ids=[2027196]` (chaslauer) / `assignee_id` = `glab api user \| jq .id` |
+| UI MR reviewer / assignee | `reviewer_ids=[21826781]` (GitLabDuo only; add 2027196 chaslauer only when the user confirms, rule 2026-11-17) / `assignee_id` = `glab api user \| jq .id` |
 | UI MR title | `feat(<area>): apply <backend repo> migration guide #<n> — <topic>` (prefix `Draft: ` when checks fail) |
 | UI MR branch | `feature/migration-guide-<backend repo>-<n>-<slug>` |
 | Label | none |
@@ -168,7 +168,7 @@ text, the target UI, the step-3 evidence, and this contract:
 ```bash
 glab api --method POST "/projects/$UI_ENC/merge_requests" \
   -f source_branch="$BRANCH" -f target_branch=development -f title="$TITLE" \
-  -f description="$DESC" -F "assignee_id=$ME" -F 'reviewer_ids=[2027196]'
+  -f description="$DESC" -F "assignee_id=$ME" -F 'reviewer_ids=[21826781]'
 ```
 
 `$DESC` contains, in order: the guide's folder link plus its filename
