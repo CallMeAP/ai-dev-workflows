@@ -79,12 +79,23 @@ not authorised.
 | Workflow completion notification | Copy the last phase's `result`-line decisions first, then the same mail with the result (MR links, tests, pipeline). Start the next queued workflow only if the away-mode request named it or the active handover queues it with the user's go; otherwise mail `[ACTION NEEDED]`. Remove the id from `watch.txt`. |
 | You launch a workflow | Append its run id to `watch.txt` right after launch. Never adopt ids by listing `<W>` (old runs flood mails). |
 | Auto-decision in the main session | Append to `decisions.md`; costly to revert → mail it at once. |
-| Hard gate (prod write, secret, unauthorized irreversible/outward action) | Stop that branch, mail `[ACTION NEEDED]` with options; wait for a mail or chat answer. |
+| Hard gate (prod write, secret, unauthorized irreversible/outward action) | Stop that branch, send an **urgent mail** (below) with options; wait for a mail or chat answer. |
+| Anything that needs the user's hands or expires (device-code link, login, a code valid N minutes) | **Urgent mail** (below), state the expiry time in the first line. |
 | `WATCH_ERROR` line | Check the journal path; mail one line if it persists. |
 | Queue empty, last workflow done | `TaskStop` the Monitor; keep the cron until `away-mode-off`. |
 | User types in chat | Chat wins; mention it in the next mail. |
 
 The last phase of a workflow is never a `PHASE_DONE` line — its completion notification covers it.
+
+**Urgent mail** (user, 2026-11-17): subject starts with `[URGENT ACTION NEEDED]` (replaces the old
+`[ACTION NEEDED]`). Right after sending, mark that message: `list_labels`, else `create_label(displayName="URGENT",
+colorPreset="LABEL_COLOR_PRESET_RED")` once; then `label_message(messageId=<id>, labelIds=[<URGENT id>, "IMPORTANT",
+"STARRED"])`. Gmail's red "!" superstar is a UI setting the API cannot pick — the red label is the colour.
+Its id → `sent-ids.txt` as usual.
+
+**Before the user leaves** (gotcha 2026-11-17: live LLM tests idled all night because the Codex device code expired
+at 02:15 while the user slept): ask in chat for everything that needs the user at the keyboard — Codex/OAuth
+links on any demo stack, logins, keys — and do it before the kick-off mail.
 
 ## Common mistakes
 
