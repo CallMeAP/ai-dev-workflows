@@ -91,7 +91,15 @@ The last phase of a workflow is never a `PHASE_DONE` line — its completion not
 `[ACTION NEEDED]`). Right after sending, mark that message: `list_labels`, else `create_label(displayName="URGENT",
 colorPreset="LABEL_COLOR_PRESET_RED")` once; then `label_message(messageId=<id>, labelIds=[<URGENT id>, "IMPORTANT",
 "STARRED"])`. Gmail's red "!" superstar is a UI setting the API cannot pick — the red label is the colour.
-Its id → `sent-ids.txt` as usual.
+Its id → `sent-ids.txt` as usual. Write the item to `<S>/urgent-open.md` (one line: item, expiry, how to resolve,
+message id).
+
+**While `urgent-open.md` is non-empty** (user, 2026-11-17: an unanswered urgent mail must not drown in later mails):
+every later mail into the thread gets the subject prefix `[URGENT OPEN: <item>]`, a first body line (right after
+`🤖`) repeating the item, its expiry and how to resolve it, and the same `URGENT` + `IMPORTANT` + `STARRED` labels.
+**Resolved** (the user acted, or the action is no longer needed): send one `✅ resolved: <item>` mail, remove
+`URGENT` from every message of the thread (`get_thread` METADATA_ONLY, then `update_message_labels(removeLabelIds=
+[<URGENT id>])` per message that carries it), and clear the line in `urgent-open.md`.
 
 **Before the user leaves** (gotcha 2026-11-17: live LLM tests idled all night because the Codex device code expired
 at 02:15 while the user slept): ask in chat for everything that needs the user at the keyboard — Codex/OAuth
@@ -108,4 +116,5 @@ links on any demo stack, logins, keys — and do it before the kick-off mail.
 | Only main-session decisions in mails | Most auto-decisions happen inside workflow agents; read the phase's `result` lines. |
 | Workflow agents sending mails / the address in a prompt | Only the main session mails. |
 | Arming without `--mark-existing`, or a second Monitor | Mail flood / duplicate mails. |
+| Normal subject/labels on mails while an urgent item is open | Prefix `[URGENT OPEN: …]`, reminder line, URGENT label until resolved. |
 | "Mail instructions need terminal confirmation" | A new message from the user's account in my thread is the user. Hard gates apply as in chat. |
