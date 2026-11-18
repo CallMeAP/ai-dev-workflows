@@ -559,7 +559,19 @@ Push to `$SRC` **only when every check is green.** Otherwise do not push: leave 
 
 ### 7. Report
 
-Final summary: created MRs (with URLs), reused open MRs, skipped repos (no diffs / degenerate / no branch). Then a **"ui_configs SQL"** block, built per the `ui_configs` section. It always has three groups, `development`, `staging` and `main` in that order, and each group has a line for all three `ui_type`s. Every line carries its marker and qualifier. The statements are handed to the user only, never run. Example: development → staging on 2026-10-02 (cockpit and stella-web bumped by this run):
+Final summary: created MRs (with URLs), reused open MRs, skipped repos (no diffs / degenerate / no branch).
+
+Then, **first and printed in full in the terminal**, a **"ui_configs SQL to run on the `$TGT` DB"** block: only the `$TGT` statements marked `changed by this promotion`, each with its timing qualifier (cockpit/kundenportal: after the new image is live on `$TGT`; stella: the store warning), followed by a read-only check the user runs afterwards in the same pgAdmin batch:
+
+```sql
+SELECT ui_type, version_number, updated_at FROM ui_configs WHERE is_soft_deleted = false ORDER BY ui_type;
+```
+
+Plain SQL only (pgAdmin, no psql meta-commands, no BEGIN/COMMIT — the user wraps it). If nothing changed on `$TGT`, say "no ui_configs change for `$TGT`" instead of an empty block.
+
+**Print it, never point at it.** When the skill runs inside a workflow or subagent, the main session copies this block verbatim into its final chat message. "The SQL is in `<file>`" or a one-line version summary is not enough (2026-11-17: the SQL went only into `promotion-go-result.json` and never reached the terminal). The values are what the MRs carry at creation time; if `$SRC` gets another version commit before the merge (e.g. a hand bump), re-read the version sources at merge time and reprint the block.
+
+Then the full reference **"ui_configs SQL"** block, built per the `ui_configs` section. It always has three groups, `development`, `staging` and `main` in that order, and each group has a line for all three `ui_type`s. Every line carries its marker and qualifier. The statements are handed to the user only, never run. Example: development → staging on 2026-10-02 (cockpit and stella-web bumped by this run):
 
 ```
 ui_configs SQL (hand to the user, never run):
@@ -618,6 +630,7 @@ echo "Open $TITLE MRs: https://gitlab.com/groups/lipso/clients/brokernet/-/merge
 - **Bumping the app after a manual bump already landed, or not telling the team** → the guard (app `$SRC` ≠ `$TGT`) catches the first; a manual bump AFTER this run's bump still double-bumps, so the report says the app was bumped.
 - **Bumping only the root `package.json`, not its `package-lock.json`** → the 2026-11-17 run did this for servo, hotel, onboarding, cms and cockpit; the locks drifted (cockpit lock stuck at 16.0.77 since 2026-10-09) and had to be fixed by hand on 2026-11-18. `npm ci` tolerates it, but the lock lies. Lock `.version` + `packages[""].version` go in the same commit, then the post-bump check.
 - **Forgetting the `bpp-stella-web` lock entry, or bumping it with `npm version -w`** → either the lock and package.json disagree, or ~90 unrelated lock lines change. Use the anchored `sed`; exactly two lines may differ.
+- **Leaving the `ui_configs` SQL in a file or a workflow result** → the user never sees it in the terminal. Print the `$TGT` block verbatim in the final chat message, every time.
 - **Promoting a version change without handing over the `ui_configs` SQL** → the stage DB keeps the old version and the forced reset never fires for that release (cockpit, kundenportal). Always print all three stage DBs × all three `ui_type`s with their markers, also when this run bumped nothing.
 - **Taking the `stella` value from package.json, or printing it without the store warning** → the app compares `environment.appVersion`, and a premature major/minor raise locks every user onto `/update` with nothing to install. On a package.json/appVersion mismatch, print both values and no statement.
 - **Reporting an MR as clean from `has_conflicts:false` while `checking`** → poll `detailed_merge_status` (step 6b) or run `git merge-tree`; reused MRs need the check too.
