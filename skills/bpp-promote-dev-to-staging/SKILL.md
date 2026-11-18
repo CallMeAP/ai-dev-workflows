@@ -78,29 +78,29 @@ These defaults are for promotion MRs. The UI MRs opened by the migration-guide a
 
 ## Version bump (extra step for the repos in the bump table)
 
-**The repos in the table below need a version bump on the source branch BEFORE the promotion MR is created.** Rule: **raise the PATCH version when promoting** — applies to BOTH directions.
+**The repos in the table below need a version bump on the source branch BEFORE the promotion MR is created.** Rule: **raise the PATCH version when promoting** — applies to BOTH directions. One exception: the go-stella **app** in `bpp-stella-ui` gets a **MINOR** bump, development → staging only (see the `bpp-stella-ui` subsection).
 
 Affected repos (exactly these nine):
 
 | Repo | Version file | Version anchor |
 |------|--------------|----------------|
-| `bpp-stella-ui` | `projects/bpp-stella-web/package.json` **+** its workspace entry in the root `package-lock.json` | `.version` — see the `bpp-stella-ui` subsection; never the app or common |
-| `callidus-bvs-ui` | root `package.json` | `.version` |
-| `servo-ui` | root `package.json` | `.version` |
-| `brokernet-cockpit-ui` | root `package.json` | `.version` |
-| `brokernet-hotel-ui` | root `package.json` | `.version` |
-| `brokernet-onboarding-ui` | root `package.json` | `.version` |
-| `bpp-document-analysis-dashboard` | root `package.json` | `.version` |
-| `brokernet-document-cms` | root `package.json` | `.version` |
+| `bpp-stella-ui` | `projects/bpp-stella-web/package.json` **+** its workspace entry in the root `package-lock.json`; dev→staging also the go-stella app (16 files) | `.version` — see the `bpp-stella-ui` subsection; never common, never the root `0.0.0` |
+| `callidus-bvs-ui` | root `package.json` **+** root `package-lock.json` | `.version`; lock `.version` + `packages[""].version` |
+| `servo-ui` | root `package.json` **+** root `package-lock.json` | `.version`; lock `.version` + `packages[""].version` |
+| `brokernet-cockpit-ui` | root `package.json` **+** root `package-lock.json` | `.version`; lock `.version` + `packages[""].version` |
+| `brokernet-hotel-ui` | root `package.json` **+** root `package-lock.json` | `.version`; lock `.version` + `packages[""].version` |
+| `brokernet-onboarding-ui` | root `package.json` **+** root `package-lock.json` | `.version`; lock `.version` + `packages[""].version` |
+| `bpp-document-analysis-dashboard` | root `package.json` **+** root `package-lock.json` | `.version`; lock `.version` + `packages[""].version` |
+| `brokernet-document-cms` | root `package.json` **+** root `package-lock.json` | `.version`; lock `.version` + `packages[""].version` |
 | `brokernet-varias-sign` | root `pom.xml` | the project `<version>` — the first one **after** `</parent>`. The first `<version>` in the file is the spring-boot parent (`2.7.2`); never touch it. |
 
 Why `brokernet-document-cms` and `brokernet-varias-sign` are in: their image build refuses to overwrite an existing tag — `main with tag 4.2.2-SNAPSHOT already exists!` / `main with tag 11.0.0 already exists!` — so an un-bumped promotion merges but **skips deploy**.
 
 The `bpp-*` backends do NOT get a bump — MR only.
 
-### `bpp-stella-ui` (formerly `brokernet-app`, go-stella) — bump the web project only
+### `bpp-stella-ui` (formerly `brokernet-app`, go-stella) — bump the web project, and the app on dev→staging
 
-An npm-workspaces monorepo (`projects/*`): `bpp-stella-app` (the mobile app), `bpp-stella-web` (the Kundenportal), `bpp-stella-common`. The repo root `package.json` is `0.0.0` and never changes.
+An npm-workspaces monorepo (`projects/*`): `bpp-stella-app` (the mobile app), `bpp-stella-web` (the Kundenportal), `bpp-stella-common`. The repo root `package.json` is `0.0.0` and never changes; so are the root lock `.version` and `packages[""].version` (the root-lock rule under "Mechanics" does not apply to this repo).
 
 **`bpp-stella-web` IS bumped** (user decision 2026-10-02) — same patch rule and idempotency guard as the other rows, read from `projects/bpp-stella-web/package.json` on both branches. Its staging/main web image is tagged with that version. Exactly two lines change, one per file: the `version` in `projects/bpp-stella-web/package.json`, and the `"projects/bpp-stella-web"` workspace entry in the root `package-lock.json` (present on development/staging/main, verified 2026-10-02). Patch the lock with an anchored `sed`, never `npm version -w` (it runs a full install and rewrites unrelated lock entries). The lock is ~1.4 MB, which is too big for a `-f content=` argument (`Argument list too long`), so commit both files in ONE commit as JSON on stdin (`$OLD`/`$NEW` from the guard and patch rule under "Mechanics", `$BUMP_MSG` = the direction table's bump commit msg):
 
@@ -119,16 +119,96 @@ jq -n --arg b "$SRC" --arg m "$BUMP_MSG" --rawfile w web.json --rawfile l lock.j
   | glab api --method POST "/projects/$P/repository/commits" -H 'Content-Type: application/json' --input -
 ```
 
-**`bpp-stella-app` and `bpp-stella-common` are NEVER bumped here.** That rules out their `package.json`, their lock entries and every `environment*` file. The app version does **not** live in one `package.json`. It sits in **16 files across 4 ecosystems** (Gradle `versionName`, Xcode `MARKETING_VERSION`, npm, and 12 Angular `src/environments/*` files). A naive bump leaves the app reporting inconsistent versions across platforms, and a global search-replace on the pbxproj corrupts the 2 `MARKETING_VERSION` lines that belong to a separate Xcode extension target with its own release cadence.
+**`bpp-stella-common` is NEVER bumped here.**
 
-The app has its own dedicated skill, maintained by nangert, which handles all 16 files with a hard verification gate:
-<https://gitlab.com/lipso/internal/agentic-coding-knowledge/-/blob/main/personal-workflows/nangert/skills/stella-bump-version-staging-mr/SKILL.md>
+#### go-stella app bump (development → staging only; user decision 2026-11-18)
 
-Rules when a promotion wave includes `bpp-stella-ui`:
-- **Never** bump the app's version from this skill. The `bpp-stella-web` bump above is the only version change this skill makes in the repo.
-- If the wave needs a go-stella release bump, hand that off to `stella-bump-version-staging-mr` (or the user) **first**, then create the promotion MR here so the bump commit rides in it.
-- If no app bump is wanted, the app goes MR-only, riding along with the web bump. That is the default.
-- Note that skill targets **`development` -> `staging`** and the `staging-deployment` **label** (not a git tag). For `staging` -> `main` it does not apply — bump handling there is out of its scope; ask the user.
+**Why:** until 2026-11-18 this skill never bumped the app and relied on someone doing it by hand. The 2026-11-17 run (!512) shipped app `1.40.0` unchanged on both branches; chaslauer bumped it by hand the next day (`ebf31047`, 1.40.0 → 1.41.0). Every earlier promotion with app changes got that manual commit too (11-13: `b7f3650b` 1.39.0 → 1.40.0, ten minutes after the web bump). So this skill now does it.
+
+**The file list and anchors are nangert's** — `stella-bump-version-staging-mr` (<https://gitlab.com/lipso/internal/agentic-coding-knowledge/-/blob/main/personal-workflows/nangert/skills/stella-bump-version-staging-mr/SKILL.md>, local copy `~/.claude/skills/stella-bump-version-staging-mr/SKILL.md`; read-only for us, never edit it). If that skill's list or seds change, follow it. The app version sits in **16 files across 4 ecosystems**:
+
+- root `package-lock.json` — only the `"projects/bpp-stella-app"` workspace entry;
+- `projects/bpp-stella-app/package.json`;
+- `projects/bpp-stella-app/android/app/build.gradle` — `versionName`;
+- `projects/bpp-stella-app/ios/App/App.xcodeproj/project.pbxproj` — the **6** `MARKETING_VERSION = <app>;` lines. The other **2** (`1.0.16`, bundle id `app.goplattform.at`) belong to a separate Xcode extension target with its own cadence and must stay untouched;
+- the **12** files in `projects/bpp-stella-app/src/environments/` (`appVersion`, incl. `environment.emulator.ts` and `environment.appium.js`) — **except** `environment.local-network.ts`, stale at `1.5.0` on purpose.
+
+Never the root `package.json` / lock `.version` / `packages[""]` (all `0.0.0`). Never `npm version` (full install, ~90 lines of lock noise).
+
+**Rules:**
+
+1. **Idempotency guard, at bump time** (not at preview time): `projects/bpp-stella-app/package.json` `.version` on `$SRC` ≠ on `$TGT` → already bumped (by hand or an earlier run) → skip.
+2. **When:** only if the `$TGT`…`$SRC` compare touches a non-`*.spec.ts` file under `projects/bpp-stella-app/` or `projects/bpp-stella-common/`. If the compare payload is truncated, treat it as touched. No such change → no app bump; the preview says so, and the user can still ask for one at "go". (Inferred from history: 10-02 and 11-07 shipped without an app bump.)
+3. **Increment: MINOR**, `X.Y.Z` → `X.(Y+1).0`. Patch is used only for `main` hotfixes. NEW must sort above `main`'s app version (`sort -V`), else STOP.
+4. **Own commit**, message `chore: bump version to <NEW>` (matches history and nangert's skill) — separate from the web `raise version for staging` commit.
+5. **staging → main: no app bump.** The app version that staging carries is promoted as is.
+6. The preview row says `+ app bump <OLD> → <NEW>` (or `app: no bump (<reason>)`) so the single "go" covers it.
+
+Run this block in its own bash call: the guard and `STOP` end it with `exit`.
+
+```bash
+STOP() { echo "STOP — do not commit; report counts" >&2; exit 1; }
+P=${ENC[bpp-stella-ui]}; A=projects/bpp-stella-app; D="$WORK/app-bump"; mkdir -p "$D/orig" "$D/new"
+AOLD=$(glab api "/projects/$P/repository/files/projects%2Fbpp-stella-app%2Fpackage.json/raw?ref=$SRC" | jq -r .version)
+ATGT=$(glab api "/projects/$P/repository/files/projects%2Fbpp-stella-app%2Fpackage.json/raw?ref=$TGT" | jq -r .version)
+AMAIN=$(glab api "/projects/$P/repository/files/projects%2Fbpp-stella-app%2Fpackage.json/raw?ref=main" | jq -r .version)
+[ "$AOLD" = "$ATGT" ] || { echo "app already bumped: $ATGT -> $AOLD, skip"; exit 0; }    # guard → skip the rest
+IFS=. read -r MA MI PA <<<"$AOLD"; ANEW="$MA.$((MI + 1)).0"
+[ "$(printf '%s\n' "$AMAIN" "$ANEW" | sort -V | tail -1)" = "$ANEW" ] && [ "$ANEW" != "$AMAIN" ] || STOP
+
+# the 16 files: 4 fixed + the env dir minus local-network (must be exactly 12)
+FILES=(package-lock.json "$A/package.json" "$A/android/app/build.gradle" "$A/ios/App/App.xcodeproj/project.pbxproj")
+ENVS=$(glab api "/projects/$P/repository/tree?path=$A/src/environments&ref=$SRC&per_page=100" \
+  | jq -r '.[].name | select(startswith("environment") and . != "environment.local-network.ts")')
+[ "$(echo "$ENVS" | wc -l)" -eq 12 ] || STOP                       # layout drift: new/removed env file
+for f in $ENVS; do FILES+=("$A/src/environments/$f"); done
+for f in "${FILES[@]}"; do                                          # content + last_commit_id in one call
+  k=$(echo "$f" | tr / _)
+  glab api "/projects/$P/repository/files/$(jq -rn --arg p "$f" '$p|@uri')?ref=$SRC" > "$D/$k.meta"
+  jq -r .content "$D/$k.meta" | base64 -d > "$D/orig/$k"; cp "$D/orig/$k" "$D/new/$k"
+done
+L="$D/new/package-lock.json"; PBX="$D/new/$(echo "$A/ios/App/App.xcodeproj/project.pbxproj" | tr / _)"
+
+# consistency precheck on $SRC — every anchor must sit at AOLD, else STOP and report the mismatch
+[ "$(sed -n '/^    "projects\/bpp-stella-app": {$/,+2p' "$L" | grep -c "^      \"version\": \"$AOLD\",$")" -eq 1 ] || STOP
+[ "$(grep -c "versionName = \"$AOLD\"" "$D/new/$(echo "$A/android/app/build.gradle" | tr / _)")" -eq 1 ] || STOP
+[ "$(grep -c "MARKETING_VERSION = $AOLD;" "$PBX")" -eq 6 ] || STOP
+grep -o 'MARKETING_VERSION = [^;]*;' "$PBX" | grep -v "= $AOLD;" | sort | uniq -c              # record (today: 2x 1.0.16)
+for f in $ENVS; do [ "$(grep -c "appVersion: '$AOLD'" "$D/new/$(echo "$A/src/environments/$f" | tr / _)")" -eq 1 ] || STOP; done
+
+# patch — nangert's anchored seds, unchanged
+sed -i "/^    \"projects\/bpp-stella-app\": {$/,+2 s/^      \"version\": \"$AOLD\",$/      \"version\": \"$ANEW\",/" "$L"
+sed -i "s/^  \"version\": \"$AOLD\",$/  \"version\": \"$ANEW\",/" "$D/new/$(echo "$A/package.json" | tr / _)"
+sed -i "s/versionName = \"$AOLD\"/versionName = \"$ANEW\"/" "$D/new/$(echo "$A/android/app/build.gradle" | tr / _)"
+sed -i "s/MARKETING_VERSION = $AOLD;/MARKETING_VERSION = $ANEW;/g" "$PBX"
+for f in $ENVS; do sed -i "s/appVersion: '$AOLD'/appVersion: '$ANEW'/" "$D/new/$(echo "$A/src/environments/$f" | tr / _)"; done
+
+# verify — 1 changed line per file (6 in the pbxproj), 21 in total; extension lines + trailing newlines intact
+T=0; for f in "${FILES[@]}"; do k=$(echo "$f" | tr / _)
+  n=$(diff "$D/orig/$k" "$D/new/$k" | grep -c '^>'); echo "$n $f"; T=$((T + n))
+  cmp -s <(tail -c1 "$D/orig/$k") <(tail -c1 "$D/new/$k") || STOP
+done; [ "$T" -eq 21 ] || STOP
+grep -c 'MARKETING_VERSION = 1.0.16;' "$PBX"                                                    # MUST be 2 (same as recorded)
+
+# one commit, 16 update actions, JSON on stdin (the lock is ~1.4 MB); last_commit_id rejects a file that moved since the read
+echo '[]' > "$D/actions.json"
+for f in "${FILES[@]}"; do k=$(echo "$f" | tr / _)
+  jq --arg p "$f" --rawfile c "$D/new/$k" --arg lc "$(jq -r .last_commit_id "$D/$k.meta")" \
+    '. + [{action:"update", file_path:$p, content:$c, last_commit_id:$lc}]' "$D/actions.json" > "$D/a.tmp" && mv "$D/a.tmp" "$D/actions.json"
+done
+jq -n --arg b "$SRC" --arg m "chore: bump version to $ANEW" --slurpfile a "$D/actions.json" \
+  '{branch:$b, commit_message:$m, actions:$a[0]}' \
+  | glab api --method POST "/projects/$P/repository/commits" -H 'Content-Type: application/json' --input -
+
+# re-read every file on $SRC: byte-identical to what was sent, else report
+for f in "${FILES[@]}"; do k=$(echo "$f" | tr / _)
+  glab api "/projects/$P/repository/files/$(jq -rn --arg p "$f" '$p|@uri')/raw?ref=$SRC" | cmp -s - "$D/new/$k" || echo "MISMATCH $f"
+done
+```
+
+`STOP` = do not commit; report the file and the counts. Append the session's Co-Authored-By trailer to the commit message per the attribution rule.
+
+**Risk — double bump.** If someone bumps the app by hand AFTER this run, the app jumps twice (e.g. 1.42.0). The guard only protects the other order. Say in the report that this run bumped the app, so the team does not do it again.
 
 Mechanics, per affected repo that will get an MR:
 
@@ -136,8 +216,37 @@ Mechanics, per affected repo that will get an MR:
    - `package.json`: `jq -r .version`
    - `pom.xml`: `sed -n '/<\/parent>/,$p' | grep -m1 -oP '(?<=<version>)[^<]+'`
 2. Bump the patch component: `X.Y.Z[-SUFFIX]` → `X.Y.(Z+1)[-SUFFIX]` (keep any `-SNAPSHOT`-style suffix verbatim). Change **only that one line**; diff old vs new before committing — exactly one line may differ, and the trailing newline must survive.
-3. Commit it on the **source branch** with the direction's bump message, via the GitLab commits API (update action on the version file) — or via a local clean checkout already on the source branch if one exists (then push plain; report so other checkouts get pulled). Never force-push.
-4. Then create the promotion MR as usual — the bump commit rides in it.
+   - **Root `package.json` rows: the root `package-lock.json` moves with it, in the SAME commit** — its top-level `"version"` (line 3) and `packages[""].version` (line 9), both set to NEW. Exactly 1 line differs in `package.json` and exactly 2 in the lock. If the lock is already behind (`LOLD` ≠ OLD — the 2026-11-18 audit found servo, hotel, onboarding, cms and cockpit all drifted, cockpit since 2026-10-09 — fixed that day; callidus-bvs-ui (lock 7.0.0-SNAPSHOT vs 7.0.10-SNAPSHOT) and bpp-document-analysis-dashboard (lock 0.0.10 vs 0.0.16) were drifted too and left for their next bump), sync it to NEW anyway and say so in the report. No lock in the repo (404) → `package.json` only, and say so.
+3. Commit it on the **source branch** with the direction's bump message, via the GitLab commits API (update action on the version file; for `package.json` + lock: one commit with both actions, JSON on stdin — the locks are ~1 MB+, too big for `-f content=`) — or via a local clean checkout already on the source branch if one exists (then push plain; report so other checkouts get pulled). Never force-push, never `npm version` / `npm install`.
+
+   Run it once per repo, in its own bash call (`STOP` ends it with `exit`).
+
+   ```bash
+   STOP() { echo "STOP — do not commit; report counts" >&2; exit 1; }
+   P=${ENC[$repo]}
+   glab api "/projects/$P/repository/files/package.json?ref=$SRC" > pkg.meta
+   jq -r .content pkg.meta | base64 -d > pkg.json;  cp pkg.json pkg.orig
+   sed -i "s/^  \"version\": \"$OLD\",$/  \"version\": \"$NEW\",/" pkg.json
+   diff pkg.orig pkg.json; [ "$(diff pkg.orig pkg.json | grep -c '^>')" -eq 1 ] || STOP
+   jq -n --rawfile p pkg.json --arg pc "$(jq -r .last_commit_id pkg.meta)" \
+     '[{action:"update", file_path:"package.json", content:$p, last_commit_id:$pc}]' > actions.json
+   if glab api "/projects/$P/repository/files/package-lock.json?ref=$SRC" > lock.meta 2>/dev/null; then
+     jq -r .content lock.meta | base64 -d > lock.json; cp lock.json lock.orig
+     LOLD=$(jq -r .version lock.json)
+     [ "$LOLD" = "$(jq -r '.packages[""].version' lock.json)" ] || STOP        # lock disagrees with itself → report, no commit
+     sed -i "1,/^  \"packages\": {$/ s/^  \"version\": \"$LOLD\",$/  \"version\": \"$NEW\",/" lock.json
+     sed -i "/^    \"\": {$/,+2 s/^      \"version\": \"$LOLD\",$/      \"version\": \"$NEW\",/" lock.json
+     diff lock.orig lock.json; [ "$(diff lock.orig lock.json | grep -c '^>')" -eq 2 ] || STOP   # lock lines 3 and 9
+     jq --rawfile l lock.json --arg lc "$(jq -r .last_commit_id lock.meta)" \
+       '. + [{action:"update", file_path:"package-lock.json", content:$l, last_commit_id:$lc}]' actions.json > a.tmp && mv a.tmp actions.json
+   else
+     echo "no package-lock.json on $SRC: package.json only"                    # say so in the report
+   fi
+   jq -n --arg b "$SRC" --arg m "$BUMP_MSG" --slurpfile a actions.json '{branch:$b, commit_message:$m, actions:$a[0]}' \
+     | glab api --method POST "/projects/$P/repository/commits" -H 'Content-Type: application/json' --input -
+   ```
+4. **Post-bump check** (every `package.json` row, and `bpp-stella-web` / the app against their lock entries): re-read on `$SRC` — `package.json` `.version`, lock `.version` and lock `packages[""].version` must all equal NEW. Any disagreement → report it as a failure of the bump, never as done.
+5. Then create the promotion MR as usual — the bump commit rides in it.
 
 The preview (step 4) must mark which repos will receive a bump so the user confirms both actions with one "go".
 
@@ -156,7 +265,7 @@ The preview (step 4) must mark which repos will receive a bump so the user confi
 |---|---|---|---|
 | `cockpit` | `brokernet-cockpit-ui` root `package.json` | literal, `-SNAPSHOT` included | run once that stage runs the new build |
 | `kundenportal` | `bpp-stella-ui` `projects/bpp-stella-web/package.json` | literal, `-SNAPSHOT` included | run **after** the new web image is live on that stage. **development DB: optional**, "only if a reset is wanted on dev" (dev images are sha-tagged) |
-| `stella` | `bpp-stella-ui` `environment.appVersion` (see below), cross-checked against `projects/bpp-stella-app/package.json` | plain `major.minor.patch`, any `-SNAPSHOT` stripped | the store warning below; never bumped by this skill |
+| `stella` | `bpp-stella-ui` `environment.appVersion` (see below), cross-checked against `projects/bpp-stella-app/package.json` | plain `major.minor.patch`, any `-SNAPSHOT` stripped | the store warning below; bumped by this skill on development → staging (go-stella app bump), so `$SRC` and `$TGT` are `changed by this promotion` when it ran |
 
 Statement shape, one per `ui_type` and stage DB. The audit columns follow bpp-backend's `01-seed-ui-configs-*.sql` convention:
 
@@ -317,7 +426,9 @@ Print four groups: repos that WILL get an MR (diffs, no existing MR), repos SKIP
 Will create MR for:
   bpp-backend             (3 commits, 12 files)
   bpp-auth                (1 commit, 2 files)
-  brokernet-hotel-ui      (2 commits, 5 files)  + patch-version bump 4.0.1 → 4.0.2
+  brokernet-hotel-ui      (2 commits, 5 files)  + patch-version bump 4.0.1 → 4.0.2 (package.json + lock)
+  bpp-stella-ui           (9 commits, 40 files) + web bump 1.3.3-SNAPSHOT → 1.3.4-SNAPSHOT
+                                                + app bump 1.40.0 → 1.41.0 (16 files)
   ...
 
 Skipping (no content diffs):
@@ -355,7 +466,7 @@ If the audit fails, report it in step 7 and continue. It never blocks the promot
 
 Every promotion MR gets a SHORT generated description summarizing what the promotion ships. Build it from the compare response already fetched in step 2:
 
-1. **Commits** → group by conventional prefix / ticket key (`BRO-xxxx`) → one bullet per feature/fix theme, not one per commit. Drop pure merge commits and version-bump noise from the bullets.
+1. **Commits** → group by conventional prefix / ticket key (`BRO-xxxx`) → one bullet per feature/fix theme, not one per commit. Drop pure merge commits and version-bump noise from the bullets. Exception: `bpp-stella-ui` always gets one line on the app version — `go-stella app <OLD> -> <NEW>` or `go-stella app unchanged (<reason>)` — so the reader knows a store release is due.
 2. **Files** (`diffs[]`) → categorize: added (`new_file`), removed (`deleted_file`), renamed (`renamed_file`), modified (the rest). Report counts + call out high-signal paths explicitly: **DB migrations** (`Migrations/`), **CI** (`.gitlab-ci.yml`), **config** (`appsettings.*`), **version bumps** (`package.json` / `Directory.Build.props`).
 3. **TRAP — the compare payload is TRUNCATED on big promotions**: per-file diff content can be missing hunks and the file list itself can be capped. Treat counts from a truncated payload as a lower bound ("N+ files") and NEVER claim "X was not changed/removed" from compare output — verify via `/repository/files/<path>/raw?ref=` on both branches when it matters.
 4. Keep it short — Markdown, ≤ ~15 lines:
@@ -377,7 +488,7 @@ Omit empty categories. Pass it via `-f description="$DESC"` on the POST. If the 
 
 Only for repos with `NDIFFS[$repo] > 0` AND no existing open MR. Declare `declare -A MR_IID` before the loop.
 
-**Repos in the bump table first get the patch-version bump** (see "Version bump" section above — guard, bump, commit on `$SRC`), then the MR:
+**Repos in the bump table first get the patch-version bump** (see "Version bump" section above — guard, bump, commit on `$SRC`, post-bump check; `bpp-stella-ui` on development → staging also the go-stella app minor bump), then the MR:
 
 ```bash
 for repo in "${REPOS[@]}"; do
@@ -501,7 +612,11 @@ echo "Open $TITLE MRs: https://gitlab.com/groups/lipso/clients/brokernet/-/merge
 - **Adding assignee / reviewer** → defaults only; only override if user explicitly asks.
 - **Forgetting the patch-version bump** → the nine repos in the bump table (six UIs + stella-web + document-cms + varias-sign) need the patch bump committed on the source branch BEFORE the MR; backends don't. Missing it on document-cms / varias-sign does not fail the MR — it fails the **target** pipeline with `<stage> with tag <version> already exists!` and silently skips deploy.
 - **Bumping the spring-boot parent in `brokernet-varias-sign/pom.xml`** → the first `<version>` in the file is the parent; the project version is the first one after `</parent>`.
-- **Bumping the go-stella app in `bpp-stella-ui`** → the app version lives in 16 files across Gradle / Xcode / npm / Angular envs, not one `package.json`. Never bump `bpp-stella-app` or `bpp-stella-common` here; the app has its own skill ([stella-bump-version-staging-mr](https://gitlab.com/lipso/internal/agentic-coding-knowledge/-/blob/main/personal-workflows/nangert/skills/stella-bump-version-staging-mr/SKILL.md)). Only `projects/bpp-stella-web/package.json` and its lock entry are bumped.
+- **Leaving the go-stella app un-bumped on development → staging** → 2026-11-17 (!512) shipped app 1.40.0 on both branches and the app bump came by hand a day later (`ebf31047`). When app/common code changed and the guard says the versions are equal, this skill does the minor bump itself (see "go-stella app bump"); the preview says which.
+- **Bumping the go-stella app partially or with a global replace** → the app version lives in 16 files across Gradle / Xcode / npm / Angular envs, not one `package.json`. Use nangert's anchored seds ([stella-bump-version-staging-mr](https://gitlab.com/lipso/internal/agentic-coding-knowledge/-/blob/main/personal-workflows/nangert/skills/stella-bump-version-staging-mr/SKILL.md)): 16 files, 21/21 lines, the 2 `1.0.16` extension lines and `environment.local-network.ts` untouched. Never `bpp-stella-common`, never the root `0.0.0`.
+- **Patch-bumping the app, or bumping it on staging → main** → app releases are MINOR on development → staging; patch is for `main` hotfixes only, and staging → main gets no app bump.
+- **Bumping the app after a manual bump already landed, or not telling the team** → the guard (app `$SRC` ≠ `$TGT`) catches the first; a manual bump AFTER this run's bump still double-bumps, so the report says the app was bumped.
+- **Bumping only the root `package.json`, not its `package-lock.json`** → the 2026-11-17 run did this for servo, hotel, onboarding, cms and cockpit; the locks drifted (cockpit lock stuck at 16.0.77 since 2026-10-09) and had to be fixed by hand on 2026-11-18. `npm ci` tolerates it, but the lock lies. Lock `.version` + `packages[""].version` go in the same commit, then the post-bump check.
 - **Forgetting the `bpp-stella-web` lock entry, or bumping it with `npm version -w`** → either the lock and package.json disagree, or ~90 unrelated lock lines change. Use the anchored `sed`; exactly two lines may differ.
 - **Promoting a version change without handing over the `ui_configs` SQL** → the stage DB keeps the old version and the forced reset never fires for that release (cockpit, kundenportal). Always print all three stage DBs × all three `ui_type`s with their markers, also when this run bumped nothing.
 - **Taking the `stella` value from package.json, or printing it without the store warning** → the app compares `environment.appVersion`, and a premature major/minor raise locks every user onto `/update` with nothing to install. On a package.json/appVersion mismatch, print both values and no statement.
@@ -521,4 +636,7 @@ echo "Open $TITLE MRs: https://gitlab.com/groups/lipso/clients/brokernet/-/merge
 - About to push a Class B back-merge with a red, skipped or un-run check → STOP; do not push, report MR + files + failing check.
 - About to resolve a conflict in the main checkout's working tree, or with rebase / reset / force → STOP; worktree + merge only.
 - The migration-guide audit is running for staging → main → STOP; it belongs to development → staging only.
+- The go-stella app bump touches ≠ 16 files, ≠ 21 lines, a `1.0.16` line, `environment.local-network.ts` or the root `0.0.0` → STOP; do not commit, report the counts (layout drift means nangert's list needs re-checking).
+- The app's 16 anchors disagree on `$SRC` before the bump (precheck) → STOP; report every value, never pick one.
+- After a bump, `package.json` and its lock (`.version`, `packages[""].version`, or the workspace entry) disagree on `$SRC` → STOP; the bump is not done, report it.
 - Considering creating an MR for a repo the manifest filter did not return → STOP, exclude it. Fix the classification in `bpp/repos.md` via `bpp-project-index`, never by special-casing a repo here.
