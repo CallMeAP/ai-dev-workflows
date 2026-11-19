@@ -9,7 +9,7 @@
   "expected": {
    "result": "answer"
   },
-  "rubric": "Relevant; answered from the dashboard reads (needs Backend__DashboardToolsEnabled) or stops for the broker.",
+  "rubric": "Relevant; answered from the dashboard reads (always on since D-1013; needs the backend's dashboard tags) or stops for the broker.",
   "suite": "mail-loop"
  },
  {

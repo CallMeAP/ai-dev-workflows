@@ -40,7 +40,7 @@ a judge, one report and a fix stage. Every script lives in `scripts/` and reads 
 | `model-switch` | chat | `model-switch.sh` (Luna -> Astra) | **yes** (restart mode) | mid-session switch build, or a restart |
 | `ui` | Cockpit | `ui/live.cjs desktop|mobile` (1440x900, 390x844) | demo-DB rows | Cockpit on the demo port, Chromium, puppeteer-core |
 | `mail-loop` | mail | run-round.sh `cases/mail-loop.json` | no | connector 6251 + RabbitMQ 7272/7273, `Mail__Enabled` |
-| `dashboard` | chat | run-round.sh repo `Fixtures/ProposalEval/dashboard.json`, `TRUTH_CMD=dashboard-truth.sh` (Postkorb injection inside) | no | `Backend__DashboardToolsEnabled=true` + backend tags, custscope + dashboard seeds |
+| `dashboard` | chat | run-round.sh repo `Fixtures/ProposalEval/dashboard.json`, `TRUTH_CMD=dashboard-truth.sh` (Postkorb injection inside) | no | demo backend with the !523 `[KiAgentCanCall]` tags (the agent lists the reads always since D-1013), custscope + dashboard seeds |
 | `rules` (optional) | mail | bpp-agent `scripts/eval/drive.sh` (gotchas rules gate) | **yes** (swaps agent builds) | eval.env, frozen plan |
 
 There is no critic suite: the critic was removed from the product (D-961).
@@ -76,7 +76,7 @@ bash $S/scripts/codex-usage.sh > $OUT/codex-start.txt
 Any FAIL stops the run. `codex-link` FAIL: ask the user to link now (agent dashboard `$AGENT_URL/agent-dashboard.html` >
 Einstellungen > ChatGPT / Codex > Verknüpfen, code in their browser). Unattended and unlinked: stop and report, do not wait.
 `catalog` FAIL means `EnsureFlagsMatch` refused the tool catalog: backend `x-ki-assistent` tags and the agent's curated list
-differ (dashboard toggle needs the backend tags too). `cockpit-client` WARN: hand-written Cockpit models drifted from the agent
+differ (since D-1013 the 14 dashboard reads are always listed, so a demo backend without the !523 tags fails it). `cockpit-client` WARN: hand-written Cockpit models drifted from the agent
 swagger; list the files in the report. `--no-login` skips the login checks (dry run).
 
 ### 2 Stack setup and switch

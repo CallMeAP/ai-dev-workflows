@@ -61,9 +61,11 @@ if [ -f "$AGENT_LOG" ]; then
     *"nicht veröffentlicht"*) out FAIL catalog "EnsureFlagsMatch refused the catalog (backend tags vs curated list): $(cut -c1-160 <<<"$last")" ;;
     *) out FAIL catalog "no catalog line in $AGENT_LOG" ;; esac
 else out FAIL catalog "agent log $AGENT_LOG missing"; fi
+# The dashboard reads are always in the agent's list since D-1013 (no switch); the backend must tag them (bpp-backend !523)
 if want dashboard; then
-  grep -q '^Backend__DashboardToolsEnabled=true' <<<"$AGENT_ENV" && out PASS dashboard-switch "Backend__DashboardToolsEnabled=true" \
-    || out FAIL dashboard-switch "dashboard suite needs Backend__DashboardToolsEnabled=true on the agent AND the backend [KiAgentCanCall] tags"
+  kt=$(curl -s --max-time 5 "$BACKEND_URL/api-doc/v1/swagger.json" | jq -r '.paths["/api/dashboard/{goUserId}/kpis"].get["x-ki-assistent"] // false' 2>/dev/null)
+  [ "$kt" = true ] && out PASS dashboard-tags "backend swagger tags the dashboard reads (x-ki-assistent on kpis)" \
+    || out FAIL dashboard-tags "backend swagger has no x-ki-assistent on /api/dashboard/{goUserId}/kpis: the demo backend needs the !523 [KiAgentCanCall] tags"
 fi
 
 # 5 Codex quota (read-only snapshot)

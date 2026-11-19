@@ -12,7 +12,7 @@ set -u
 OUT=$1; TO=${2:-gpt-6-astra}; mkdir -p "$OUT"
 if curl -s --max-time 10 "$AGENT_URL/api-doc/v1/swagger.json" | jq -e '.paths["/api/agent-session/{sessionId}/provider"].patch' >/dev/null 2>&1; then
   echo "mode session -> $TO"
-  jq --arg m "$TO" 'map(.followUps |= map(if .switchTo then .switchTo.model = $m else . end))' "$SKILL_DIR/cases/model-switch.json" > "$OUT/cases.json"
+  jq --arg m "$TO" 'map(if .followUps then .followUps |= map(if .switchTo then .switchTo.model = $m else . end) else . end)' "$SKILL_DIR/cases/model-switch.json" > "$OUT/cases.json"
   bash "$SCRIPTS/run-round.sh" "$OUT/cases.json" "$OUT"
 else
   echo "mode restart -> $TO (global: run alone)"
