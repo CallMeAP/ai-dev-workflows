@@ -4,7 +4,7 @@ DEV_ROOT="${DEV_ROOT:-$HOME/Entwicklung}"
 CY_CACHE="${CYPRESS_CACHE_FOLDER:-$HOME/.cache/Cypress}"
 SCRATCH_ROOT="${DISK_CHECK_SCRATCH_ROOT:-/tmp/claude-$(id -u)}"   # override only for tests
 ACTIVE_MIN="${ACTIVE_MIN:-120}"          # a session written to within this many minutes is active
-NO_TOUCH_RE='bpp-agent|bpp-document-analysis'
+NO_TOUCH_RE='bpp-document-analysis'   # bpp-agent dropped 2026-11-20 (train merged)
 UUID_RE='[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
 
 mb() { timeout "${2:-60}" du -smx "$1" 2>/dev/null | cut -f1 | grep . || echo "?"; }

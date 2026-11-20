@@ -1,6 +1,6 @@
 ---
 name: bpp-cleanup-merged-worktrees
-description: Use when cleaning up finished git worktrees under ~/Entwicklung/bpp (all BPP and Brokernet repos live there since 2026-11-15) whose branches are already merged — phrases like "clean up merged worktrees", "remove stale worktrees", "prune finished .wt-* folders", "delete merged worktree branches", "worktree cleanup". Discovers stray `.wt-*` dirs plus every repo's linked worktrees, classifies each as REMOVE (ancestor of origin/development + clean) / LANDED (squash- or post-merge, patch-identity proven automatically) / REMOVE-AFTER-SCAFFOLD (merged, dirt is only local scaffolding — removed on user go) / KEEP (real dirt, unmerged, unproven, at-tip, detached, or git error), prints a read-only plan first (no fetch unless `--fetch`), then removes only the worktree paths the user approved — `apply <path>…` for REMOVE/LANDED, `apply-scaffold <path>…` for scaffold rows, each re-verified — with `git worktree remove` + `git branch -d` — never `--force`; `-D` only as the fallback for a proven LANDED row. Also a disk-reclaim STALE mode (`stale.sh`) for "free disk", "too many worktrees", "remove idle/stale worktrees even if unmerged": removes clean worktrees whose HEAD is on a remote and that are idle for N days, keeping their branches; bpp-agent and bpp-document-analysis excluded.
+description: Use when cleaning up finished git worktrees under ~/Entwicklung/bpp (all BPP and Brokernet repos live there since 2026-11-15) whose branches are already merged — phrases like "clean up merged worktrees", "remove stale worktrees", "prune finished .wt-* folders", "delete merged worktree branches", "worktree cleanup". Discovers stray `.wt-*` dirs plus every repo's linked worktrees, classifies each as REMOVE (ancestor of origin/development + clean) / LANDED (squash- or post-merge, patch-identity proven automatically) / REMOVE-AFTER-SCAFFOLD (merged, dirt is only local scaffolding — removed on user go) / KEEP (real dirt, unmerged, unproven, at-tip, detached, or git error), prints a read-only plan first (no fetch unless `--fetch`), then removes only the worktree paths the user approved — `apply <path>…` for REMOVE/LANDED, `apply-scaffold <path>…` for scaffold rows, each re-verified — with `git worktree remove` + `git branch -d` — never `--force`; `-D` only as the fallback for a proven LANDED row. Also a disk-reclaim STALE mode (`stale.sh`) for "free disk", "too many worktrees", "remove idle/stale worktrees even if unmerged": removes clean worktrees whose HEAD is on a remote and that are idle for N days, keeping their branches; bpp-document-analysis excluded.
 ---
 
 # bpp-cleanup-merged-worktrees
@@ -98,13 +98,13 @@ Script: `stale.sh` beside this file (2026-11-12: 103 worktrees, 14 GB freed this
 |---|---|
 | `git status --porcelain` empty | dirty, locked, main checkout |
 | HEAD reachable from a remote-tracking ref (`git branch -r --contains HEAD`) | unpushed HEAD (the only copy) |
-| no file outside `.git/bin/obj/node_modules/.angular/dist` changed within `--days N` (default 7) | repos bpp-agent, bpp-document-analysis, any path containing `/bpp-agent` |
+| no file outside `.git/bin/obj/node_modules/.angular/dist` changed within `--days N` (default 7) | repo bpp-document-analysis (bpp-agent is a normal repo since 2026-11-20, train merged) |
 
 Steps:
 1. `bash ~/.claude/skills/bpp-cleanup-merged-worktrees/stale.sh plan [--days N] [--exclude repo1,repo2]` — read-only;
    prints every candidate (size, last change, branch), per-repo totals, and writes the list to
-   `~/.claude/state/stale-worktrees.tsv`. Default excludes `bpp-agent,bpp-document-analysis`; `--exclude` replaces
-   that list, so always keep both in it. Run `plan --fetch` of the main mode first if remote refs may be stale.
+   `~/.claude/state/stale-worktrees.tsv`. Default excludes `bpp-document-analysis`; `--exclude` replaces
+   that list, so always keep it in. Run `plan --fetch` of the main mode first if remote refs may be stale.
 2. Show the totals; ask (AskUserQuestion) which scope: all candidates / skip some repos / only build output / nothing.
    Also offer "only build output" (delete `bin obj node_modules .angular` in idle worktrees) when the user wants the
    worktrees kept — that is usually most of the size.
@@ -113,7 +113,7 @@ Steps:
    **Branches are kept** — no `branch -d/-D`, the branch may carry an open MR.
 4. Report REMOVED/SKIP counts and `df -h /home` before/after.
 
-Never in STALE mode: removing a dirty or unpushed worktree, touching bpp-agent or bpp-document-analysis
+Never in STALE mode: removing a dirty or unpushed worktree, touching bpp-document-analysis
 worktrees, deleting branches, or "the next active task's worktree" (e.g. an empty feature worktree a paused
 workflow will need — it is idle by mtime but planned work; check handovers/RESUME files and ask).
 

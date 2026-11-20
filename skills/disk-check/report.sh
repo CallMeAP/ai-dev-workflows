@@ -96,7 +96,7 @@ MS=0; for p in $(grep -E '^(REMOVE|LANDED|REMOVE-AFTER-SCAFFOLD) ' "$TMPD/cleanu
   s=$(mb "$p"); MS=$((MS + ${s/\?/0})); done
 row 7 "merged worktrees (cleanup.sh apply <path>...)" "$MS" "$MS" DELETABLE
 echo "-- stale.sh plan --days 7 (idle, clean, pushed; branches kept):"
-timeout 60 bash "$WT/stale.sh" plan --days 7 --exclude bpp-agent,bpp-document-analysis 2>&1 | grep -v '^Candidate list' | sed 's#^#    #'
+timeout 60 bash "$WT/stale.sh" plan --days 7 --exclude bpp-document-analysis 2>&1 | grep -v '^Candidate list' | sed 's#^#    #'
 SS=$(awk -F'\t' '{s+=$4} END{print s+0}' "$HOME/.claude/state/stale-worktrees.tsv" 2>/dev/null)
 row 7 "stale worktrees (stale.sh apply <path>...)" "$SS" "$SS" DELETABLE
 echo "  -> apply only with explicit approved paths, never the \$(cut ...) blanket form"

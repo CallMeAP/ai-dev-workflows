@@ -20,7 +20,7 @@ args substitute dollar-digit sequences.
   needs `CLAUDE_CODE_SESSION_ID` set (otherwise every scratch path is SKIPped).
 - `apply-build.sh <path>...` deletes only item-8 build-output dirs listed in the build list (written by
   the last report.sh run, at most 6 h old). It re-checks: listed, bin/obj/node_modules/.angular/dist,
-  inside a linked git worktree, not bpp-agent/bpp-document-analysis, worktree still idle, nothing tracked.
+  inside a linked git worktree, not bpp-document-analysis, worktree still idle, nothing tracked.
 - Worktrees: `~/.claude/skills/bpp-cleanup-merged-worktrees/cleanup.sh apply <path>...` and
   `stale.sh apply <path>...`. Never this skill's scripts.
 
@@ -91,7 +91,7 @@ the user there for those. It does not cover anything this skill checks.
 
 - Any `sudo`, `--force`, `git worktree remove --force`, `branch -D` outside cleanup.sh's own rules.
 - The `stale.sh apply $(cut ...)` blanket form. Pass only the paths the user approved.
-- Any path under `bpp-agent*` or `bpp-document-analysis*`.
+- Any path under `bpp-document-analysis*` (bpp-agent is a normal repo since 2026-11-20).
 - Deleting `~/.cache/Cypress/bundles`, the current session's scratch, or `~/.claude/projects` jsonl
   (session history that `--resume` needs).
 - `rm -rf` with a glob or on a path the report did not list.

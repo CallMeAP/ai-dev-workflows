@@ -2,7 +2,7 @@
 # disk-check / apply-build.sh — item 8: delete ONLY approved build-output dirs listed by report.sh, re-checked now:
 #   the path is a line of the build list (written < MAX_AGE_H hours ago), its basename is
 #   bin|obj|node_modules|.angular|dist, it sits inside the recorded worktree, the worktree is a LINKED git
-#   worktree (not a main checkout) outside bpp-agent*/bpp-document-analysis*, still idle (no source file
+#   worktree (not a main checkout) outside bpp-document-analysis*, still idle (no source file
 #   changed in 7 d), and nothing under the path is tracked by git. Anything else is SKIPPED. No globs, no sudo.
 set -uo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd); . "$HERE/lib.sh"

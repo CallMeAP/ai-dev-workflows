@@ -45,7 +45,7 @@ License rule generalized: on any **major** bump, check the license didn't flip c
 
 ## bpp-shared bumps break bpp-doci and bpp-agent (NU1605)
 
-bpp-doci (bpp-document-analysis) and bpp-agent are usually left out of sweeps, but they pin many of the same packages as
+bpp-doci (bpp-document-analysis) is left out of sweeps (bpp-agent is swept like any repo since 2026-11-20), but both pin many of the same packages as
 `BPP.Shared.NET` directly. Raising any of those in bpp-shared turns their restore red with **NU1605 (downgrade)** as soon
 as the new shared package is bumped there (2026-10-16: dev pipelines + staging MR !332). **When the sweep raises a package
 in bpp-shared, raise the overlapping refs in doci + agent in the same run** (only those refs if the repos are otherwise

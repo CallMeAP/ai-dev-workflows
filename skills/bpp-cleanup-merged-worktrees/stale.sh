@@ -8,7 +8,7 @@
 # Local branches are KEPT (no branch -d/-D) — the branch may hold an open MR.
 set -uo pipefail
 ROOTS=(/home/alex/Entwicklung/bpp)
-DAYS=7; EXCLUDE="bpp-agent,bpp-document-analysis"
+DAYS=7; EXCLUDE="bpp-document-analysis"
 LIST="${STALE_LIST:-$HOME/.claude/state/stale-worktrees.tsv}"
 
 idle_since() { find "$1" \( -name .git -o -name bin -o -name obj -o -name node_modules -o -name .angular -o -name dist \) -prune \
@@ -36,7 +36,6 @@ plan)
     case ",$EXCLUDE," in *",$repo,"*) continue;; esac
     git -C "$r" worktree list --porcelain | awk '/^worktree /{print substr($0,10)}' | tail -n +2 | while IFS= read -r W; do
       [ -d "$W" ] || continue
-      case "$W" in */bpp-agent*) continue;; esac   # bpp-agent paths never, whatever repo owns them
       why=$(check "$W"); [ -n "$why" ] && continue
       sz=$(du -sm "$W" 2>/dev/null | cut -f1); b=$(git -C "$W" rev-parse --abbrev-ref HEAD)
       printf '%s\t%s\t%s\t%s\t%s\n' "$repo" "$W" "$b" "$sz" "$(date -d @"$(idle_since "$W")" +%F)" >> "$LIST"
@@ -51,7 +50,7 @@ apply)
   for W in "$@"; do W=${W%/}
     inroot=0; for b in "${ROOTS[@]}"; do case "$W" in "$b"/*) inroot=1;; esac; done
     [ $inroot = 0 ] && { echo "SKIP $W: outside ${ROOTS[*]}"; continue; }
-    case "$W" in */bpp-agent*|*/bpp-document-analysis*) echo "SKIP $W: no-touch repo"; continue;; esac
+    case "$W" in */bpp-document-analysis*) echo "SKIP $W: no-touch repo"; continue;; esac
     why=$(check "$W"); [ -n "$why" ] && { echo "SKIP $W: $why"; continue; }
     m=$(mainwt_of "$W")
     if git -C "$m" worktree remove "$W" 2>/dev/null; then git -C "$m" worktree prune; echo "REMOVED $W  (branch kept)"

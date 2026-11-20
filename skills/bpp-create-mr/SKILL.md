@@ -195,11 +195,10 @@ fi
 # "+" adds: a bare --reviewer replaces the list and drops the auto-requested GitLabDuo.
 if [ -n "$REVIEWER" ]; then glab mr update "$IID" -R "$PROJ" --assignee "$ME" --reviewer "+$REVIEWER"; else glab mr update "$IID" -R "$PROJ" --assignee "$ME"; fi
 
-# Group label work-ap: lists all misc MRs in one place (not on bpp-agent MRs, not on promotions).
-LABELS=$(glab api "/projects/$(printf %s "$PROJ" | sed 's#/#%2F#g')/merge_requests/$IID" | jq -r '.labels|join(",")')
-case ",$LABELS," in *,bpp-agent,*) ;; *)
-  glab api --method PUT "/projects/$(printf %s "$PROJ" | sed 's#/#%2F#g')/merge_requests/$IID" -f add_labels=work-ap >/dev/null ;;
-esac
+# Group label work-ap: lists all misc MRs in one place (not on promotions). bpp-agent MRs additionally
+# keep the label bpp-agent, so they can be reviewed as one group (user decision 2026-11-20, train done).
+ADD=work-ap; case "$PROJ" in */bpp-agent) ADD=work-ap,bpp-agent;; esac
+glab api --method PUT "/projects/$(printf %s "$PROJ" | sed 's#/#%2F#g')/merge_requests/$IID" -f add_labels=$ADD >/dev/null
 ```
 
 All `work-ap` MRs: `https://gitlab.com/groups/lipso/clients/brokernet/-/merge_requests?sort=created_date&state=opened&label_name[]=work-ap&first_page_size=100`
@@ -401,7 +400,7 @@ for i in $(seq 1 9); do
 done
 ```
 
-- `NO_QODANA_JOB` (e.g. `bpp-agent`: no MR pipelines; repos without the component) → report "no qodana job in this pipeline", skip the phase.
+- `NO_QODANA_JOB` (repos without the component) → report "no qodana job in this pipeline", skip the phase.
 - `failed`/`canceled` with no report artifact, or still running after ~30 min → report status + job URL, stop the phase.
 - Check the job trace for `NuGetCredentialProvider`: if present, the report is contaminated (see `bpp-fix-qodana-findings`) → comment that, fix nothing.
 
@@ -460,7 +459,6 @@ Clean report → still post the one-liner `Qodana: no new findings (pipeline <id
 - Touch only the files of the finding being fixed. No drive-by cleanups. Never stage secrets or `appsettings.local.json`.
 - Follow the repo's `CLAUDE.md` conventions.
 - `bpp-document-analysis` (doci): no local build/test. The pipeline is the proof. Fix NEW findings only, and only from the safe-mechanical tier. The next pipeline (build + unit + qodana) verifies them; a red pipeline stops the loop. Pre-existing findings are comment-only.
-- `bpp-agent`: no MR pipelines, so the phase ends at 9a.
 
 ### 10. GitLab Duo watcher
 
@@ -557,7 +555,7 @@ Fixes follow 9d's loop: edit only the flagged site, build, unit tests, `git add 
 | Push | `git push -u origin <branch>` |
 | Existing MR? | `glab api .../merge_requests?state=opened&source_branch=<b>&target_branch=development` |
 | Create MR | `glab api --method POST "/projects/<enc>/merge_requests" -f source_branch=… -f target_branch=development -f title=…` |
-| Label | `add_labels=work-ap` on every MR except `bpp-agent` ones |
+| Label | `add_labels=work-ap` on every MR (not promotions); bpp-agent MRs also get `bpp-agent` |
 | Cypress impact (every MR) | `git -C ~/Entwicklung/bpp/bpp-cypress grep -n -F -f <patterns> origin/development -- cypress config`; hit/new UI → linked MR, same branch, `work-ap`, no human reviewer (chaslauer only on user confirm), `cy:run:local -- --spec …` (step 6c) |
 | Guide (DTO/API change) | `bpp-endpoint-migration-guides`, folder `<repo>/`, direct push to `main`, no MR (step 6b) |
 | Set assignee+reviewer (always follow up) | `glab mr update <iid> -R lipso/clients/brokernet/<repo> --assignee <me> --reviewer +apittrich` on .NET repos only (`+` keeps GitLabDuo); UI/cypress: no human reviewer unless the user confirms chaslauer |
