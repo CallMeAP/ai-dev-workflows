@@ -11,12 +11,16 @@ the project wins.
 - Default answer shape: one-line result, then only the detail that changes what I do next,
   then the next action. Break the shape when the content needs it — code, diffs, error output,
   a comparison, or a list longer than three items. Never drop content to fit a shape.
-- Never compress away substance. Technical terms stay exact, code blocks unchanged, error
+- Never cut content to be short. Technical terms stay exact, code blocks unchanged, error
   strings quoted verbatim.
 - Write in full, not terse, for: security warnings, confirmations of irreversible or
   destructive actions, and multi-step sequences where order could be misread. Resume terse after.
 - Communicate in English, even when the input, ticket or codebase is German. Code, XML docs,
   commit messages and user-facing strings follow the project's language convention.
+- Comments you add in code (XML docs and inline comments): short and plain. Simple words, no
+  jargon like "drilldown", "band", "fan-out", "gate", "bucket", "flip", "sweep", "load-bearing"
+  or "backstop"; names of code and tech terms stay exact. One line when that is enough; say what
+  the code does or why.
 
 ## No speculation
 
@@ -30,13 +34,23 @@ the project wins.
 
 ## Before coding
 
-Don't assume. Don't hide confusion. Surface tradeoffs.
+Don't assume. Don't hide confusion. Name the tradeoffs.
 
 - State your assumptions explicitly.
 - If two readings of the task lead to different work, name both. Don't pick silently.
 - Ask when genuinely unclear, in an interactive session. In an unattended or subagent run,
   don't block: pick the most reasonable assumption, say so plainly, and keep going.
+- Open questions in an interactive session go through AskUserQuestion — concrete options,
+  recommended one first — never as prose at the end of a message. Batch up to four related
+  questions in one prompt. Prose questions only when no sensible options exist.
 - If a simpler approach exists, say so. Push back when warranted.
+
+<!-- interactive-questions-mode:begin -->
+**Interactive questions mode: ON** (toggle with `interactive-questions-mode-off`). Overrides the
+question rules above. Every open question or decision goes through AskUserQuestion — concrete
+options, recommended one first, batch up to four related questions per prompt — then wait for the
+answer. This applies in unattended and subagent-driven runs too, wherever AskUserQuestion is available.
+<!-- interactive-questions-mode:end -->
 
 ## Simplicity first
 
@@ -58,7 +72,7 @@ Touch only what you must. Clean up only your own mess.
 - Don't refactor what isn't broken.
 - Match existing style, even if you'd do it differently.
 - Unrelated dead code: mention it, don't delete it.
-- Remove imports, variables and functions that YOUR change orphaned. Leave pre-existing dead
+- Remove imports, variables and functions that YOUR change left unused. Leave pre-existing dead
   code alone unless asked.
 - The test: every changed line traces directly to the request.
 
@@ -70,6 +84,8 @@ Touch only what you must. Clean up only your own mess.
 - Loop until the check passes. Show the output. Don't assert success.
 - Never skip a test to get green. No `[Ignore]`, no `Assert.Ignore`, no conditional skip.
   If it needs a database or a service, start it. A skipped test counts as a failure.
+  Not a skip: suites a repo holds back on purpose — `[Explicit]` live/prod suites and anything that needs
+  my go first (VERA, ARAG live calls). Leave them out of the run and say so in the result.
 - After implementing, grep the touched files for `TODO` and other leftover comments so none
   ship silently.
 
@@ -77,9 +93,11 @@ Touch only what you must. Clean up only your own mess.
 
 - Never commit secrets: API keys, tokens, passwords, JWTs, connection strings, private keys.
   Not in env files, not in config, not in comments, not in test constants.
-- Local secrets go in gitignored files, with a placeholder template committed beside them.
+- Local secrets go in gitignored files, with a placeholder template committed beside them. Where a
+  repo tracks `appsettings.local.json` with empty secret values instead, fill it locally and never
+  commit the filled values.
 - If a secret is already committed, flag it immediately. Do not copy it, quote it in full, or
-  propagate it into another file, a diff or an MR description.
+  put it into another file, a diff or an MR description.
 
 ## Tools
 
@@ -94,4 +112,4 @@ Touch only what you must. Clean up only your own mess.
 
 **These rules are working if:** diffs contain nothing I didn't ask for, answers lead with the
 result instead of the preamble, and unverified claims arrive labelled rather than as fact.
-If none of that has changed, the rules aren't earning their tokens — prune them.
+If none of that has changed, the rules aren't worth their tokens — cut them.
