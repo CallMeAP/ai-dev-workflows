@@ -48,6 +48,19 @@ const texts = [first, ...(c.followUps ?? []).map(x => x.text)].map(sub);
 const switches = [null, ...(c.followUps ?? []).map(x => x.switchTo ?? null)];
 const decide = [...(c.decide ?? [])];
 let inv = 1;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+// polls GET .../turns until the newest turn has a status other than "running" (max 10 s); returns the ms waited, -1 on timeout
+async function waitTurnEnded() {
+  const w0 = Date.now();
+  while (Date.now() - w0 < 10000) {
+    const r = await fetch(`${base}/api/agent-session/${res.sessionId}/turns`, { headers: H });
+    const list = r.status === 200 ? await r.json() : [];
+    const st = list.length ? list[list.length - 1].status : null;
+    if (st && st !== 'running') return Date.now() - w0;
+    await sleep(250);
+  }
+  return -1;
+}
 for (const [k, text] of texts.entries()) {
   // model-switch suite: {"switchTo": {"provider": "openai-codex", "model": "gpt-6-astra"}} on a follow-up switches the session first
   // (PATCH /api/agent-session/{id}/provider, only on builds that have the mid-session switch)
@@ -67,10 +80,20 @@ for (const [k, text] of texts.entries()) {
   // answer every card of this turn that the case has a decision for; the continuation runs server-side and its text comes back in the body
   while (end === 'card' && decide.length && res.cards.length > res.decisions.length) {
     const card = res.cards[res.decisions.length]; const d = decide.shift();
-    const r = await fetch(`${base}/api/agent-session/${res.sessionId}/pending/${card.pendingId}/decision`, { method: 'POST',
-      headers: { ...H, 'content-type': 'application/json' }, body: JSON.stringify({ approved: !!d.approve, reason: d.reason ?? null }) });
-    const body = await r.text(); let j = null; try { j = JSON.parse(body); } catch { /* not json */ }
-    res.decisions.push({ pendingId: card.pendingId, approve: !!d.approve, http: r.status, status: j?.status ?? null, finalText: j?.finalText ?? null, raw: j ? null : body.slice(0, 300) });
+    // the card event comes before the turn releases the session lease, so a decision sent at once got 409 session_busy (row 19);
+    // wait (max 10 s) until the newest turn row has an end status, then retry a session_busy up to 5 times, 1 s apart
+    const waitedMs = await waitTurnEnded();
+    let r, body, j, attempts = 0;
+    for (;;) {
+      attempts++;
+      r = await fetch(`${base}/api/agent-session/${res.sessionId}/pending/${card.pendingId}/decision`, { method: 'POST',
+        headers: { ...H, 'content-type': 'application/json' }, body: JSON.stringify({ approved: !!d.approve, reason: d.reason ?? null }) });
+      body = await r.text(); j = null; try { j = JSON.parse(body); } catch { /* not json */ }
+      if (r.status !== 409 || j?.code !== 'session_busy' || attempts > 5) break;
+      await sleep(1000);
+    }
+    res.decisions.push({ pendingId: card.pendingId, approve: !!d.approve, http: r.status, status: j?.status ?? null, finalText: j?.finalText ?? null,
+      raw: j ? (r.status === 409 ? body.slice(0, 300) : null) : body.slice(0, 300), code: j?.code ?? null, attempts, waitedMs });
     await new Promise(r2 => setTimeout(r2, 1500));
   }
   if (!['ReceiveTurnDone', 'ReceiveConfirmationRequest'].includes(out.target)) break;
