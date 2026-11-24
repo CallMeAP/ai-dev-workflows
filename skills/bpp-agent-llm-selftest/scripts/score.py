@@ -39,7 +39,8 @@ def load(p, default=None):
 
 
 def tool_entries(turns):
-    return [e for t in (turns or []) for e in (t.get('tools') or []) if isinstance(e, dict)]
+    # T3-03 timing events (pre_loop, model_call, context_estimate ...) share tool_call_log; keep only real tool entries
+    return [e for t in (turns or []) for e in (t.get('tools') or []) if isinstance(e, dict) and (e.get('path') or e.get('tool'))]
 
 
 rows, judge = [], []
