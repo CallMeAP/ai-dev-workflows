@@ -15,6 +15,8 @@ model-switch, ui, mail-loop, dashboard, rules), hard checks, a blind judge, one 
 - A running bpp-agent demo stack per bpp-agent `docs/local-demo-stack.md`: services on 62xx, own demo DB (`bpp_agent_demo*`,
   a `pg_dump` copy of local `bpp`), private RabbitMQ (7272/7273), connector with the synthetic test-mail form, Cockpit on its own port.
   `$DEMO_HOME` holds `start.sh`, `stop.sh`, `rabbit-start.sh`, `pg-password.local` (mode 600).
+- For llamacpp (Qwen) runs: the `mac` WireGuard VPN to the LLM Macs (`10.13.13.0/24`, MTU 1000), connected by the developer;
+  Qwen answers on `http://10.13.13.9:8000/v1` (bpp-agent's committed `appsettings.local.json`). Pre-flight checks it (`llm-qwen`).
 - Codex (ChatGPT) linked on the demo agent for the developer GoUser; the Codex CLI logged in on the same account (quota snapshot).
 - Tools: bash 4+, `curl`, `jq`, `psql`, `ss`, `python3`, `node` 18+, user `systemd` (latency), Chromium + a `puppeteer-core` install
   (ui), the Cockpit worktree's `node_modules` (`ws`, `openapi-generator-cli` for the client regen).

@@ -21,7 +21,7 @@ and `compare.env.example`. Run them through their interpreter. Env: `SELFTEST_EN
 | Rule | Enforced by |
 |---|---|
 | Install nothing and pull no model without the developer's answer. Detect, then ASK runtime + model. | you |
-| `CHALLENGER_KIND=local` = a loopback endpoint; anything else is hosted. Hosted challengers see **synthetic data only**. The demo DB is a `pg_dump` copy of local `bpp`: hosted needs a DB the developer confirmed as synthetic (`SYNTHETIC_DATA_CONFIRMED=yes`). bpp-copy data only with local models. | `challenger.sh` refuses |
+| `CHALLENGER_KIND=local` = a loopback endpoint or an LLM Mac on the `mac` WireGuard VPN (`http://10.13.13.x`, our own hardware, user 2026-11-24); anything else is hosted. Hosted challengers see **synthetic data only**. The demo DB is a `pg_dump` copy of local `bpp`: hosted needs a DB the developer confirmed as synthetic (`SYNTHETIC_DATA_CONFIRMED=yes`). bpp-copy data only with local models. | `challenger.sh` refuses |
 | Anthropic only through a **Console API key** of a workspace **with a spend limit**. Never a subscription OAuth token (`sk-ant-oat...`). | `challenger.sh` refuses the OAuth prefix; the spend limit is yours to check |
 | Key in a mode-600 file, passed by variable name (`ApiKeyEnv`). Never printed, never in the env file, never committed. | `challenger.sh` |
 | The tuning loop reads `tune/` only. Never open `heldback/`, its run dirs or their `blind/` files while proposing a change. | you (brief the tuning subagent with tune paths only) |
@@ -48,15 +48,23 @@ if it is still off. Hard safety gates (secrets, writes outside the demo DB, merg
 
 ### 1 Challenger setup (ask first)
 
+**Default challenger: Qwen on the LLM Mac over the `mac` VPN** (`http://10.13.13.9:8000/v1`, llama.cpp, model
+`unsloth/Qwen3.5-35B-A3B-GGUF:Q8_0`, 4 slots; the defaults in `compare.env.example`). Before anything else, ask the developer to
+connect the VPN (`sudo wg-quick up mac`, MTU 1000; larger requests fail at MTU 1420) and wait for their OK; then
+`curl -s --max-time 5 http://10.13.13.9:8000/health` must answer 200. Never change the VPN yourself. The Mac's server is shared with
+dev users: keep runs paced. `bash $C/scripts/challenger.sh check` runs every refusal check without restarting the agent.
+Only when the developer wants a model on this machine instead, detect and ask as below.
+
 ```bash
 C=~/.claude/skills/bpp-agent-llm-compare; S=~/.claude/skills/bpp-agent-llm-selftest
-bash $C/scripts/detect.sh                    # runtimes, GPU, RAM, CPU, disk, local models, what answers on :8000/v1
+bash $C/scripts/detect.sh                    # runtimes, GPU, RAM, CPU, disk, local models, what answers on :8000/v1 (pass the Mac URL to probe it)
 ```
 
 Then ask the developer (AskUserQuestion; recommended option first), with the detect output in the question:
 
 | Machine | Recommend |
 |---|---|
+| `mac` VPN up (default) | Qwen on 10.13.13.9 (llama.cpp, Qwen3.5-35B-A3B Q8_0): nothing to install here |
 | No GPU, <= 64 GB RAM | llama.cpp CPU, a 3-8B GGUF at Q8/Q4 (default `unsloth/Qwen3.5-4B-GGUF:Q8_0`, the existing `Llm:LlamaCpp` model). 30B+ is too slow to be useful. |
 | NVIDIA GPU | llama.cpp with CUDA offload, or vLLM; model size by VRAM |
 | Ollama already installed | Ollama (`/v1` endpoint) in the llamacpp slot |
@@ -164,5 +172,6 @@ Never merge.
 - Changing `SPLIT_SEED` or omitting `--prev`: held-back cases move into tune.
 - Same `SELFTEST_RUN_ID` for both arms: their synthetic mails share a thread. `ab-run.sh` sets `<COMPARE_RUN>-<arm>`; keep `COMPARE_RUN` unique per iteration.
 - A provider that is not selectable (`openai-compatible` id) run in pref mode: sessions silently start on Luna. `ab.py score` lists those as wrong-arm.
+- Starting a Mac run without asking for the VPN: `challenger.sh` refuses with "connect the 'mac' WireGuard VPN"; ask, wait for the OK, re-run.
 - `CHALLENGER_CONTEXT_TOKENS` left at 32768 for a hosted model: the agent budgets every request as if the window were 32k (D-101).
 - Judging with the arm names in the brief, or with timing/token data: slow local answers give the arm away.

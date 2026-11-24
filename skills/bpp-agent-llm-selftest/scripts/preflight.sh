@@ -39,6 +39,24 @@ else out FAIL agent-is-demo "no listener on $(port_of "$AGENT_URL")"; AGENT_ENV=
 n52=$(ss -ltnH 2>/dev/null | grep -cE ':52[0-9][0-9]\s')
 out INFO normal-stack "$n52 listeners on 52xx (another session may run e2e there; this run never touches them)"
 
+# 1b llamacpp slot (Qwen): the agent's endpoint answers. On an LLM Mac (10.13.13.x) that needs the 'mac' WireGuard VPN, which
+#    only the developer connects (never change the VPN from here). Read-only: /health and /v1/models, no completion call.
+ep=$(grep -o '^Llm__LlamaCpp__Endpoint=.*' <<<"$AGENT_ENV" | cut -d= -f2-)
+[ -z "$ep" ] && ep=$(jq -r '.Llm.LlamaCpp.Endpoint // empty' "$AGENT_WORKTREE/BPP.Agent.NET/BPP.Agent.NET.API/appsettings.local.json" 2>/dev/null)
+if [ -z "$ep" ]; then out WARN llm-qwen "no Llm:LlamaCpp:Endpoint in the agent env or the worktree's appsettings.local.json"
+else
+  case "$ep" in http://10.13.13.*) vpn=1 ;; *) vpn=0 ;; esac
+  c=$(http "${ep%/v1}/health")
+  if [ "$c" = 200 ]; then out PASS llm-qwen "$ep /health 200, model $(curl -s --max-time 5 "$ep/models" | jq -r '.data[0].id // "?"' 2>/dev/null)"
+  elif [ "$vpn" = 1 ]; then out FAIL llm-qwen "$ep -> $c: ask the developer to connect the 'mac' WireGuard VPN (sudo wg-quick up mac) and wait for their OK"
+  else out FAIL llm-qwen "$ep -> $c (start the llamacpp runtime)"; fi
+  if [ "$vpn" = 1 ]; then
+    mtu=$(ip -o link show mac 2>/dev/null | grep -o 'mtu [0-9]*' | cut -d' ' -f2)
+    case "$mtu" in 1000) out PASS llm-vpn-mtu "mac MTU 1000" ;; '') out WARN llm-vpn-mtu "no 'mac' interface" ;;
+      *) out WARN llm-vpn-mtu "mac MTU $mtu: requests over ~1 KB get lost above 1000; ask the developer to set MTU = 1000 in /etc/wireguard/mac.conf" ;; esac
+  fi
+fi
+
 # 2 demo DB and migrations
 if PGPASSWORD=$(pg_password) psql -X -h "$PGHOST" -p "$PGPORT" -U "$PG_USER" -d postgres -Atc "select 1 from pg_database where datname='$DEMO_DB'" 2>/dev/null | grep -q 1; then
   out PASS demo-db "$DEMO_DB exists"

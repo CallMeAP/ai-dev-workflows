@@ -13,7 +13,9 @@ cases, with a 70/30 tune/held-back split and a tuning loop whose changes are acc
 ## Prerequisites
 
 - `bpp-agent-llm-selftest` installed and its demo stack running (see its README), `selftest.env` filled, Codex linked.
-- A challenger: a local runtime (llama.cpp `llama-server --jinja`, Ollama, vLLM) the developer chose after `detect.sh`, or a hosted
+- Default challenger: Qwen on the LLM Mac `http://10.13.13.9:8000/v1`, reached over the `mac` WireGuard VPN (MTU 1000); the
+  developer connects it (`sudo wg-quick up mac`). It counts as local (own hardware).
+- Or a challenger: a local runtime (llama.cpp `llama-server --jinja`, Ollama, vLLM) the developer chose after `detect.sh`, or a hosted
   vendor key (Anthropic: Console API key of a workspace with a spend limit; hosted only on a DB confirmed as synthetic).
 - Hosted or keyed challengers (restart mode): `$DEMO_HOME/start.sh` must read
   `Llm__DefaultProvider="${AGENT_DEFAULT_PROVIDER:-openai-codex}"` on the agent line.
@@ -23,7 +25,7 @@ cases, with a 70/30 tune/held-back split and a tuning loop whose changes are acc
 
 - `SKILL.md`: the procedure. `compare.env.example`: env template (challenger, prices, budget, iterations, split seed).
 - `scripts/detect.sh`: machine and runtime detection, read-only.
-- `scripts/challenger.sh`: `up [overlay.env]` / `down` / `mode`; restarts the demo agent with the challenger (pref or restart mode), refuses unsafe setups.
+- `scripts/challenger.sh`: `up [overlay.env]` / `down` / `mode` / `check` (refusal checks only, no restart); restarts the demo agent with the challenger (pref or restart mode), refuses unsafe setups.
 - `scripts/split.py`: deterministic stratified 70/30 split, stable across runs with `--prev`, fresh cases into held-back.
 - `scripts/ab-run.sh`: runs a set on both arms (interleaved per case in pref mode) via the main skill's `run-round.sh` + `score.py`;
   Codex 95/95 stop (exit 3), hosted budget stop (exit 4).

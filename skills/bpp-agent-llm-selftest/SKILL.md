@@ -16,6 +16,7 @@ a judge, one report and a fix stage. Every script lives in `scripts/` and reads 
 
 | Rule | Why (what happened) |
 |---|---|
+| llamacpp (Qwen) = the LLM Mac `http://10.13.13.9:8000/v1` over the `mac` WireGuard VPN (committed in bpp-agent `appsettings.local.json`). Before a run, ask the developer to connect the VPN (`sudo wg-quick up mac`, MTU 1000) and wait for their OK; never change the VPN yourself. The Mac is shared with dev users: pace the load. | Pre-flight `llm-qwen` FAILs while the Mac does not answer; `llm-vpn-mtu` WARNs at MTU != 1000 (requests > ~1 KB get lost). |
 | Demo stack (62xx) and demo DB (`bpp_agent_demo_*`) on localhost only. Never the 52xx stack, never DB `bpp`. `lib.sh` allows nothing else. | Another session runs e2e on the normal stack; real writes happen here. |
 | Codex device-code link only while the user is at the keyboard; check it right before a long run. | 2026-11-17: the code expired 02:15, the live tests idled all night. |
 | Codex stop 95 % 5 h / 95 % week, checked before every case and every UI/latency turn (`quota_guard`). Exit 3 = pause, resume after the reset. | The agent and the Codex CLI share one ChatGPT plan. |
@@ -73,7 +74,7 @@ bash $S/scripts/preflight.sh --suites read,write,mail-loop --jar $JAR --regen $O
 bash $S/scripts/codex-usage.sh > $OUT/codex-start.txt
 ```
 
-Any FAIL stops the run. `codex-link` FAIL: ask the user to link now (agent dashboard `$AGENT_URL/agent-dashboard.html` >
+Any FAIL stops the run. `llm-qwen` FAIL: ask the developer to connect the `mac` VPN, wait for the OK, re-run. `codex-link` FAIL: ask the user to link now (agent dashboard `$AGENT_URL/agent-dashboard.html` >
 Einstellungen > ChatGPT / Codex > Verknüpfen, code in their browser). Unattended and unlinked: stop and report, do not wait.
 `catalog` FAIL means `EnsureFlagsMatch` refused the tool catalog: backend `x-ki-assistent` tags and the agent's curated list
 differ (since D-1013 the 14 dashboard reads are always listed, so a demo backend without the !523 tags fails it). `cockpit-client` WARN: hand-written Cockpit models drifted from the agent

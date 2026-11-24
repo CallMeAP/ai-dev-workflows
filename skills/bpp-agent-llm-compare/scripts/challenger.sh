@@ -12,13 +12,14 @@
 # Refuses: hosted without SYNTHETIC_DATA_CONFIRMED=yes, a key file missing or not mode 600, an Anthropic subscription OAuth token
 # (sk-ant-oat...) instead of a Console API key, a hosted run without BUDGET_USD, a local endpoint that does not answer, pending
 # 13 h latency timers. The key goes in by variable name (ApiKeyEnv), never printed; it is readable in /proc/<agent pid>/environ.
-# Usage: SELFTEST_ENV=<file> COMPARE_ENV=<file> JAR=<jar> bash challenger.sh up [overlay.env] | down | mode
+# Usage: SELFTEST_ENV=<file> COMPARE_ENV=<file> JAR=<jar> bash challenger.sh up [overlay.env] | down | mode | check
+# check: runs every refusal check of "up" and exits without touching the agent
 set -u
 SELFTEST_SKILL=${SELFTEST_SKILL:-$HOME/.claude/skills/bpp-agent-llm-selftest}
 . "$SELFTEST_SKILL/scripts/lib.sh"
 : "${COMPARE_ENV:?set COMPARE_ENV (copy of compare.env.example)}"; . "$COMPARE_ENV"
 : "${DEMO_HOME:?}"; : "${JAR:?set JAR}"
-ACTION=${1:?up|down|mode}; OVERLAY=${2:-}
+ACTION=${1:?up|down|mode|check}; OVERLAY=${2:-}
 P=$CHALLENGER_PROVIDER
 ARM_MODE=restart; [ "$P" = llamacpp ] && ARM_MODE=pref
 [ "$ACTION" = mode ] && { echo "$ARM_MODE"; exit 0; }
@@ -38,11 +39,17 @@ if [ "$CHALLENGER_KIND" = hosted ]; then
   awk "BEGIN{exit !(${BUDGET_USD:-0} > 0)}" || { echo "REFUSING: BUDGET_USD must be > 0 for a hosted challenger" >&2; exit 6; }
   BPP_COMPARE_KEY=$(cat "$CHALLENGER_KEY_FILE"); export BPP_COMPARE_KEY
 else
-  # local = this machine: anything else is hosted (synthetic data only) and must say so
-  case "$CHALLENGER_ENDPOINT" in http://127.0.0.1:*|http://localhost:*|http://\[::1\]:*) ;;
-    *) echo "REFUSING: CHALLENGER_KIND=local needs a loopback endpoint (http://127.0.0.1:<port>/v1), got $CHALLENGER_ENDPOINT; use KIND=hosted" >&2; exit 6 ;; esac
-  curl -fsS --max-time 5 -o /dev/null "$CHALLENGER_ENDPOINT/models" || { echo "REFUSING: nothing answers on $CHALLENGER_ENDPOINT (start the runtime first)" >&2; exit 6; }
+  # local = this machine or our own LLM Macs on the 'mac' WireGuard VPN (10.13.13.0/24, user 2026-11-24); anything else is hosted
+  case "$CHALLENGER_ENDPOINT" in
+    http://127.0.0.1:*|http://localhost:*|http://\[::1\]:*) VIA_VPN=0 ;;
+    http://10.13.13.[0-9]:*|http://10.13.13.[0-9][0-9]:*|http://10.13.13.[0-9][0-9][0-9]:*) VIA_VPN=1 ;;
+    *) echo "REFUSING: CHALLENGER_KIND=local needs a loopback endpoint or an LLM Mac on the 'mac' VPN (http://10.13.13.x:<port>/v1), got $CHALLENGER_ENDPOINT; use KIND=hosted" >&2; exit 6 ;; esac
+  if ! curl -fsS --max-time 5 -o /dev/null "$CHALLENGER_ENDPOINT/models"; then
+    [ "$VIA_VPN" = 1 ] && { echo "REFUSING: $CHALLENGER_ENDPOINT does not answer. Ask the developer to connect the 'mac' WireGuard VPN (sudo wg-quick up mac, MTU 1000) and wait for their OK" >&2; exit 6; }
+    echo "REFUSING: nothing answers on $CHALLENGER_ENDPOINT (start the runtime first)" >&2; exit 6
+  fi
 fi
+[ "$ACTION" = check ] && { echo "OK: challenger $P ($CHALLENGER_KIND, $ARM_MODE mode) at $CHALLENGER_ENDPOINT passes every refusal check"; exit 0; }
 if [ "$ARM_MODE" = pref ]; then
   E=("Llm__AllowedProviders=$LUNA_PROVIDER,llamacpp" "Llm__LlamaCpp__Endpoint=$CHALLENGER_ENDPOINT" "Llm__LlamaCpp__Model=$CHALLENGER_MODEL"
      "Llm__LlamaCpp__ContextTokens=$CHALLENGER_CONTEXT_TOKENS")
