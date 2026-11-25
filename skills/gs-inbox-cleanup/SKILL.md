@@ -1,6 +1,6 @@
 ---
 name: gs-inbox-cleanup
-description: Use when the Gütesiegel platform mails have piled up in Alex's Gmail inbox and should be sorted — phrases like "clean up my inbox", "cleanup my gmail like yesterday", "trash the pause and speichern mails", "archive the submissions", "my inbox is full of bewegte schule mails". Classifies the automated mails from support@guetesiegel-bewegteschule.at by BODY text, saves each school's resume link before trashing the pause mails, labels + archives the submission confirmations, and never touches a mail a school actually wrote.
+description: Use when the Gütesiegel platform mails have piled up in Alex's Gmail inbox and should be sorted — phrases like "clean up my inbox", "cleanup my gmail like yesterday", "trash the pause and speichern mails", "archive the submissions", "my inbox is full of bewegte schule mails". Classifies the automated mails from support@guetesiegel-bewegteschule.at by BODY text, saves each school's resume link before trashing the pause mails, labels + archives the submission confirmations, and never touches a mail a school actually wrote. Every run also scans the same inbox for new support tickets — the mails a human wrote — and reports each one with a triage line, so a cleanup run can never silently bury a school's question.
 ---
 
 # Gütesiegel inbox cleanup
@@ -11,6 +11,12 @@ for the 2026 NÖ/Wien cycle alone — so the inbox stops being usable without th
 
 **Runs with full autonomy** (Alex's decision, 2026-11-05): apply the matrix below to every
 matching mail without asking. Report what moved at the end.
+
+**This skill has two jobs, and the second one is not optional.** Sorting the automated mails is
+one; **scanning for new support tickets** (step 1b) is the other. They belong together because
+the same cleanup that empties the inbox is what makes a school's question stop being visible —
+so the run that files the automated mails away is exactly the run that has to surface the human
+ones. Never finish a run without the support-ticket section in the report, even when it is empty.
 
 ## The one rule that matters
 
@@ -49,6 +55,43 @@ Keep only messages whose `labelIds` contain `INBOX`. Ignore the rest — already
 If the thread is too large for one read, fall back to `get_message` per id with
 `messageFormat: PLAIN_TEXT`.
 
+### 1b. Scan for new support tickets — always, every run
+
+A second, independent search. The step-1 query only finds mails **from** the platform; a school's
+question comes from the school, so it would never appear there. Run both.
+
+```
+search_threads  query: "in:inbox -from:support@guetesiegel-bewegteschule.at newer_than:14d"
+                view: THREAD_VIEW_SUMMARY  pageSize: 50
+```
+
+Widen `newer_than` if the last run was longer ago; the point is to cover everything since then.
+A reply from a school often lands **inside** a platform thread (same subject, `AW:` prefix), so
+it also shows up in the step-1 threads — read every message of those threads, not only the ones
+`labelIds` marks `INBOX`.
+
+For each hit, decide from the body:
+
+| What it is | What to do |
+|---|---|
+| A school, a Landeskoordination, or Sigi writing about a submission, an invoice, a plaque, a resume link, a defect | **a support ticket** — handle it (below) |
+| A bounce / delivery report for a platform mail | report it with the affected address; do not touch the mail |
+| Unrelated mail (newsletters, other projects, Claude/AWS/vendor mail) | ignore it entirely, and do not list it — it is not inbox cleanup's business |
+
+For every support ticket, in the same run:
+
+1. **Draft the reply immediately** — do not offer and wait for a go. Reply on the school's own
+   message (`replyToMessageId`), To only the person who wrote, Cc `skai@ms-taiskirchen.at` and
+   `peter.klein@bewegteschule.at`. Sending stays with Alex; the skill only drafts.
+2. **File a GitHub issue** via `gs-support-ticket` (English body, original quoted verbatim in a
+   `<details>` block, label `support-ticket`, plus a triage comment). Check
+   `gh issue list --state open --search "<key terms>"` for a duplicate first.
+3. **Flag the time-critical shape**: a school that has *not yet submitted* and needs a flag
+   changed is cheap — the fix costs nothing before submission and becomes a manual production
+   write afterwards (#109, #112, #113). If a mail looks like that, say so first in the report, in
+   its own line, so Alex can mail the school to hold before it submits.
+4. Never trash, archive or label a mail a person wrote, not even after filing the issue.
+
 ### 2. Classify every message by its `plaintextBody`
 
 Apply the matrix above. Count each class before acting, and print the counts.
@@ -83,6 +126,11 @@ link to a single school only in a direct reply to that school's own address.
 Skip a line that is already in the file (match on the message id) so repeated runs don't
 duplicate.
 
+**Also record the pause mails the Gmail filter already trashed.** The step-1 thread read returns
+them too (their `labelIds` say `TRASH`, not `INBOX`), and their link is still intact there — so
+harvest it even though there is nothing left to trash. Those are the links nobody ever wrote down,
+and in 30 days they are gone for good. Record them, then leave the mails in Trash.
+
 ### 4. Act
 
 Pause mails — one call each:
@@ -106,9 +154,11 @@ Archiving keeps the mail and its attachments fully searchable. Nothing is delete
 ### 5. Report
 
 - counts per class, and the Kennzahlen/addresses of the trashed pause mails
-- every mail you did not touch, with sender, subject, date and one line on what it wants —
-  these are the ones Alex has to answer
 - how many resume links the file now holds
+- **Support tickets (step 1b), always its own section, even when empty:** per ticket the sender,
+  the Schulkennzahl, the date, one line on what it wants, the GitHub issue number, and whether a
+  reply draft exists. Anything time-critical goes first.
+- every other mail you did not touch, with sender, subject, date and one line on what it wants
 
 ## The filter
 
