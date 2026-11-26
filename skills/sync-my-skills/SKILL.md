@@ -146,6 +146,8 @@ For each new/updated skill:
   `personal-workflows/apittrich/skills/<name>/`, literal paths, no placeholders — but **with a
   `README.md` beside it** (see above). Never de-personalise it and never move it into the shared
   `bpp/skills/`.
+- **Personal mod** (`/home/alex/.claude/mods/<name>/`) → canonical `mods/<name>/`, mirror
+  `personal-workflows/apittrich/mods/<name>/`, literal, with a short `README.md`; skip `.claude-plugin/types/` (generated).
 - **Support files carry the same contract as the `.md`.** Under the shared `bpp/skills/` a `.sh`/`.py`
   gets the same reverse-render (`start_local_stack.sh` ships `ROOT="{{BPP_ROOT}}"`); `install.sh`
   renders it and preserves the executable bit. Under `personal-workflows/` it stays literal.

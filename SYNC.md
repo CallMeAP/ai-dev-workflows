@@ -22,6 +22,9 @@ it shipped broken skills: `lipsum-stundenliste` reached the mirror without `make
 its documented `python3 …/make_stundenliste.py` failed with "No such file or directory". A skill is
 mirrored complete or not at all.
 
+Personal mods under `mods/**` are in scope too: they go to the mirror's `personal-workflows/apittrich/mods/<name>/`,
+kept literal (no placeholders), without generated gitignored output such as `.claude-plugin/types/`.
+
 Still excluded from the **skills** sync: top-level `runAgents.sh` and large binary fixtures — those are not
 invoked from the skill directory.
 
