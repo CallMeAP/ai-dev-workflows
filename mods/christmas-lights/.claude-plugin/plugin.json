@@ -1,0 +1,6 @@
+{
+  "name": "christmas-lights",
+  "version": "0.1.0",
+  "description": "Hangs a string of Christmas lights above the prompt and counts the days to Christmas in the status line.",
+  "types": "./types/index.d.ts"
+}
