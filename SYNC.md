@@ -24,6 +24,7 @@ mirrored complete or not at all.
 
 Personal mods under `mods/**` are in scope too: they go to the mirror's `personal-workflows/apittrich/mods/<name>/`,
 kept literal (no placeholders), without generated gitignored output such as `.claude-plugin/types/`.
+`global/CLAUDE.md` is mirrored to `personal-workflows/apittrich/global/CLAUDE.md`, kept literal.
 
 Still excluded from the **skills** sync: top-level `runAgents.sh` and large binary fixtures — those are not
 invoked from the skill directory.
