@@ -45,7 +45,7 @@ Per repo, in order:
 
 ```bash
 set -uo pipefail
-BASE=/home/alex/Entwicklung/bpp
+BASE="$HOME/Entwicklung/bpp"
 for repo in "$BASE"/*/; do
   name=$(basename "$repo")
   case "$name" in *worktrees*|infra) continue;; esac

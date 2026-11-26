@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # bpp-cleanup-merged-worktrees — MODE: plan [--fetch] (default) | apply <worktree>... | apply-scaffold <worktree>...
 set -uo pipefail
-ROOTS=(/home/alex/Entwicklung/bpp)
+ROOTS=("$HOME/Entwicklung/bpp")
 if [ -z "${BASE:-}" ]; then   # no BASE given → run once per root; apply paths are routed to the root they live under
   mode="${1:-plan}"
   case "$mode" in

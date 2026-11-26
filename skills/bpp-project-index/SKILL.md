@@ -17,7 +17,7 @@ description: Use when user mentions any BPP project (bpp-backend, bpp-auth, bpp-
 
 Output: **`~/.claude/bpp-fleet/manifest.tsv`** — one row per repo, consumed by every other `bpp-*` skill
 instead of each re-deriving the fleet. Plus the human-readable
-`/home/alex/Entwicklung/bpp/bpp-backend/dev/apittrich/project_index.md`, which keeps the prose
+`~/Entwicklung/bpp/bpp-backend/dev/apittrich/project_index.md`, which keeps the prose
 descriptions and the legacy Brokernet Java modules that exist in no GitLab listing.
 
 Neither of the first two inputs is sufficient alone and the drift runs **both** ways — measured
@@ -64,7 +64,7 @@ Rationale for that split:
 1. Read `~/.claude/bpp-fleet/manifest.tsv` → `local_path` column is the answer. It is authoritative for
    the *path*, because it is keyed on the `origin` URL, not the folder name.
 2. For purpose / architecture / legacy Java modules (`backend-claim`, `backend-servo`, …), read
-   `/home/alex/Entwicklung/bpp/bpp-backend/dev/apittrich/project_index.md`.
+   `~/Entwicklung/bpp/bpp-backend/dev/apittrich/project_index.md`.
 3. `local_path` is `-` → the repo exists but is not checked out. Say so; offer `--clone`. **Never guess
    a path.**
 4. Name in neither → say so, offer a refresh; it may simply be newer than the last one.

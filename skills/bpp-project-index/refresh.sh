@@ -13,7 +13,7 @@ set -uo pipefail
 
 MANIFEST_DIR=~/.claude/bpp-fleet
 MANIFEST="$MANIFEST_DIR/manifest.tsv"
-INDEX=/home/alex/Entwicklung/bpp/bpp-backend/dev/apittrich/project_index.md
+INDEX="$HOME"/Entwicklung/bpp/bpp-backend/dev/apittrich/project_index.md
 DEV_ROOT="$HOME/Entwicklung/bpp"
 GROUP=lipso%2Fclients%2Fbrokernet
 KNOW=lipso%2Finternal%2Fagentic-coding-knowledge
