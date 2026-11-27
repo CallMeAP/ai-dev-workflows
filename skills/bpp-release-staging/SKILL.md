@@ -1,6 +1,6 @@
 ---
 name: bpp-release-staging
-description: Use when the BPP fleet must be released from development to staging without a human — phrases like "release to staging", "run the staging release", "autonomous staging release", "henry release", "bpp release dry run", "resume the halted release", "/bpp-release-staging". Runs the saved workflow (pull, shared state, DB migrations on local/dev/staging, shared bump, promotion MRs, wait green, merge, deploy watch, ui_configs, stage SQL, Henry ping, cleanup) with critic agents between phases; halts and pings on anything risky. For staging → main use bpp-release-main.
+description: Use when the BPP fleet must be released from development to staging without a human — phrases like "release to staging", "run the staging release", "autonomous staging release", "henry release", "bpp release dry run", "resume the halted release", "/bpp-release-staging". Runs the saved workflow (pull, shared state, DB migrations on local/dev/staging for the bpp and the document analysis database, shared bump, promotion MRs, wait green, merge, deploy watch, ui_configs, stage SQL, Henry ping, cleanup) with critic agents between phases; halts and pings on anything risky. For staging → main use bpp-release-main.
 ---
 
 # bpp-release-staging
@@ -20,16 +20,16 @@ Phases, in order:
 | # | Phase | What happens |
 |---|---|---|
 | 0 | Skill update | switch `BPP_RELEASE_SKILL_UPDATE` (`on`, `off` or `report`, default `on`). `on`: every run pulls + installs the skills mirror; only changed skills this run uses get a critic diff review first. `off`: no pull, no install, the report says "skill update off". `report`: pulls into a temp clone and lists which used skills differ, never installs |
-| 1 | Preflight | glab auth + Maintainer rights, dotnet, psql, secrets readable (with a timeout), disk, lock, previous state; health + deploy baseline: halt **before any write** if a release repo's endpoint is unhealthy or its last staging deploy failed (`lib/health-map.sh`) |
+| 1 | Preflight | glab auth + Maintainer rights, dotnet, psql, secrets of both databases readable (with a timeout), disk, lock, previous state; health + deploy baseline: halt **before any write** if a release repo's endpoint is unhealthy or its last staging deploy failed (`lib/health-map.sh`) |
 | 2 | Pull | `bpp-pull-all-dev`; halt if bpp-shared or bpp-backend were skipped |
-| 3 | Shared state | newest `BPP.Shared.NET` package → its bpp-shared commit; record the pre-move SHA, then checkout; pending migrations for dev + staging; record each repo's `development` head |
-| 4 | Local migrate | `lib/migrate-stage.sh local` |
-| 5 | Dev migrate | `lib/migrate-stage.sh development`, then new bpp-backend StageSql files whose header lists `development` (pre-deploy, then post-deploy) via `lib/run-stage-sql.sh development` |
+| 3 | Shared state | newest `BPP.Shared.NET` package → its bpp-shared commit; record the pre-move SHA, then checkout; pending migrations for dev + staging; record each repo's `development` head; pending document analysis migrations for dev + staging at the `development` head of bpp-document-analysis |
+| 4 | Local migrate | `lib/migrate-stage.sh local`, then `lib/migrate-stage.sh local --db document-analysis` |
+| 5 | Dev migrate | `lib/migrate-stage.sh development`, then `lib/migrate-stage.sh development --db document-analysis`, then new bpp-backend StageSql files whose header lists `development` (pre-deploy, then post-deploy) via `lib/run-stage-sql.sh development` |
 | 5b | Bump shared | `bpp-bump-shared-version` to exactly the phase 3 package |
 | 6 | Promote | `bpp-promote-dev-to-staging` dev→staging; the go is given after critics approve the preview; restart guard |
 | 7 | UI versions | package.json version on `development` > `staging` (and > `main`) in every UI promotion MR |
 | 8 | Wait green | every promotion MR: pipeline success + `mergeable`; one retry; bounded wait; Duo path; a `skipped` pipeline after `[skip ci]` gets one empty CI commit on `development` |
-| 9 | Staging migrate | `lib/migrate-stage.sh staging`, then new bpp-backend `*.pre-deploy.sql` via `lib/run-stage-sql.sh staging` |
+| 9 | Staging migrate | `lib/migrate-stage.sh staging`, then `lib/migrate-stage.sh staging --db document-analysis`, then new bpp-backend `*.pre-deploy.sql` via `lib/run-stage-sql.sh staging` |
 | 10 | Merge | merge with `sha=<head from phase 3>` and `should_remove_source_branch=false`; check `development` still exists |
 | 11 | Watch deploy | `staging` pipelines + deploy jobs green, then `bpp-go-health` vs the Preflight baseline: polls each new failure until healthy or fail_since + 15 min, then halts; never done while one is still unhealthy; baseline failures are listed as known |
 | 12 | ui_configs | `cockpit` + `kundenportal` statements changed by this promotion; never `stella` |
@@ -40,9 +40,11 @@ Phases, in order:
 
 Scripts in `lib/` (bash 3.2-safe, macOS + Linux):
 
-- `secret-env.sh` — `get_secret <development|staging>`; only the wrappers below call it.
-- `migrate-stage.sh <local|development|staging>` — bpp-shared DbMigrator with the injected connection string.
-- `run-stage-sql.sh [--readonly] <development|staging> (<file.sql> | --check | --query 'SQL')` — psql in one transaction.
+- `secret-env.sh` — `get_secret <development|staging> [bpp|document-analysis]`; only the wrappers below call it.
+- `migrate-stage.sh <local|development|staging> [--db bpp|document-analysis] [--repo-dir DIR]` — bpp-shared DbMigrator
+  (default), or the bpp-document-analysis DbMigrator, with the injected connection string.
+- `run-stage-sql.sh [--readonly] [--db bpp|document-analysis] <development|staging> (<file.sql> | --check | --query 'SQL')` —
+  psql in one transaction. With `--db document-analysis` only `--check` and `--readonly --query` (read-only).
 - `find-stage-sql.sh` — SQL candidates (convention / diff / MR description) as JSON.
 - `health-map.sh` — `hosts <repo>=<dir|compose file>…` (Traefik hosts, network aliases, container_name and
   hostname from `origin/staging`'s compose file; a downloaded compose file for repos without a clone),
@@ -53,13 +55,35 @@ Scripts in `lib/` (bash 3.2-safe, macOS + Linux):
   `set-package <version>`, `set-baseline <json>`, `set-pre-move-sha <sha>`, `add-sql` / `has-sql <stage> <file-id>`, `get [key]`.
   `henry-ping.sh <info|blocker> <title> <body>` — prints the ping block.
 
+## Two databases
+
+Each stage has two databases, and the release migrates both:
+
+| Database | Schema source | Migrator | Secret |
+|---|---|---|---|
+| `bpp` | bpp-shared, at the commit of the newest `BPP.Shared.NET` package | `BPP.Shared.NET.DbMigrator` | `bpp-db-<stage>` / `BPP_DB_<STAGE>` |
+| `bpp_document_analysis` (its own Postgres) | bpp-document-analysis, at its recorded `development` head | `BPP.DocumentAnalysis.DbMigrator` | `bpp-db-document-analysis-<stage>` / `BPP_DB_DOCUMENT_ANALYSIS_<STAGE>` |
+
+- bpp-shared's migrations never reach the document analysis database, and the service never migrates
+  on startup, so without this step a release leaves that database behind its code.
+- The document analysis migrator runs from a detached worktree of bpp-document-analysis at one exact
+  commit: the phase 3 `development` head for local and development, the recorded `development` head
+  (what the promotion MR merges) for staging. Both must hold the same migrations, else the run halts.
+- Its `__EFMigrationsHistory` has snake_case columns (`migration_id`), unlike the bpp database.
+- The critics' old-code check covers its migrations too: they also run before the merge.
+- Pending document analysis migrations for staging need a promotion MR of bpp-document-analysis
+  (halt otherwise) and its staging deploy in phase 11: running containers cache enum labels and
+  columns until they are replaced.
+- No SQL file runs against it; `run-stage-sql.sh --db document-analysis` is read-only. StageSql is
+  for the bpp database only.
+
 ## Rules
 
 These change the standing rules **only while this skill runs**. Everywhere else the old rules hold
 (no DB writes, merges are the user's).
 
-- The run may write to the **development** and **staging** DBs, and only through
-  `lib/migrate-stage.sh` and `lib/run-stage-sql.sh`. Never `main`: no script accepts it.
+- The run may write to the **development** and **staging** DBs (bpp and document analysis), and only
+  through `lib/migrate-stage.sh` and `lib/run-stage-sql.sh`. Never `main`: no script accepts it.
 - The run may merge the **staging** promotion MRs (phase 10), and in the Duo path push `staging`.
 - Never print, cat, echo or log a secret. Never call `get_secret` directly. Never read
   `~/.bpp-release.env`. DB access only via the wrappers; their output is filtered for the password.
@@ -127,7 +151,8 @@ Lint: `shellcheck -x "$HOME/.claude/skills/bpp-release-staging/lib/"*.sh` (`-x` 
 
 Two backends, one skill. `secret-env.sh` uses the Keychain on macOS and the env file elsewhere;
 `BPP_RELEASE_SECRETS=keychain|envfile` overrides that. Values are full Npgsql connection strings for
-`development` and `staging`. There is no `main` entry, on purpose.
+`development` and `staging`, one per database (see "Two databases"): four in all. There is no `main`
+entry, on purpose. A password with a `;` is not supported (`run-stage-sql.sh` splits at `;`).
 
 Recommended: one DB role per stage with DDL + DML on the bpp schema only.
 
@@ -148,11 +173,13 @@ Only on the user's VM. The user starts the run by hand there; the autonomy is th
    nano ~/.bpp-release.env
    ```
 
-   Content, exactly two lines, double quotes allowed:
+   Content, exactly four lines, double quotes allowed:
 
    ```
    BPP_DB_DEVELOPMENT="Host=<host>;Port=5432;Database=<db>;Username=<user>;Password=<password>"
    BPP_DB_STAGING="Host=<host>;Port=5432;Database=<db>;Username=<user>;Password=<password>"
+   BPP_DB_DOCUMENT_ANALYSIS_DEVELOPMENT="Host=<host>;Port=<port>;Database=bpp_document_analysis;Username=<user>;Password=<password>"
+   BPP_DB_DOCUMENT_ANALYSIS_STAGING="Host=<host>;Port=<port>;Database=bpp_document_analysis;Username=<user>;Password=<password>"
    ```
 
    No `BPP_DB_MAIN`. The file is read line by line and never `source`d, so nothing in it runs.
@@ -186,6 +213,8 @@ Only on the user's VM. The user starts the run by hand there; the autonomy is th
    ```bash
    bash ~/.claude/skills/bpp-release-staging/lib/run-stage-sql.sh --readonly staging --check
    bash ~/.claude/skills/bpp-release-staging/lib/run-stage-sql.sh --readonly development --check
+   bash ~/.claude/skills/bpp-release-staging/lib/run-stage-sql.sh --readonly --db document-analysis staging --check
+   bash ~/.claude/skills/bpp-release-staging/lib/run-stage-sql.sh --readonly --db document-analysis development --check
    ```
 
    Exit 3 = line missing, 4 = wrong mode or owner. Fix and rerun; never paste the file into a chat.
@@ -228,12 +257,17 @@ Another path: `BPP_RELEASE_ENV_FILE=/path/to/file` (same mode and owner rules).
    ```bash
    security add-generic-password -s bpp-db-development -a bpp -T /usr/bin/security -w
    security add-generic-password -s bpp-db-staging     -a bpp -T /usr/bin/security -w
+   security add-generic-password -s bpp-db-document-analysis-development -a bpp -T /usr/bin/security -w
+   security add-generic-password -s bpp-db-document-analysis-staging     -a bpp -T /usr/bin/security -w
    ```
 
-2. Test, read-only:
+2. Test, read-only (all four must print "connection OK"):
 
    ```bash
    bash ~/.claude/skills/bpp-release-staging/lib/run-stage-sql.sh --readonly staging --check
+   bash ~/.claude/skills/bpp-release-staging/lib/run-stage-sql.sh --readonly development --check
+   bash ~/.claude/skills/bpp-release-staging/lib/run-stage-sql.sh --readonly --db document-analysis staging --check
+   bash ~/.claude/skills/bpp-release-staging/lib/run-stage-sql.sh --readonly --db document-analysis development --check
    ```
 
 3. Skill update: the Mac mini keeps `on` (the default). Do not set `BPP_RELEASE_SKILL_UPDATE` there;
@@ -250,8 +284,8 @@ Another path: `BPP_RELEASE_ENV_FILE=/path/to/file` (same mode and owner rules).
 - `secret-env.sh` never waits for a popup: it calls `security` under a timeout
   (`BPP_KEYCHAIN_TIMEOUT`, default 10 s) and returns exit 5. Preflight treats that as a blocker
   (halt + Henry ping naming the Keychain cause), not a hang.
-- Prove it: reboot once, then let cron start the preflight with nobody at the Mac. It must read both
-  entries without a popup.
+- Prove it: reboot once, then let cron start the preflight with nobody at the Mac. It must read all
+  four entries without a popup.
 
 ## Install checklist
 
@@ -264,9 +298,11 @@ Mac mini (the colleague who installs it ticks every line; the VM needs the lines
 - [ ] The macOS user that runs the job is a normal user, not `root` (Keychain is per user). *Mac*
 - [ ] Keychain entries created with `-T /usr/bin/security`; auto-login after reboot set up. *Mac*
 - [ ] `jq`, `psql`, `dotnet`, `glab` installed; `glab auth status` OK.
-- [ ] dev and staging DBs reachable from this machine (VPN or tunnel?); both `--check` commands pass.
-- [ ] Local Postgres with a `bpp` DB for phase 4 (`migrate-stage.sh local`).
-- [ ] GitLab NuGet auth works for `dotnet run` of the bpp-shared DbMigrator.
+- [ ] dev and staging DBs of both databases reachable from this machine (VPN or tunnel?); all four
+      `--check` commands pass.
+- [ ] Local Postgres with a `bpp` DB for phase 4 (`migrate-stage.sh local`); its login must also fit the
+      document analysis migrator's `appsettings.json`, which creates `bpp_document_analysis` there.
+- [ ] GitLab NuGet auth works for `dotnet run` of the bpp-shared and the bpp-document-analysis DbMigrator.
 - [ ] The glab identity is **Maintainer** in every promoted repo (`staging` merge/push needs it).
 - [ ] The same `~/Entwicklung/bpp` checkouts exist (`bpp-project-index` → missing local checkouts).
 - [ ] Saved workflow copied to `~/.claude/workflows/`; no hard-coded home paths in the skills used.

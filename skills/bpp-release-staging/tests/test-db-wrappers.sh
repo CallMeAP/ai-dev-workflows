@@ -18,7 +18,9 @@ unset BPP_RELEASE_ENV_FILE PGOPTIONS PGPASSWORD PGHOST PGUSER PGDATABASE PGPORT
 PW='Zq7SecretPw'
 CONN_STG="Host=stg.db.example;Port=5433;Database=bpp_stg;Username=bpp_rel;Password=$PW;SSL Mode=Require"
 CONN_DEV="Server=dev.db.example;Database=bpp_dev;User Id=bpp_dev;Pwd=$PW"
-printf 'BPP_DB_STAGING="%s"\nBPP_DB_DEVELOPMENT="%s"\n' "$CONN_STG" "$CONN_DEV" > "$HOME/.bpp-release.env"
+PW2='Yk4DocAnaPw'
+CONN_DA_STG="Host=da.stg.example;Port=13323;Database=bpp_document_analysis;Username=bpp;Password=$PW2"
+printf 'BPP_DB_STAGING="%s"\nBPP_DB_DEVELOPMENT="%s"\nBPP_DB_DOCUMENT_ANALYSIS_STAGING="%s"\n' "$CONN_STG" "$CONN_DEV" "$CONN_DA_STG" > "$HOME/.bpp-release.env"
 chmod 600 "$HOME/.bpp-release.env"
 
 # Stubs log argv and the env they see to files under $TMP/log.
@@ -59,6 +61,8 @@ export PATH="$TMP/bin:$PATH"
 # shared dir layout the migrator wrapper expects
 SHARED="$TMP/bpp-shared"
 mkdir -p "$SHARED/BPP.Shared.NET/BPP.Shared.NET.DbMigrator"
+DOCANA="$TMP/bpp-document-analysis"
+mkdir -p "$DOCANA/BPP.DocumentAnalysis/BPP.DocumentAnalysis.DbMigrator"
 
 reset_logs() { rm -f "$STUB_LOG"/*; }
 
@@ -123,6 +127,38 @@ assert_eq no "$( [ -e "$STUB_LOG/dotnet.argv" ] && echo yes || echo no)" "migrat
 
 run_cap bash "$MIGRATE" staging --shared-dir "$TMP/nope"
 assert_eq 1 "$RC" "migrate: missing migrator project gives exit 1"
+
+# ---- migrate-stage.sh --db document-analysis: own migrator project, own secret
+reset_logs
+run_cap bash "$MIGRATE" staging --db document-analysis --repo-dir "$DOCANA"
+assert_eq 0 "$RC" "migrate document-analysis staging: exit 0"
+assert_eq "run --no-launch-profile --project $DOCANA/BPP.DocumentAnalysis/BPP.DocumentAnalysis.DbMigrator" "$(cat "$STUB_LOG/dotnet.argv")" "migrate document-analysis: its own DbMigrator project"
+assert_not_contains "$PW2" "$OUT" "migrate document-analysis: output has no password"
+assert_not_contains "$PW" "$OUT" "migrate document-analysis: the bpp secret is not used"
+assert_contains '***' "$OUT" "migrate document-analysis: output redacted with ***"
+
+reset_logs
+run_cap bash "$MIGRATE" staging --shared-dir "$SHARED" --repo-dir "$DOCANA"
+assert_eq "run --no-launch-profile --project $SHARED/BPP.Shared.NET/BPP.Shared.NET.DbMigrator" "$(cat "$STUB_LOG/dotnet.argv")" "migrate without --db: still the bpp-shared DbMigrator"
+
+reset_logs
+( BPP_RELEASE_ENV_FILE="$TMP/none.env"; export BPP_RELEASE_ENV_FILE
+  bash "$MIGRATE" local --db document-analysis --repo-dir "$DOCANA" ) > "$TMP/out" 2>&1
+RC=$?
+assert_eq 0 "$RC" "migrate document-analysis local: exit 0 without any secret"
+assert_contains 'conn=<unset>' "$(cat "$TMP/out")" "migrate document-analysis local: no connection string passed"
+
+reset_logs
+run_cap bash "$MIGRATE" development --db document-analysis --repo-dir "$DOCANA"
+assert_eq 3 "$RC" "migrate document-analysis development, secret missing: exit 3 (the bpp line is not a fallback)"
+assert_eq no "$( [ -e "$STUB_LOG/dotnet.argv" ] && echo yes || echo no)" "migrate document-analysis, secret missing: dotnet not called"
+run_cap bash "$MIGRATE" staging --db other
+assert_eq 2 "$RC" "migrate unknown database: exit 2"
+run_cap bash "$MIGRATE" main --db document-analysis --repo-dir "$DOCANA"
+assert_eq 2 "$RC" "migrate document-analysis main: exit 2"
+run_cap bash "$MIGRATE" staging --db document-analysis --repo-dir "$TMP/nope"
+assert_eq 1 "$RC" "migrate document-analysis: missing migrator project gives exit 1"
+assert_eq no "$( [ -e "$STUB_LOG/dotnet.argv" ] && echo yes || echo no)" "migrate document-analysis refusals: dotnet not called"
 
 # ---- run-stage-sql.sh
 printf 'UPDATE ui_configs SET x = 1 WHERE app = %s;\n' "'cockpit'" > "$TMP/sql/ok.sql"
@@ -189,8 +225,36 @@ run_cap env BPP_RELEASE_ENV_FILE="$TMP/none.env" bash "$RUNSQL" staging --check
 assert_eq 3 "$RC" "run-sql, secret missing: exit 3"
 assert_eq no "$( [ -e "$STUB_LOG/psql.argv" ] && echo yes || echo no)" "run-sql, secret missing: psql not called"
 
+# ---- run-stage-sql.sh --db document-analysis: read-only access with its own secret
+reset_logs
+run_cap bash "$RUNSQL" --readonly --db document-analysis staging --check
+assert_eq 0 "$RC" "run-sql document-analysis --check: exit 0"
+assert_eq 'connection OK, 42 migrations applied' "$OUT" "run-sql document-analysis --check: message"
+assert_contains 'PGHOST=da.stg.example' "$(cat "$STUB_LOG/psql.env")" "run-sql document-analysis: its own host"
+assert_contains 'PGPORT=13323' "$(cat "$STUB_LOG/psql.env")" "run-sql document-analysis: its own port"
+assert_contains 'PGDATABASE=bpp_document_analysis' "$(cat "$STUB_LOG/psql.env")" "run-sql document-analysis: its own database"
+
+reset_logs
+run_cap bash "$RUNSQL" --db document-analysis --readonly staging --query 'SELECT 1'
+assert_contains 'PGOPTIONS=-c default_transaction_read_only=on' "$(cat "$STUB_LOG/psql.env")" "run-sql document-analysis: options in either order, read-only"
+assert_not_contains "$PW2" "$OUT" "run-sql document-analysis: output has no password"
+
+reset_logs
+run_cap bash "$RUNSQL" --db document-analysis staging "$TMP/sql/ok.sql"
+assert_eq 1 "$RC" "run-sql document-analysis: SQL file refused"
+run_cap bash "$RUNSQL" --db document-analysis staging --query 'UPDATE t SET x = 1'
+assert_eq 1 "$RC" "run-sql document-analysis: --query without --readonly refused"
+assert_eq no "$( [ -e "$STUB_LOG/psql.argv" ] && echo yes || echo no)" "run-sql document-analysis writes: psql not called"
+run_cap bash "$RUNSQL" --readonly --db other staging --check
+assert_eq 2 "$RC" "run-sql unknown database: exit 2"
+run_cap bash "$RUNSQL" --readonly --db document-analysis development --check
+assert_eq 3 "$RC" "run-sql document-analysis development, secret missing: exit 3"
+run_cap bash "$RUNSQL" --readonly --db document-analysis main --check
+assert_eq 2 "$RC" "run-sql document-analysis main: exit 2"
+
 # argv of every stub call over the whole test never held the password
 assert_eq yes "$( [ -s "$STUB_ALL" ] && echo yes || echo no)" "stubs: argv log written"
 assert_not_contains "$PW" "$(cat "$STUB_ALL")" "stubs: password never in argv"
+assert_not_contains "$PW2" "$(cat "$STUB_ALL")" "stubs: document analysis password never in argv"
 
 finish

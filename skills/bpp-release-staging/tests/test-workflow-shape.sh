@@ -54,6 +54,8 @@ assert_not_contains "$HOME/" "$SRC" "no literal home path"
 
 for s in 'should_remove_source_branch=false' '--readonly' 'henry-ping.sh' 'state.sh lock' \
          'state.sh unlock' 'state.sh halt' 'migrate-stage.sh staging' 'run-stage-sql.sh staging' \
+         'migrate-stage.sh staging --db document-analysis' 'migrate-stage.sh development --db document-analysis' \
+         'migrate-stage.sh local --db document-analysis' '--readonly --db document-analysis' \
          'find-stage-sql.sh' 'args.runId' 'dry-run' 'block: true' '$HOME/.claude/skills/bpp-release-staging/lib'; do
   assert_contains "$s" "$SRC" "workflow mentions $s"
 done
@@ -92,7 +94,7 @@ const agent = async (p, o) => {
   if (o.schema && o.schema.properties && 'block' in o.schema.properties) return { block: false, reason: '' }
   if (o.label === 'halt') return { ping: '', notes: '' }
   return { ok: true, halt: false, reason: '', summary: 's', applied: [], evidence: [], ping: 'p',
-    package: '1.0.0', shared_sha: 'abc', heads: [{ repo: 'r', sha: 'a' }], staging_heads: [{ repo: 'r', sha: 'b' }],
+    package: '1.0.0', shared_sha: 'abc', docana_sha: 'dcf', docana_pending_staging: ['20260101000000_DocAna'], heads: [{ repo: 'r', sha: 'a' }], staging_heads: [{ repo: 'r', sha: 'b' }],
     mrs: [{ repo: 'r', iid: 1, url: 'u', kind: 'dotnet' }],
     changed_skills: process.argv[5] === 'changed' ? ['bpp-pull-all-dev'] : [],
     skill_update: process.env.STUB_SKILL_UPDATE || 'on',
@@ -139,6 +141,22 @@ EOF
     # phase 9: only bpp-backend pre-deploy, skipping recorded files
     sw=$(cat "$O/Staging_migrate_worker" 2>/dev/null)
     assert_contains 'has-sql staging' "$sw" "$mode: Staging migrate skips SQL already applied on staging"
+    # document analysis DB: own secrets, own migrator from a worktree at a fixed commit, read-only SQL
+    assert_contains '--readonly --db document-analysis development --check' "$(cat "$O/Preflight_worker" 2>/dev/null)" "$mode: Preflight checks the document analysis dev secret"
+    assert_contains '--readonly --db document-analysis development --query' "$(cat "$O/Shared_state_worker" 2>/dev/null)" "$mode: Shared state lists the document analysis migrations"
+    assert_contains 'migration_id' "$(cat "$O/Shared_state_worker" 2>/dev/null)" "$mode: Shared state queries the snake_case history column"
+    lw=$(cat "$O/Local_migrate_worker" 2>/dev/null)
+    assert_contains 'worktree add --detach' "$lw" "$mode: Local migrate builds the document analysis worktree"
+    assert_contains ' dcf' "$lw" "$mode: Local migrate pins the document analysis commit of phase 3"
+    assert_contains 'migrate-stage.sh development --db document-analysis --repo-dir' "$dw" "$mode: Dev migrate runs the document analysis migrator"
+    assert_contains 'migrate-stage.sh staging --db document-analysis --repo-dir' "$sw" "$mode: Staging migrate runs the document analysis migrator"
+    assert_contains '20260101000000_DocAna' "$sw" "$mode: Staging migrate gets the phase 3 document analysis pending list"
+    # exit 0 of the migrator does not prove the target: both stages re-read the target's history
+    assert_contains 'run-stage-sql.sh --readonly --db document-analysis development --query' "$dw" "$mode: Dev migrate verifies the document analysis target DB afterwards"
+    assert_contains 'run-stage-sql.sh --readonly --db document-analysis staging --query' "$sw" "$mode: Staging migrate verifies the document analysis target DB afterwards"
+    assert_contains 'bpp-document-analysis must be in the preview list' "$(cat "$O/Promote_preview_worker" 2>/dev/null)" "$mode: Promote preview has the document analysis restart guard"
+    assert_contains 'bpp-document-analysis must be one of those repos' "$(cat "$O/Watch_deploy_worker" 2>/dev/null)" "$mode: Watch deploy checks the document analysis redeploy"
+    assert_not_contains 'run-stage-sql.sh staging --db document-analysis' "$sw" "$mode: no SQL write against the document analysis DB"
     # phase 13: StageSql outside bpp-backend is a fallback candidate
     mw=$(cat "$O/Manual_SQL_convention_worker" 2>/dev/null)
     assert_contains 'outside bpp-backend' "$mw" "$mode: Manual SQL treats StageSql outside bpp-backend as a fallback candidate"
@@ -161,6 +179,13 @@ EOF
 
   # dry-run: local git updates are allowed, critics are told so
   assert_contains 'Local git updates' "$(cat "$T/dry-run/Pull_critic_1" 2>/dev/null)" "dry-run: critics allow local git updates"
+
+  # no document analysis commit from Shared state -> halt there
+  O="$T/nodocana"
+  mkdir -p "$O"
+  sed "s/docana_sha: 'dcf', //" "$T/h.js" > "$T/h2.js"
+  node "$T/h2.js" "$WF" run "$O" 2> "$T/err" || _fail "nodocana: stub run failed: $(head -5 "$T/err")"
+  assert_eq "halted Shared state" "$(cat "$O/status" 2>/dev/null)" "no document analysis head: halts in Shared state"
 
   # a used skill changed -> diff critics run before the install
   O="$T/changed"

@@ -20,9 +20,9 @@ write_env() {
   chmod "$1" "$ENVF"
 }
 
-# gs <stage> - runs get_secret in a subshell; sets OUT, ERR, RC
+# gs <stage> [db] - runs get_secret in a subshell; sets OUT, ERR, RC
 gs() {
-  ( . "$LIB" && get_secret "$1" ) > "$TMP/out" 2> "$TMP/err"
+  ( . "$LIB" && get_secret "$@" ) > "$TMP/out" 2> "$TMP/err"
   RC=$?
   OUT=$(cat "$TMP/out")
   ERR=$(cat "$TMP/err")
@@ -94,6 +94,33 @@ assert_eq 2 "$RC" "get_secret prod: status 2"
 gs ''
 assert_eq 2 "$RC" "get_secret without stage: status 2"
 
+# second database: document analysis has its own lines; neither database reads the other's
+write_env 600 'BPP_DB_STAGING="Host=h;Password=p1"
+BPP_DB_DOCUMENT_ANALYSIS_STAGING="Host=da;Password=p3"
+BPP_DB_DOCUMENT_ANALYSIS_DEVELOPMENT="Host=dd;Password=p4"
+'
+gs staging document-analysis
+assert_eq 0 "$RC" "envfile document-analysis: status 0"
+assert_eq 'Host=da;Password=p3' "$OUT" "envfile document-analysis: staging value"
+gs development document-analysis
+assert_eq 'Host=dd;Password=p4' "$OUT" "envfile document-analysis: development value"
+gs staging bpp
+assert_eq 'Host=h;Password=p1' "$OUT" "envfile: explicit bpp is the default database"
+gs staging
+assert_eq 'Host=h;Password=p1' "$OUT" "envfile: bpp value unchanged by the document analysis lines"
+gs development
+assert_eq 3 "$RC" "envfile: a document analysis line does not count as the bpp line"
+write_env 600 'BPP_DB_STAGING="Host=h;Password=p1"
+'
+gs staging document-analysis
+assert_eq 3 "$RC" "envfile document-analysis: missing line gives status 3"
+assert_contains 'BPP_DB_DOCUMENT_ANALYSIS_STAGING' "$ERR" "envfile document-analysis: error names the missing key"
+gs staging other
+assert_eq 2 "$RC" "get_secret unknown database: status 2"
+assert_eq '' "$OUT" "get_secret unknown database: no output"
+gs main document-analysis
+assert_eq 2 "$RC" "get_secret main document-analysis: status 2"
+
 # missing line / missing file / empty value
 gs development
 assert_eq 3 "$RC" "envfile: missing stage line gives status 3"
@@ -145,10 +172,16 @@ OUT=$( (PATH="$TMP/bin:$PATH" BPP_RELEASE_SECRETS=keychain; export PATH BPP_RELE
 assert_eq 'Host=k;Password=kc1' "$OUT" "keychain: value returned"
 assert_eq 'find-generic-password -s bpp-db-development -a bpp -w' "$(cat "$TMP/args")" "keychain: security called with service and account"
 
+OUT=$( (PATH="$TMP/bin:$PATH" BPP_RELEASE_SECRETS=keychain; export PATH BPP_RELEASE_SECRETS; . "$LIB" && get_secret staging document-analysis) 2>/dev/null)
+assert_eq 'Host=k;Password=kc1' "$OUT" "keychain document-analysis: value returned"
+assert_eq 'find-generic-password -s bpp-db-document-analysis-staging -a bpp -w' "$(cat "$TMP/args")" "keychain document-analysis: own service name"
+
 # keychain: item not found (security exit 44) gives 3, denied gives 5
 printf '#!/usr/bin/env bash\nexit 44\n' > "$TMP/bin/security"
 ( PATH="$TMP/bin:$PATH" BPP_RELEASE_SECRETS=keychain; export PATH BPP_RELEASE_SECRETS; . "$LIB" && get_secret staging ) >/dev/null 2>&1
 assert_eq 3 "$?" "keychain: item not found gives status 3"
+ERR=$( (PATH="$TMP/bin:$PATH" BPP_RELEASE_SECRETS=keychain; export PATH BPP_RELEASE_SECRETS; . "$LIB" && get_secret development document-analysis) 2>&1 >/dev/null)
+assert_contains 'bpp-db-document-analysis-development not found' "$ERR" "keychain document-analysis: not-found error names the entry"
 printf '#!/usr/bin/env bash\nexit 51\n' > "$TMP/bin/security"
 ( PATH="$TMP/bin:$PATH" BPP_RELEASE_SECRETS=keychain; export PATH BPP_RELEASE_SECRETS; . "$LIB" && get_secret staging ) >/dev/null 2>&1
 assert_eq 5 "$?" "keychain: denied gives status 5"
@@ -159,7 +192,7 @@ printf '#!/usr/bin/env bash\necho Host=mac\n' > "$TMP/bin/security"
 chmod +x "$TMP/bin/uname"
 OUT=$( (PATH="$TMP/bin:$PATH"; export PATH; unset BPP_RELEASE_SECRETS; . "$LIB" && get_secret staging) 2>/dev/null)
 assert_eq 'Host=mac' "$OUT" "backend: Darwin uses keychain"
-rm -f "$TMP/bin/uname"
+printf '#!/usr/bin/env bash\necho Linux\n' > "$TMP/bin/uname"
 write_env 600 'BPP_DB_STAGING="Host=lin"
 '
 OUT=$( (PATH="$TMP/bin:$PATH"; export PATH; unset BPP_RELEASE_SECRETS; . "$LIB" && get_secret staging) 2>/dev/null)

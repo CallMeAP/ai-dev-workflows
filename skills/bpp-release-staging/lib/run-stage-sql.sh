@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# run-stage-sql.sh [--readonly] <development|staging> (<file.sql> | --check | --query 'SQL')
+# run-stage-sql.sh [--readonly] [--db bpp|document-analysis] <development|staging> (<file.sql> | --check | --query 'SQL')
 # Runs SQL against a stage DB with psql. The Npgsql connection string from get_secret is turned
 # into PGHOST/PGPORT/PGDATABASE/PGUSER/PGPASSWORD inside this process only; all output goes
 # through redact_stream. No main stage.
@@ -8,8 +8,11 @@
 #   --check     prints "connection OK, <n> migrations applied" (always read-only)
 #   --query SQL runs one SQL string with psql -c
 #   --readonly  sets PGOPTIONS='-c default_transaction_read_only=on'
-# Exit: psql's exit; 1 bad file or args; 2 unknown stage; 3-5 from get_secret; 6 file has
-#       transaction lines.
+#   --db        bpp (default) or document-analysis (the bpp_document_analysis database). The
+#               document analysis database is read-only here: only --check and --readonly --query;
+#               its schema changes come from migrate-stage.sh --db document-analysis alone.
+# Exit: psql's exit; 1 bad file or args; 2 unknown stage or database; 3-5 from get_secret;
+#       6 file has transaction lines.
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=SCRIPTDIR/secret-env.sh
@@ -18,15 +21,30 @@ here=$(cd "$(dirname "$0")" && pwd)
 . "$here/redact.sh"
 
 usage() {
-  echo "usage: run-stage-sql.sh [--readonly] <development|staging> (<file.sql> | --check | --query 'SQL')" >&2
+  echo "usage: run-stage-sql.sh [--readonly] [--db bpp|document-analysis] <development|staging> (<file.sql> | --check | --query 'SQL')" >&2
   exit 1
 }
 
 readonly_mode=no
-if [ "${1:-}" = --readonly ]; then
-  readonly_mode=yes
-  shift
-fi
+db=bpp
+while :; do
+  case "${1:-}" in
+    --readonly) readonly_mode=yes; shift ;;
+    --db)
+      [ $# -ge 2 ] || usage
+      db=$2
+      shift 2
+      ;;
+    *) break ;;
+  esac
+done
+case "$db" in
+  bpp|document-analysis) ;;
+  *)
+    printf 'run-stage-sql: unknown database "%s" (allowed: bpp, document-analysis)\n' "$db" >&2
+    exit 2
+    ;;
+esac
 
 stage=${1:-}
 case "$stage" in
@@ -49,6 +67,11 @@ case "${1:-}" in
   *) action='file'; [ $# -eq 1 ] || usage; file=$1 ;;
 esac
 
+if [ "$db" = document-analysis ] && [ "$action" != check ] && { [ "$action" != query ] || [ "$readonly_mode" != yes ]; }; then
+  echo 'run-stage-sql: --db document-analysis is read-only (use --check or --readonly --query)' >&2
+  exit 1
+fi
+
 if [ "$action" = file ]; then
   if [ ! -f "$file" ] || [ ! -r "$file" ]; then
     printf 'run-stage-sql: file not found or not readable: %s\n' "$file" >&2
@@ -62,7 +85,7 @@ if [ "$action" = file ]; then
   fi
 fi
 
-conn=$(get_secret "$stage") || exit $?
+conn=$(get_secret "$stage" "$db") || exit $?
 
 # Clear libpq vars from the caller so only the stage's values count.
 unset PGHOST PGHOSTADDR PGPORT PGDATABASE PGUSER PGPASSWORD PGPASSFILE PGSERVICE PGSERVICEFILE \

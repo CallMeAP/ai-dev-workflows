@@ -31,6 +31,13 @@ for s in "starts again at phase 0" "no jump to the halted phase" "has-sql" \
   assert_contains "$s" "$md" "mentions $s"
 done
 assert_not_contains "resumes from the halted phase" "$md" "no jump-to-phase resume"
+# second database: document analysis has its own migrator, secrets and checks
+for s in "## Two databases" "bpp-db-document-analysis-staging" "bpp-db-document-analysis-development" \
+  "BPP_DB_DOCUMENT_ANALYSIS_STAGING" "BPP_DB_DOCUMENT_ANALYSIS_DEVELOPMENT" "migration_id" \
+  "migrate-stage.sh staging --db document-analysis" "--readonly --db document-analysis staging --check" \
+  "exactly four lines"; do
+  assert_contains "$s" "$md" "mentions $s"
+done
 # skill update switch: VM sets it off in ~/.claude/settings.json env, Mac mini keeps on
 for s in "BPP_RELEASE_SKILL_UPDATE" "on|off|report" "unsynced local edits" \
   "Mac mini keeps \`on\`" "skill update off"; do

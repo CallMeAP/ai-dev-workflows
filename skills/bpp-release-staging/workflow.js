@@ -4,16 +4,16 @@ export const meta = {
   whenToUse: 'Run by the bpp-release-staging skill. args: {mode: "run"|"dry-run", runId: "<yyyy-mm-dd-hhmm>", ack?: "<note>"}',
   phases: [
     { title: 'Skill update', detail: 'pull the skills mirror; critics review changed skills before install (BPP_RELEASE_SKILL_UPDATE on|off|report)' },
-    { title: 'Preflight', detail: 'lock, tools, glab rights, DB secrets readable, disk, previous run state, health + deploy baseline' },
+    { title: 'Preflight', detail: 'lock, tools, glab rights, DB secrets readable (bpp + document analysis), disk, previous run state, health + deploy baseline' },
     { title: 'Pull', detail: 'bpp-pull-all-dev' },
-    { title: 'Shared state', detail: 'newest BPP.Shared.NET package, check out its commit, pending migrations, dev heads' },
-    { title: 'Local migrate', detail: 'migrate-stage.sh local' },
-    { title: 'Dev migrate', detail: 'migrate-stage.sh development' },
+    { title: 'Shared state', detail: 'newest BPP.Shared.NET package, check out its commit, pending migrations (bpp + document analysis), dev heads' },
+    { title: 'Local migrate', detail: 'migrate-stage.sh local, bpp then document analysis' },
+    { title: 'Dev migrate', detail: 'migrate-stage.sh development, bpp then document analysis, + StageSql' },
     { title: 'Bump shared', detail: 'bpp-bump-shared-version to the phase 3 package' },
     { title: 'Promote', detail: 'bpp-promote-dev-to-staging preview, critics, then go' },
     { title: 'UI versions', detail: 'package.json versions in every UI promotion MR' },
     { title: 'Wait green', detail: 'pipelines green and mergeable; Duo findings judged' },
-    { title: 'Staging migrate', detail: 'migrate-stage.sh staging + pre-deploy StageSql' },
+    { title: 'Staging migrate', detail: 'migrate-stage.sh staging, bpp then document analysis, + pre-deploy StageSql' },
     { title: 'Merge', detail: 'merge promotion MRs at the recorded heads' },
     { title: 'Watch deploy', detail: 'staging deploys + bpp-go-health, compared with the preflight baseline' },
     { title: 'ui_configs', detail: 'cockpit/kundenportal ui_configs on staging, never stella' },
@@ -45,6 +45,11 @@ const PING = `bash "${LIB}/henry-ping.sh"`
 const SDIR = '$HOME/.claude/state/bpp-release'
 const SHARED = '$HOME/Entwicklung/bpp/bpp-shared'
 const BACKEND = '$HOME/Entwicklung/bpp/bpp-backend'
+// bpp-document-analysis has its own database (bpp_document_analysis, own Postgres) and its own DbMigrator
+const DOCANA = '$HOME/Entwicklung/bpp/bpp-document-analysis'
+const DOCANA_MIG = 'BPP.DocumentAnalysis/BPP.DocumentAnalysis.DbMigrator/Migrations'
+const DOCANA_WT = `${SDIR}/docana-${RUN_ID}`
+const DOCANA_HISTORY = `--query 'SELECT migration_id FROM "__EFMigrationsHistory" ORDER BY 1'`
 const MIRROR = '$HOME/Entwicklung/lipso/agentic-coding-knowledge'
 const HEALTH = 'bash "$HOME/.claude/skills/bpp-go-health/health.sh"'
 const HMAP = `bash "${LIB}/health-map.sh"`
@@ -98,6 +103,7 @@ const HALT_SCHEMA = {
 const SAFETY = `Safety rules (all phases, no exceptions):
 - Never print, echo, cat, log or write a secret or connection string. Never read ~/.bpp-release.env, never run "security find-generic-password", never call get_secret or source secret-env.sh yourself.
 - Databases only through the wrappers: ${LIB}/migrate-stage.sh and ${LIB}/run-stage-sql.sh. Use run-stage-sql.sh --readonly for every read. There is no main stage; never touch the main/prod DB.
+- Two databases per stage: bpp (the default) and document analysis (--db document-analysis). The document analysis DB is written only by migrate-stage.sh --db document-analysis; run-stage-sql.sh reads it (--readonly --db document-analysis) and never writes it. No SQL file ever runs against it.
 - Git: worktrees for any repo change; never amend, rebase, reset, stash or force-push (the only allowed reset --hard is the one bpp-checkout-shared-at-stage does on the bpp-shared checkout). "git add <path>" only, never "git add -A". Commit trailer: Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 - This is an unattended run: ask no questions. When a halt condition applies, or you are unsure, stop and return halt: true with a precise reason.
 - Waiting: bounded loops only (sleep inside a loop with a fixed number of rounds, each Bash call under 10 minutes). Never "cat /dev/zero" or an unbounded loop.`
@@ -129,7 +135,7 @@ const RESULT_RULES = `Return: ok (phase done and every check passed), halt (a ha
 
 let ctx = {
   mode: MODE, runId: RUN_ID, ack: ACK, previous: null, package: null, shared_sha: null,
-  pending_dev: [], pending_staging: [], heads: [], staging_heads: [], mrs: [], duo: [], ui_configs_sql: '', stella_sql: '',
+  pending_dev: [], pending_staging: [], docana_sha: null, docana_pending_dev: [], docana_pending_staging: [], heads: [], staging_heads: [], mrs: [], duo: [], ui_configs_sql: '', stella_sql: '',
   applied: [], promote_preview: '', sql_candidates: [], skill_update: '',
   baseline: null, pre_move_sha: null,
 }
@@ -263,7 +269,7 @@ const R = {
 - Skills this run uses: bpp-release-staging, bpp-pull-all-dev, bpp-bump-shared-version, bpp-checkout-shared-at-stage, bpp-promote-dev-to-staging, bpp-migration-guide-audit, bpp-project-index, bpp-go-health, bpp-cleanup-merged-worktrees.
 - Halt when the install would overwrite a local skill file that has edits the mirror does not have (that would destroy unsynced work).`,
   preflight: `- glab auth + Maintainer rights (staging merge/push = Maintainers) in every repo that may be promoted, dotnet, psql, jq, timeout or gtimeout.
-- DB secrets readable without a popup, with a timeout: run-stage-sql.sh --readonly <development|staging> --check. Exit 3 = entry missing, 4 = env file mode/owner wrong, 5 = Keychain timeout/denied/locked: each is a preflight blocker (halt naming the cause), never a hang.
+- DB secrets readable without a popup, with a timeout, for both databases: run-stage-sql.sh --readonly <development|staging> --check and run-stage-sql.sh --readonly --db document-analysis <development|staging> --check. Exit 3 = entry missing, 4 = env file mode/owner wrong, 5 = Keychain timeout/denied/locked: each is a preflight blocker (halt naming the cause), never a hang.
 - Disk: at least 10 GB free in $HOME.
 - No other release run holds the lock file (state.sh lock exit 7 -> halt).
 - Health + deploy baseline, before any write: release repos = every active repo with a staging branch whose development head differs from its staging head, plus every repo with an open Development -> Staging MR. For each: its Traefik hosts (health-map.sh hosts) and its latest staging deploy job (newest job named like deploy across the last 5 staging pipelines, retried jobs included). Gatus staging statuses via bpp-go-health (health.sh json) mapped with health-map.sh map.
@@ -275,12 +281,16 @@ const R = {
 - The staging DB must be migrated from exactly that bpp-shared state; anything else is an anti-goal.
 - Critics check: every new migration is safe with the old staging code (no drop/rename of a column/table/enum value the old code uses). Migrations run before the merge, so they must work with the old code for a few minutes; a migration that drops/renames something the old code uses is a blocker.
 - Halt if a DB already has a migration id that the checked-out bpp-shared commit does not contain (DB ahead of the package).
-- Record each repo's development head; the merge phase merges with sha=<recorded head> so GitLab refuses an MR that moved.`,
+- Record each repo's development head; the merge phase merges with sha=<recorded head> so GitLab refuses an MR that moved.
+- Document analysis has its own database and its own EF migrations (bpp-document-analysis, ${DOCANA_MIG}); bpp-shared's migrations never touch it. List the migrations its dev and staging DBs lack against the recorded development head of bpp-document-analysis (its __EFMigrationsHistory has snake_case columns: migration_id). Halt if one of these DBs has a migration id that commit does not contain.
+- The critics' old-code check covers the document analysis migrations too: they also run before the merge.`,
   local: `- migrate-stage.sh local from that bpp-shared state. Halt on failure.
-- bpp-shared HEAD must still be the phase 3 commit; else halt.`,
+- bpp-shared HEAD must still be the phase 3 commit; else halt.
+- Then migrate-stage.sh local --db document-analysis from a worktree of bpp-document-analysis at its phase 3 commit. Halt on failure.`,
   dev: `- migrate-stage.sh development. Halt on failure.
 - bpp-shared HEAD must still be the phase 3 commit; else halt.
 - Afterwards every migration listed as pending for development must be in its __EFMigrationsHistory (read-only check); else halt.
+- Then migrate-stage.sh development --db document-analysis from a worktree of bpp-document-analysis at its phase 3 commit; afterwards every id in docana_pending_dev must be in that DB's __EFMigrationsHistory; else halt. Its running dev containers cache enum labels and columns (Npgsql) until they are redeployed: report whether migrations were applied.
 - Then the new bpp-backend StageSql files whose "-- stages:" header lists development (added between the recorded bpp-backend staging and development heads): pre-deploy first, then post-deploy (the dev code is already deployed), each via run-stage-sql.sh development. Files recorded as applied on development (state.sh has-sql) are skipped. Halt on failure.`,
   bump: `- bpp-bump-shared-version to exactly the package from phase 3 (halt if a newer one appeared).
 - Runs after the dev migration on purpose: the bump commits redeploy every .NET consumer on dev, so they restart with the new schema.
@@ -289,9 +299,11 @@ const R = {
   promotePreview: `- bpp-promote-dev-to-staging (direction dev->staging). The "go" its preview asks for is given by the workflow after critics approve the preview.
 - Includes bumps, conflict back-merge (its step 6b), migration-guide audit.
 - Restart guard: when phase 3 found pending migrations, every .NET consumer with a staging branch must have a promotion MR; one missing -> halt. (The Java services bpp-mail and bpp-js-report-connector have no Postgres config.)
+- Document analysis restart guard: when phase 3 found pending document analysis migrations for staging, bpp-document-analysis must have a promotion MR; missing -> halt (its staging containers must be redeployed after its DB is migrated).
 - Preview stage: read-only; nothing is created or pushed.`,
   promoteGo: `- Run bpp-promote-dev-to-staging with the go given, for exactly the repo set of the approved preview; a different repo set -> halt.
 - Restart guard: when phase 3 found pending migrations, every .NET consumer with a staging branch must have a promotion MR; one missing -> halt.
+- Document analysis restart guard: when phase 3 found pending document analysis migrations for staging, bpp-document-analysis must have a promotion MR; missing -> halt.
 - Conflicts: the skill's step 6b back-merge in a worktree; an unresolved conflict -> halt.
 - New development heads may only differ from the recorded ones by this phase's own commits (version bumps, back-merges); any other new commit -> halt.
 - MRs: should_remove_source_branch must be false on every MR.`,
@@ -305,13 +317,15 @@ const R = {
 - Confirmed critical or unclear -> block (halt + Henry ping; the Bypass needs a human).`,
   stagingMigrate: `- migrate-stage.sh staging, then the new *.pre-deploy.sql files for staging via run-stage-sql.sh staging. Halt on failure.
 - bpp-shared HEAD must still be the phase 3 commit, and the staging pending list must be unchanged since phase 3 (a new shared pin or migration since phase 3 -> halt; the next run starts again at phase 0 and re-checks every phase).
+- Then migrate-stage.sh staging --db document-analysis from a worktree of bpp-document-analysis at its recorded development head (the commit its promotion MR merges). The migration ids at that commit must equal the ones at the phase 3 commit, and its staging pending list must be unchanged since phase 3; else halt. Afterwards every pending id must be in that DB's __EFMigrationsHistory; else halt. No SQL file runs against the document analysis DB.
 - StageSql convention: only bpp-backend's StageSql/*.pre-deploy.sql added between staging and the recorded development head, whose "-- stages:" header lists staging; plain SQL, no BEGIN/COMMIT, "-- idempotent: yes". A file whose stages header omits staging, a post-deploy file, or a file outside bpp-backend must not run here. Files recorded as applied on staging (state.sh has-sql) are skipped.`,
   merge: `- Merge all staging promotion MRs with sha=<head recorded> and should_remove_source_branch=false, then verify development still exists in each repo.
 - A refused merge (MR moved) -> halt; say exactly which MRs are already merged.
 - Duo-path MRs whose findings all critics judged non-issue: close the MR with a note why, merge development (at the recorded sha) into staging in a worktree and push staging (no force).
 - Merging while any promotion MR is red, conflicting or un-computed is an anti-goal.`,
   deploy: `- Each merged repo's staging pipeline and deploy job to success (bounded wait 60 min); a failed one -> halt.
-- Then bpp-go-health staging, compared with the Preflight baseline (health-map.sh diff): halt only on endpoints that were healthy (or absent) at baseline and are still unhealthy once their fail_since + 15 minutes has passed (bounded polling; never "done" while one is still unhealthy). Endpoints already unhealthy at baseline are known: list them, no halt.`,
+- Then bpp-go-health staging, compared with the Preflight baseline (health-map.sh diff): halt only on endpoints that were healthy (or absent) at baseline and are still unhealthy once their fail_since + 15 minutes has passed (bounded polling; never "done" while one is still unhealthy). Endpoints already unhealthy at baseline are known: list them, no halt.
+- When document analysis migrations were applied on staging in phase 9, bpp-document-analysis must be among the merged repos and its staging pipeline must have deployed (the old containers cache enum labels and columns until they are replaced); else halt.`,
   ui_configs: `- Run the staging statements marked "changed by this promotion" for cockpit and kundenportal (the promote skill's SQL) through run-stage-sql.sh staging; then the read-only check SELECT.
 - Never stella: it waits for the store release.
 - Before the staging DbMigrator applied the ui_configs migration the table does not exist: halt instead of running SQL that fails.`,
@@ -324,6 +338,12 @@ const R = {
   cleanup: `- Restore bpp-shared by SHA: when HEAD differs from the pre-move SHA recorded in phase 3, and the tree is clean, git switch development && git pull --ff-only, then verify HEAD == origin/development; dirty or mismatch -> halt, never stash or force. No move recorded -> nothing to restore. Then bpp-cleanup-merged-worktrees (plan, apply only its REMOVE/LANDED rows; never --force).
 - Release the lock (state.sh unlock).`,
 }
+
+// the bpp-document-analysis DbMigrator runs from a detached worktree at one exact commit
+function docanaWorktree(sha) {
+  return `in ${DOCANA}: git fetch origin; git worktree add --detach "${DOCANA_WT}" ${sha} (expand $HOME; if the directory is left over from an earlier call, git worktree remove it first; never --force). Check git -C "${DOCANA_WT}" rev-parse HEAD equals ${sha}`
+}
+const DOCANA_WT_REMOVE = `git -C ${DOCANA} worktree remove "${DOCANA_WT}" (no --force; a refusal goes into evidence, it is not a halt)`
 
 function dryNote(what) {
   return DRY ? `\nDRY RUN: do not execute ${what}. Print the exact command(s) you would run, with their arguments, in evidence (prefix "WOULD RUN:"), and run only the read-only checks.` : ''
@@ -370,7 +390,7 @@ Then verify the installed files match the mirror (diff) and list them in evidenc
   const pf = await gate(1, `1. ${STATE} lock ${RUN_ID} (the stateRules above already say this; exit 7 -> lock_lost).
 2. Tools: glab auth status; dotnet --version; psql --version; jq --version; command -v timeout || command -v gtimeout.
 3. Maintainer rights: for each repo in $HOME/.claude/bpp-fleet/manifest.tsv (state=active) that has a staging branch, check the glab user's access_level >= 40 (glab api user, then glab api projects/<id>/members/all/<user id>). List repos without it.
-4. DB secrets: bash ${LIB}/run-stage-sql.sh --readonly development --check and the same for staging. Report each exit code; map 3/4/5 to its cause (missing entry, env file mode/owner, Keychain timeout/denied/locked).
+4. DB secrets, four checks: bash ${LIB}/run-stage-sql.sh --readonly development --check and the same for staging; then bash ${LIB}/run-stage-sql.sh --readonly --db document-analysis development --check and the same for staging. Report each exit code; map 3/4/5 to its cause (missing entry, env file mode/owner, Keychain timeout/denied/locked).
 5. Disk: df -h "$HOME".
 6. Previous state: ${STATE} get (exit 3 = none). If a previous run is "halted": put its halt_reason and applied list in previous_halt/previous_applied (read-only here; step 8 archives it).${ACK ? ` The user acknowledged it with: "${ACK}".` : ' If its halt_reason needs a human decision (Keychain, Duo finding, unsafe migration, unclear SQL, refused merge with partial merges) and no ack was given (args.ack), halt and say so.'} If status is "running" with another run_id, report it (its lock is stale or the lock check would have refused).
 7. Health + deploy baseline (read-only; mkdir -p ${BDIR}). It comes before any local write, so a blocker halts the run before state.json is touched:
@@ -411,12 +431,18 @@ A rerun after a halt starts again at phase 0 and re-checks every phase; there is
 5. pending_dev / pending_staging = ids in the checkout missing in that DB. Halt if a DB has an id the checkout lacks.
 6. For each pending migration put its file path (the .cs with Up()) in evidence, so critics can read it.
 7. Heads: for every active repo in $HOME/.claude/bpp-fleet/manifest.tsv with a staging branch, git ls-remote origin refs/heads/development -> heads [{repo, sha}], and refs/heads/staging -> staging_heads [{repo, sha}] (the base of this release).
-${DRY ? '' : `8. ${STATE} set-package <version>, then ${STATE} set-heads '<JSON object {"<repo>": "<development sha>", ...}>' built from heads, then ${STATE} add-applied "phase 3: bpp-shared checked out at <sha> (package <version>)".`}`, R.shared, {
+8. Document analysis DB (its own database and migrations; bpp-shared's do not apply to it): docana_sha = the development head of bpp-document-analysis from step 7 (not in the manifest -> git -C ${DOCANA} ls-remote origin refs/heads/development; no such repo or branch -> halt). In ${DOCANA}: git fetch origin, then list the migration ids at that commit: git ls-tree --name-only <docana_sha>:${DOCANA_MIG} (the <timestamp>_<Name>.cs files, without .Designer.cs and the ModelSnapshot).
+9. Applied there: bash ${LIB}/run-stage-sql.sh --readonly --db document-analysis development ${DOCANA_HISTORY} and the same for staging (snake_case column, unlike the bpp DB).
+10. docana_pending_dev / docana_pending_staging = ids at docana_sha missing in that DB. Halt if a DB has an id the commit lacks. For each pending migration put "git -C ${DOCANA} show <docana_sha>:<path of the .cs with Up()>" in evidence, so critics can read it.
+${DRY ? '' : `11. ${STATE} set-package <version>, then ${STATE} set-heads '<JSON object {"<repo>": "<development sha>", ...}>' built from heads, then ${STATE} add-applied "phase 3: bpp-shared checked out at <sha> (package <version>)".`}`, R.shared, {
     critics: 3,
     extra: {
       package: { type: 'string' }, shared_sha: { type: 'string' }, pre_move_sha: { type: 'string' },
       pending_dev: { type: 'array', items: { type: 'string' } },
       pending_staging: { type: 'array', items: { type: 'string' } },
+      docana_sha: { type: 'string', description: 'development head of bpp-document-analysis the document analysis migrations are listed from' },
+      docana_pending_dev: { type: 'array', items: { type: 'string' } },
+      docana_pending_staging: { type: 'array', items: { type: 'string' } },
       heads: HEADS,
       staging_heads: HEADS,
     },
@@ -426,21 +452,29 @@ ${DRY ? '' : `8. ${STATE} set-package <version>, then ${STATE} set-heads '<JSON 
   ctx.pre_move_sha = ss.pre_move_sha || null
   ctx.pending_dev = ss.pending_dev || []
   ctx.pending_staging = ss.pending_staging || []
+  ctx.docana_sha = ss.docana_sha || null
+  ctx.docana_pending_dev = ss.docana_pending_dev || []
+  ctx.docana_pending_staging = ss.docana_pending_staging || []
   ctx.heads = ss.heads || []
   ctx.staging_heads = ss.staging_heads || []
   if (!ctx.package || !ctx.shared_sha || !ctx.heads.length || !ctx.staging_heads.length) throw new Halt('Shared state', 'package, shared sha, development heads or staging heads missing from the result')
+  if (!ctx.docana_sha) throw new Halt('Shared state', 'development head of bpp-document-analysis (docana_sha) missing from the result')
 
   // 4. Local migrate
   phase('Local migrate')
-  await gate(4, `Check git -C ${SHARED} rev-parse HEAD equals ${ctx.shared_sha}. Then: bash ${LIB}/migrate-stage.sh local
-Report the exit code and the last 30 output lines.${dryNote('migrate-stage.sh')}`, R.local)
+  await gate(4, `1. Check git -C ${SHARED} rev-parse HEAD equals ${ctx.shared_sha}. Then: bash ${LIB}/migrate-stage.sh local
+Report the exit code and the last 30 output lines.
+2. Document analysis: ${docanaWorktree(ctx.docana_sha)}. Then: bash ${LIB}/migrate-stage.sh local --db document-analysis --repo-dir "${DOCANA_WT}"
+Report the exit code and the last 30 output lines. Then ${DOCANA_WT_REMOVE}.${dryNote('migrate-stage.sh or the git worktree commands')}`, R.local)
 
   // 5. Dev migrate
   phase('Dev migrate')
   await gate(5, `1. Check git -C ${SHARED} rev-parse HEAD equals ${ctx.shared_sha}. Then: bash ${LIB}/migrate-stage.sh development
 Report the exit code and the last 30 output lines. Then verify with run-stage-sql.sh --readonly development --query on __EFMigrationsHistory that every id in pending_dev is applied.
-2. Development StageSql: in ${BACKEND}: git fetch origin; bash ${LIB}/find-stage-sql.sh --repo ${BACKEND} --from <recorded bpp-backend staging head> --to <recorded bpp-backend development head> --stage development. Take only entries with source=convention (their stages header lists development). Run all pre-deploy ones first, then all post-deploy ones (the dev code is already deployed): show each file's content in evidence, then bash ${LIB}/run-stage-sql.sh development <sql_file>. Any failure -> halt. Remove the temp dir find-stage-sql.sh made.
-${sqlId('development')}${dryNote('migrate-stage.sh development or any run-stage-sql.sh write (read-only queries and find-stage-sql.sh still run)')}`, R.dev, { critics: 2 })
+2. Document analysis: ${docanaWorktree(ctx.docana_sha)}. Then: bash ${LIB}/migrate-stage.sh development --db document-analysis --repo-dir "${DOCANA_WT}"
+Report the exit code and the last 30 output lines. Exit 0 alone is no proof that the development DB was the target: verify with bash ${LIB}/run-stage-sql.sh --readonly --db document-analysis development ${DOCANA_HISTORY} that every id in docana_pending_dev (${JSON.stringify(ctx.docana_pending_dev)}) is applied. Then ${DOCANA_WT_REMOVE}. Say in the summary whether document analysis migrations were applied on development.
+3. Development StageSql (bpp DB only): in ${BACKEND}: git fetch origin; bash ${LIB}/find-stage-sql.sh --repo ${BACKEND} --from <recorded bpp-backend staging head> --to <recorded bpp-backend development head> --stage development. Take only entries with source=convention (their stages header lists development). Run all pre-deploy ones first, then all post-deploy ones (the dev code is already deployed): show each file's content in evidence, then bash ${LIB}/run-stage-sql.sh development <sql_file>. Any failure -> halt. Remove the temp dir find-stage-sql.sh made.
+${sqlId('development')}${dryNote('migrate-stage.sh development (either database), the git worktree commands or any run-stage-sql.sh write (read-only queries and find-stage-sql.sh still run)')}`, R.dev, { critics: 2 })
 
   // 5b. Bump shared
   phase('Bump shared')
@@ -452,7 +486,7 @@ Afterwards list every consumer with its result (bumped / already current / skipp
   // 6. Promote: preview, critics, go
   phase('Promote')
   const pp = await gate(7, `Use the Skill tool to load bpp-promote-dev-to-staging, direction development -> staging. Run it up to and including its step 4 Preview, then STOP: do not answer the go, create nothing, push nothing.
-Return the preview verbatim in preview, and the repo list it would promote. Check the restart guard: pending_staging = ${JSON.stringify(ctx.pending_staging)}; if non-empty, every .NET consumer (BPP.*/Directory.Build.props has <BppSharedVersion>) with a staging branch must be in the preview list or already have an open promotion MR.`, R.promotePreview, {
+Return the preview verbatim in preview, and the repo list it would promote. Check the restart guard: pending_staging = ${JSON.stringify(ctx.pending_staging)}; if non-empty, every .NET consumer (BPP.*/Directory.Build.props has <BppSharedVersion>) with a staging branch must be in the preview list or already have an open promotion MR. Document analysis restart guard: docana_pending_staging = ${JSON.stringify(ctx.docana_pending_staging)}; if non-empty, bpp-document-analysis must be in the preview list or already have an open promotion MR.`, R.promotePreview, {
     label: 'Promote (preview)', critics: 2,
     extra: { preview: { type: 'string' }, repos: { type: 'array', items: { type: 'string' } } },
   })
@@ -462,7 +496,7 @@ ${ctx.promote_preview}
 
 Use the Skill tool to load bpp-promote-dev-to-staging and run it again with the go given (the user's go is this approved preview). If its preview now lists a different repo set, halt. Run all its steps after go (4b migration-guide audit, 5, 6, 6b conflict back-merge, 7 report).${dryNote('the go: create no MRs, push nothing')}
 Return mrs (every open dev -> staging promotion MR, including ones that already existed: repo, project_id, iid, url, kind dotnet|ui|other), heads (git ls-remote development for every repo in the run context heads, with git log old..new proof that new commits are only this phase's own), and ui_configs_sql (its "ui_configs SQL to run on the staging DB" block plus the full reference block, verbatim).
-Re-check the restart guard against the MR list.${DRY ? '' : `
+Re-check the restart guard and the document analysis restart guard against the MR list.${DRY ? '' : `
 Record the new heads: ${STATE} set-heads '<JSON object {"<repo>": "<sha>", ...}>'.`}`, R.promoteGo, {
     label: 'Promote (go)', critics: 2,
     extra: { mrs: MRS, heads: HEADS, ui_configs_sql: { type: 'string' } },
@@ -515,8 +549,10 @@ Read-only: no MR changes, no push. Default to block: true when unsure. Return bl
   await gate(10, `1. Check git -C ${SHARED} rev-parse HEAD equals ${ctx.shared_sha}.
 2. Re-list pending staging migrations (bash ${LIB}/run-stage-sql.sh --readonly staging --query 'SELECT "MigrationId" FROM "__EFMigrationsHistory" ORDER BY 1' vs the checkout). It must equal ${JSON.stringify(ctx.pending_staging)}; else halt.
 3. bash ${LIB}/migrate-stage.sh staging  - report exit code and last 30 lines; verify every pending id is now applied (read-only query).
-4. Pre-deploy SQL, bpp-backend only: in ${BACKEND}: git fetch origin; bash ${LIB}/find-stage-sql.sh --repo ${BACKEND} --from <recorded bpp-backend staging head> --to <recorded bpp-backend development head> --stage staging. Take only entries with source=convention and timing=pre-deploy. Show each file's content in evidence, then run each: bash ${LIB}/run-stage-sql.sh staging <sql_file>. Any failure -> halt. Remove the temp dir find-stage-sql.sh made. StageSql files of other repos do not run here; phase 13 hands them to the critics.
-${sqlId('staging')}${dryNote('migrate-stage.sh staging or any run-stage-sql.sh write (read-only --readonly queries and find-stage-sql.sh still run)')}`, R.stagingMigrate, { critics: 3 })
+4. Document analysis: head = the recorded development head of bpp-document-analysis (run context heads; the commit its promotion MR merges). In ${DOCANA}: git fetch origin; the migration ids at head (git ls-tree --name-only <head>:${DOCANA_MIG}) must equal the ones at ${ctx.docana_sha}; else halt. Re-list its pending staging migrations (bash ${LIB}/run-stage-sql.sh --readonly --db document-analysis staging ${DOCANA_HISTORY} vs that list). It must equal ${JSON.stringify(ctx.docana_pending_staging)}; else halt.
+5. ${docanaWorktree('<head>')}. Then: bash ${LIB}/migrate-stage.sh staging --db document-analysis --repo-dir "${DOCANA_WT}"  - report exit code and last 30 lines. Exit 0 alone is no proof that the staging DB was the target: verify with bash ${LIB}/run-stage-sql.sh --readonly --db document-analysis staging ${DOCANA_HISTORY} that every pending id is now applied there; else halt. Then ${DOCANA_WT_REMOVE}.
+6. Pre-deploy SQL, bpp-backend only, bpp DB only: in ${BACKEND}: git fetch origin; bash ${LIB}/find-stage-sql.sh --repo ${BACKEND} --from <recorded bpp-backend staging head> --to <recorded bpp-backend development head> --stage staging. Take only entries with source=convention and timing=pre-deploy. Show each file's content in evidence, then run each: bash ${LIB}/run-stage-sql.sh staging <sql_file>. Any failure -> halt. Remove the temp dir find-stage-sql.sh made. StageSql files of other repos do not run here; phase 13 hands them to the critics.
+${sqlId('staging')}${dryNote('migrate-stage.sh staging (either database), the git worktree commands or any run-stage-sql.sh write (read-only --readonly queries and find-stage-sql.sh still run)')}`, R.stagingMigrate, { critics: 3 })
 
   // 10. Merge
   phase('Merge')
@@ -530,6 +566,7 @@ Finally verify development still exists in every repo: git ls-remote origin refs
   await gate(12, `1. For every repo merged in phase 10: wait for its newest staging pipeline (glab api projects/<id>/pipelines?ref=staging) and its deploy job to reach success, polling every 2 minutes, at most 60 minutes. Failed -> halt naming the repo, job id and first error line.
 2. Health against the Preflight baseline (${BDIR}): ${HEALTH} json > ${BDIR}/statuses-now.json; ${HMAP} map ${BDIR}/statuses-now.json ${BDIR}/hosts.tsv <release repos from ${BDIR}/repos.txt, comma-separated> > ${BDIR}/map-now.json; ${HMAP} diff ${BDIR}/map.json ${BDIR}/map-now.json.
 3. new_unhealthy (healthy or absent at baseline, unhealthy now): re-run step 2 every 3 minutes. An endpoint that turns healthy is done. An endpoint still unhealthy once its fail_since + 15 minutes has passed -> halt naming endpoint, host and repos. Keep polling until every new_unhealthy endpoint is either healthy or past fail_since + 15 minutes (bounded: at most 10 rounds, each Bash call under 10 minutes; reaching the bound with one still unhealthy -> halt). You may never return ok while a new_unhealthy endpoint is still unhealthy. known_unhealthy (already unhealthy at baseline): list them in summary, no halt.
+Document analysis: docana_pending_staging = ${JSON.stringify(ctx.docana_pending_staging)}; if non-empty, bpp-document-analysis must be one of those repos and its staging pipeline must have run its deploy job; else halt.
 Baseline from Preflight (run context baseline): use the files in ${BDIR}; if they are missing, halt (no baseline to compare with).${dryNote('nothing (no merge happened); still run steps 2-3 read-only')}`, R.deploy)
 
   // 12. ui_configs
@@ -589,13 +626,13 @@ Return ping = the output verbatim.`, R.ping, { critics: 2, extra: { ping: { type
 
   // 15. Report
   phase('Report')
-  const rp = await gate(16, `Write the final report: phases passed, MRs merged, DB changes on development and staging, SQL run, ui_configs, open TODOs (store release, stella ui_configs), and the phase 0 result as one line, word for word: ${ctx.skill_update}. ${DRY ? 'DRY RUN: do not run state.sh done; list every WOULD RUN command from the run context instead.' : `Then: ${STATE} done and show ${STATE} get.`}`, R.report, { critics: 2 })
+  const rp = await gate(16, `Write the final report: phases passed, MRs merged, DB changes on development and staging for both databases (bpp and document analysis), SQL run, ui_configs, open TODOs (store release, stella ui_configs; and, when document analysis migrations were applied on development but bpp-document-analysis got no new development commit in this run, "recreate the BPP.DocumentAnalysis.App containers on development"), and the phase 0 result as one line, word for word: ${ctx.skill_update}. ${DRY ? 'DRY RUN: do not run state.sh done; list every WOULD RUN command from the run context instead.' : `Then: ${STATE} done and show ${STATE} get.`}`, R.report, { critics: 2 })
 
   // 16. Cleanup
   phase('Cleanup')
   await gate(17, `1. ${restoreShared()} A dirty tree or a mismatch -> halt, no force.
 2. Use the Skill tool to load bpp-cleanup-merged-worktrees; run its plan. ${DRY ? 'DRY RUN: plan only, apply nothing.' : 'Apply only the paths of its REMOVE and LANDED rows (apply <path>...); never --force, never apply-scaffold, never stale.sh.'}
-3. rm -rf ${SDIR}/sql-${RUN_ID} ${BDIR} ${SDIR}/pre-move-sha-${RUN_ID} (only these).
+3. rm -rf ${SDIR}/sql-${RUN_ID} ${BDIR} ${SDIR}/pre-move-sha-${RUN_ID} (only these). If "${DOCANA_WT}" still exists: ${DOCANA_WT_REMOVE}.
 4. ${STATE} unlock ${RUN_ID}`, R.cleanup)
 
   return {
