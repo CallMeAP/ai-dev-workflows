@@ -4,7 +4,7 @@ export const meta = {
   whenToUse: 'Run by the bpp-release-staging skill. args: {mode: "run"|"dry-run", runId: "<yyyy-mm-dd-hhmm>", ack?: "<note>"}',
   phases: [
     { title: 'Skill update', detail: 'pull the skills mirror; critics review changed skills before install (BPP_RELEASE_SKILL_UPDATE on|off|report)' },
-    { title: 'Preflight', detail: 'lock, tools, glab rights, DB secrets readable, disk, previous run state' },
+    { title: 'Preflight', detail: 'lock, tools, glab rights, DB secrets readable, disk, previous run state, health + deploy baseline' },
     { title: 'Pull', detail: 'bpp-pull-all-dev' },
     { title: 'Shared state', detail: 'newest BPP.Shared.NET package, check out its commit, pending migrations, dev heads' },
     { title: 'Local migrate', detail: 'migrate-stage.sh local' },
@@ -15,7 +15,7 @@ export const meta = {
     { title: 'Wait green', detail: 'pipelines green and mergeable; Duo findings judged' },
     { title: 'Staging migrate', detail: 'migrate-stage.sh staging + pre-deploy StageSql' },
     { title: 'Merge', detail: 'merge promotion MRs at the recorded heads' },
-    { title: 'Watch deploy', detail: 'staging pipelines + bpp-go-health' },
+    { title: 'Watch deploy', detail: 'staging deploys + bpp-go-health, compared with the preflight baseline' },
     { title: 'ui_configs', detail: 'cockpit/kundenportal ui_configs on staging, never stella' },
     { title: 'Manual SQL', detail: 'post-deploy StageSql; fallback SQL only when all critics approve' },
     { title: 'Henry ping', detail: 'release summary, store release, stella ui_configs' },
@@ -46,6 +46,10 @@ const SDIR = '$HOME/.claude/state/bpp-release'
 const SHARED = '$HOME/Entwicklung/bpp/bpp-shared'
 const BACKEND = '$HOME/Entwicklung/bpp/bpp-backend'
 const MIRROR = '$HOME/Entwicklung/lipso/agentic-coding-knowledge'
+const HEALTH = 'bash "$HOME/.claude/skills/bpp-go-health/health.sh"'
+const HMAP = `bash "${LIB}/health-map.sh"`
+// baseline files of this run (both modes): statuses, hosts.tsv, map.json, deploys.json
+const BDIR = `${SDIR}/baseline-${RUN_ID}`
 
 // spec phase label per meta title, used in prompts and stored by state.sh set-phase
 const TITLES = ['Skill update', 'Preflight', 'Pull', 'Shared state', 'Local migrate', 'Dev migrate', 'Bump shared',
@@ -127,6 +131,7 @@ let ctx = {
   mode: MODE, runId: RUN_ID, ack: ACK, previous: null, package: null, shared_sha: null,
   pending_dev: [], pending_staging: [], heads: [], staging_heads: [], mrs: [], duo: [], ui_configs_sql: '', stella_sql: '',
   applied: [], promote_preview: '', sql_candidates: [], skill_update: '',
+  baseline: null, pre_move_sha: null,
 }
 function ctxText() {
   return 'Run context so far (JSON):\n' + JSON.stringify(ctx, null, 2)
@@ -177,6 +182,18 @@ ${ctxText()}
 Return block: true with a reason when anything is wrong, unproven or missing. Default to block: true when evidence is missing or does not prove the rule was checked. Return block: false only when the evidence shows the phase is correct and complete.`
 }
 
+// bpp-shared restore: by SHA, not by branch name (phase 3's reset --hard keeps the branch name)
+function restoreShared() {
+  const known = ctx.pre_move_sha ? `the pre-move SHA is ${ctx.pre_move_sha}` : (DRY
+    ? `read the pre-move SHA from ${SDIR}/pre-move-sha-${RUN_ID} if that file exists`
+    : `read the pre-move SHA with: ${STATE} get pre_move_sha  (only if state.json's run_id is ${RUN_ID})`)
+  return `Restore bpp-shared in ${SHARED} by SHA: ${known}.
+   - No pre-move SHA recorded -> phase 3 never moved the checkout: restore nothing, say so.
+   - HEAD (git rev-parse HEAD) equals the pre-move SHA -> nothing to restore, say so.
+   - Otherwise: the tree must be clean (git status --porcelain empty) -> git switch development && git pull --ff-only, then verify git rev-parse HEAD equals git rev-parse origin/development.
+   - Dirty tree, a refused switch/pull, or HEAD != origin/development afterwards -> do not stash, reset or force anything; report it (it needs a human).`
+}
+
 // ---- halt handling ----
 function Halt(title, reason, lockLost) {
   this.halt = true
@@ -223,7 +240,7 @@ Do exactly this, in order:
 ${ownLock ? `1. ${DRY ? 'DRY RUN: do not touch state.json.' : `Run ${STATE} get. Only if its run_id is ${RUN_ID}: ${STATE} halt "phase ${SPEC_NO[idx]} ${h.title}: <reason, one line>". Otherwise leave it alone (it is the previous run's state).`}
 2. Write the ping body with the Write tool to ${SDIR}/ping-${RUN_ID}.txt (expand $HOME first). Content: run id, mode, the phase it stopped in, the reason, and an exact "already applied" list: ${JSON.stringify(ctx.applied)} plus anything "${STATE} get" lists under applied${DRY ? ' (dry run: nothing was applied)' : ''}. Say what a human must decide or do next, and that a rerun starts with a re-check of every phase.
 3. ${PING} blocker "bpp-release-staging ${DRY ? '[dry-run] ' : ''}halted in ${h.title}" "${SDIR}/ping-${RUN_ID}.txt"
-4. Restore bpp-shared: in ${SHARED}, if HEAD is not on branch development, run "git switch development && git pull" (the bpp-checkout-shared-at-stage restore mode). If the tree is dirty or git refuses, do not force anything; report it in notes.
+4. ${restoreShared()} Put the outcome in notes.
 5. ${STATE} unlock ${RUN_ID}`
     : `Another run holds the release lock. Do NOT run state.sh halt or unlock and do NOT touch the bpp-shared checkout: they belong to the other run.
 1. ${PING} blocker "bpp-release-staging ${DRY ? '[dry-run] ' : ''}refused: lock held" "<one paragraph: run ${RUN_ID} did not start because another run holds the lock; show the output of: cat ${SDIR}/lock>"`}
@@ -249,6 +266,9 @@ const R = {
 - DB secrets readable without a popup, with a timeout: run-stage-sql.sh --readonly <development|staging> --check. Exit 3 = entry missing, 4 = env file mode/owner wrong, 5 = Keychain timeout/denied/locked: each is a preflight blocker (halt naming the cause), never a hang.
 - Disk: at least 10 GB free in $HOME.
 - No other release run holds the lock file (state.sh lock exit 7 -> halt).
+- Health + deploy baseline, before any write: release repos = every active repo with a staging branch whose development head differs from its staging head, plus every repo with an open Development -> Staging MR. For each: its Traefik hosts (health-map.sh hosts) and its latest staging deploy job (newest job named like deploy across the last 5 staging pipelines, retried jobs included). Gatus staging statuses via bpp-go-health (health.sh json) mapped with health-map.sh map.
+- Halt in Preflight, before any write, when an endpoint of a release repo is unhealthy (release_unhealthy) or a release repo's latest staging deploy job failed; the reason names repo, endpoint, job id and the first error line. Unhealthy endpoints of other repos are known (report only); release repos without a Gatus endpoint are unmapped (report only).
+- Report promotion MRs whose head pipeline is skipped (report only; Wait green handles them).
 - Previous run state: a halt records phase, reason, and what is already applied. A rerun starts again at phase 0 and re-checks every phase (no jump to the halted phase), or reports that a human must decide. SQL files recorded in state (state.sh has-sql) are never run again.`,
   pull: `- bpp-pull-all-dev. Halt if bpp-shared or bpp-backend were skipped (or are not on development afterwards).`,
   shared: `- Resolve the newest BPP.Shared.NET package (the one bpp-bump-shared-version will pick: newest by created_at in the GitLab registry) and its bpp-shared commit (+<sha>), check it out (same mechanism as bpp-checkout-shared-at-stage) and list the migrations the dev and staging DBs lack (query __EFMigrationsHistory with run-stage-sql.sh --readonly).
@@ -277,6 +297,7 @@ const R = {
 - MRs: should_remove_source_branch must be false on every MR.`,
   ui: `- For every UI promotion MR: package.json version on development > staging (and > main), lock entries match (the promote skill's post-bump check, re-run). Halt on mismatch.`,
   wait: `- Poll every promotion MR: pipeline success, detailed_merge_status=mergeable. One retry of a failed job; still red -> halt. Bounded wait (90 min) -> halt on timeout.
+- A head pipeline with status skipped is not green. If the MR head commit message contains [skip ci] or [ci skip]: push one empty commit "chore: run CI after a skipped commit" to that repo's development (worktree, no force; dry run prints it), record it in applied, and keep waiting; still skipped after that -> halt. Any other skipped pipeline -> halt.
 - Never merge while any promotion MR is red, conflicting or un-computed.
 - Each MR's head sha must equal the recorded development head of its repo; a moved MR -> halt.
 - Duo requested_changes on a promotion MR -> Duo path: critics judge Duo's findings; all agree non-issue -> at merge time the MR is closed with a note why, development is merged into staging in a worktree and staging is pushed; confirmed critical or unclear -> halt + Henry ping (Bypass needs a human).`,
@@ -289,8 +310,8 @@ const R = {
 - A refused merge (MR moved) -> halt; say exactly which MRs are already merged.
 - Duo-path MRs whose findings all critics judged non-issue: close the MR with a note why, merge development (at the recorded sha) into staging in a worktree and push staging (no force).
 - Merging while any promotion MR is red, conflicting or un-computed is an anti-goal.`,
-  deploy: `- Each merged repo's staging pipeline to success; then bpp-go-health for staging.
-- Halt on a failed pipeline or a service unhealthy after a bounded wait (pipelines 60 min, health 15 min).`,
+  deploy: `- Each merged repo's staging pipeline and deploy job to success (bounded wait 60 min); a failed one -> halt.
+- Then bpp-go-health staging, compared with the Preflight baseline (health-map.sh diff): halt only on endpoints that were healthy (or absent) at baseline and are still unhealthy once their fail_since + 15 minutes has passed (bounded polling; never "done" while one is still unhealthy). Endpoints already unhealthy at baseline are known: list them, no halt.`,
   ui_configs: `- Run the staging statements marked "changed by this promotion" for cockpit and kundenportal (the promote skill's SQL) through run-stage-sql.sh staging; then the read-only check SELECT.
 - Never stella: it waits for the store release.
 - Before the staging DbMigrator applied the ui_configs migration the table does not exist: halt instead of running SQL that fails.`,
@@ -300,7 +321,7 @@ const R = {
 - Running SQL that no critic looked at, or SQL meant for another stage, is an anti-goal.`,
   ping: `- Print: what was released (MR list, versions), the go-stella app version that now needs submitting/unlocking in App Store + Play Store, and the stella ui_configs statement to run after the store release.`,
   report: `- Final summary; state file marked done. A silent partial release is an anti-goal.`,
-  cleanup: `- Restore bpp-shared (git switch development && git pull), then bpp-cleanup-merged-worktrees (plan, apply only its REMOVE/LANDED rows; never --force).
+  cleanup: `- Restore bpp-shared by SHA: when HEAD differs from the pre-move SHA recorded in phase 3, and the tree is clean, git switch development && git pull --ff-only, then verify HEAD == origin/development; dirty or mismatch -> halt, never stash or force. No move recorded -> nothing to restore. Then bpp-cleanup-merged-worktrees (plan, apply only its REMOVE/LANDED rows; never --force).
 - Release the lock (state.sh unlock).`,
 }
 
@@ -351,13 +372,29 @@ Then verify the installed files match the mirror (diff) and list them in evidenc
 3. Maintainer rights: for each repo in $HOME/.claude/bpp-fleet/manifest.tsv (state=active) that has a staging branch, check the glab user's access_level >= 40 (glab api user, then glab api projects/<id>/members/all/<user id>). List repos without it.
 4. DB secrets: bash ${LIB}/run-stage-sql.sh --readonly development --check and the same for staging. Report each exit code; map 3/4/5 to its cause (missing entry, env file mode/owner, Keychain timeout/denied/locked).
 5. Disk: df -h "$HOME".
-6. Previous state: ${STATE} get (exit 3 = none). If a previous run is "halted": copy ${SDIR}/state.json to ${SDIR}/state-<its run_id>.json, and put its halt_reason and applied list in previous_halt/previous_applied.${ACK ? ` The user acknowledged it with: "${ACK}".` : ' If its halt_reason needs a human decision (Keychain, Duo finding, unsafe migration, unclear SQL, refused merge with partial merges) and no ack was given (args.ack), halt and say so.'} If status is "running" with another run_id, report it (its lock is stale or the lock check would have refused).
-7. ${DRY ? 'DRY RUN: do not run state.sh new.' : `If the previous state is absent, done, or halted (and copied): ${STATE} new ${RUN_ID} (it keeps the sql_applied list of a run that did not finish, so no SQL runs twice). If it already has run_id ${RUN_ID}, keep it. Then record phase 0 writes: ${STATE} add-applied "<text>" for each of ${JSON.stringify(ctx.applied)}.`}
+6. Previous state: ${STATE} get (exit 3 = none). If a previous run is "halted": put its halt_reason and applied list in previous_halt/previous_applied (read-only here; step 8 archives it).${ACK ? ` The user acknowledged it with: "${ACK}".` : ' If its halt_reason needs a human decision (Keychain, Duo finding, unsafe migration, unclear SQL, refused merge with partial merges) and no ack was given (args.ack), halt and say so.'} If status is "running" with another run_id, report it (its lock is stale or the lock check would have refused).
+7. Health + deploy baseline (read-only; mkdir -p ${BDIR}). It comes before any local write, so a blocker halts the run before state.json is touched:
+   a. Release repos: for every active repo in $HOME/.claude/bpp-fleet/manifest.tsv with a staging branch, git ls-remote origin refs/heads/development refs/heads/staging; heads differ -> release repo. Add every repo with an open Development -> Staging MR (glab api "groups/lipso%2Fclients%2Fbrokernet/merge_requests?state=opened&source_branch=development&target_branch=staging&per_page=100"). Write them one per line to ${BDIR}/repos.txt.
+   b. Hosts: in each release repo's local checkout (manifest column 7) git fetch -q origin staging. A repo without local clone: download its staging compose file with glab api "projects/<enc>/repository/files/infra%2Fdocker%2Fcompose%2Fdocker-compose.staging.yml/raw?ref=staging" > ${BDIR}/<repo>-compose.yml. Then ${HMAP} hosts <repo>=<checkout> ... <repo>=<downloaded compose file> ... > ${BDIR}/hosts.tsv (Traefik hosts plus network aliases, container_name and hostname).
+   c. Gatus: ${HEALTH} json > ${BDIR}/statuses.json; then ${HMAP} map ${BDIR}/statuses.json ${BDIR}/hosts.tsv <release repos, comma-separated> > ${BDIR}/map.json.
+   d. Deploys: for each release repo: glab api "projects/<enc>/pipelines?ref=staging&per_page=5", then for those pipelines glab api "projects/<enc>/pipelines/<id>/jobs?per_page=100&include_retried=true"; take the newest job whose name contains "deploy". Record {repo, pipeline, job, status}; for status failed also the first error line of its trace (glab api projects/<enc>/jobs/<job>/trace, ANSI stripped, first line matching error|not found|failed). Write the list to ${BDIR}/deploys.json. A repo without any deploy job: status "none".
+   e. Skipped: open promotion MRs whose head_pipeline.status is "skipped" -> skipped_mrs ["<repo>!<iid>"] (report only).
+   f. baseline = {release_repos, map: <map.json>, deploys: <deploys.json>, skipped_mrs}; return it as baseline (the files above keep it for phase 11).
+   g. release_blockers = one line per map.json release_unhealthy entry ("<repo>: endpoint <key> (<host>) unhealthy since <fail_since>") and per deploy with status failed ("<repo>: staging deploy job <job> failed: <first error line>"). Non-empty -> halt: true with all of them in the reason. known_unhealthy and unmapped go into the summary only.
+8. Only when step 7 found no release_blockers: ${DRY ? 'DRY RUN: do not run state.sh new.' : `If the previous state is halted: copy ${SDIR}/state.json to ${SDIR}/state-<its run_id>.json first. If the previous state is absent, done, or halted (and copied): ${STATE} new ${RUN_ID} (it keeps the sql_applied list of a run that did not finish, so no SQL runs twice). If it already has run_id ${RUN_ID}, keep it. Then record phase 0 writes: ${STATE} add-applied "<text>" for each of ${JSON.stringify(ctx.applied)}, and store the baseline: ${STATE} set-baseline '<the step 7 baseline JSON, compact>'.`}
 A rerun after a halt starts again at phase 0 and re-checks every phase; there is no jump to the halted phase.`, R.preflight, {
     critics: 2,
-    extra: { previous_halt: { type: 'string' }, previous_applied: { type: 'array', items: { type: 'string' } } },
+    extra: {
+      previous_halt: { type: 'string' }, previous_applied: { type: 'array', items: { type: 'string' } },
+      baseline: { type: 'object' },
+      release_blockers: { type: 'array', items: { type: 'string' } },
+      skipped_mrs: { type: 'array', items: { type: 'string' } },
+    },
   })
   if (pf.previous_halt) ctx.previous = { halt: pf.previous_halt, applied: pf.previous_applied || [] }
+  if (pf.release_blockers && pf.release_blockers.length) throw new Halt('Preflight', `release repo unhealthy or its staging deploy failed (before any write): ${pf.release_blockers.join(' | ')}`)
+  ctx.baseline = pf.baseline || null
+  if (pf.skipped_mrs && pf.skipped_mrs.length) log(`Preflight: skipped head pipelines (Wait green handles them): ${pf.skipped_mrs.join(', ')}`)
 
   const resumeNote = ctx.previous ? '\nA previous run halted (see run context "previous"). This run starts again at phase 0 and re-checks every phase; re-check its applied work instead of assuming it: migrations are idempotent, SQL recorded in state (has-sql) is skipped, open promotion MRs are reused, already-merged MRs are not merged again.' : ''
 
@@ -368,7 +405,7 @@ A rerun after a halt starts again at phase 0 and re-checks every phase; there is
   // 3. Shared state
   phase('Shared state')
   const ss = await gate(3, `1. Resolve the newest BPP.Shared.NET package exactly as bpp-bump-shared-version step 1 does (load that skill with the Skill tool and read its step 1; newest by created_at; do not run the bump). Take the bpp-shared commit from its +<sha> build metadata.
-2. Check out that commit in ${SHARED} the way bpp-checkout-shared-at-stage does (load the skill; clean tree, ancestor-of-origin/development guard, then its own reset --hard). Record the pre-move SHA in evidence.
+2. Before moving anything, record the pre-move SHA (git -C ${SHARED} rev-parse HEAD): ${DRY ? `write it to ${SDIR}/pre-move-sha-${RUN_ID} (one line, mkdir -p ${SDIR})` : `${STATE} set-pre-move-sha <sha>`}, and return it as pre_move_sha. Then check out that commit in ${SHARED} the way bpp-checkout-shared-at-stage does (load the skill; clean tree, ancestor-of-origin/development guard, then its own reset --hard).
 3. Migrations in the checkout: list the EF migration ids under the bpp-shared Migrations folder at that commit.
 4. Applied migrations: bash ${LIB}/run-stage-sql.sh --readonly development --query 'SELECT "MigrationId" FROM "__EFMigrationsHistory" ORDER BY 1' and the same for staging.
 5. pending_dev / pending_staging = ids in the checkout missing in that DB. Halt if a DB has an id the checkout lacks.
@@ -377,7 +414,7 @@ A rerun after a halt starts again at phase 0 and re-checks every phase; there is
 ${DRY ? '' : `8. ${STATE} set-package <version>, then ${STATE} set-heads '<JSON object {"<repo>": "<development sha>", ...}>' built from heads, then ${STATE} add-applied "phase 3: bpp-shared checked out at <sha> (package <version>)".`}`, R.shared, {
     critics: 3,
     extra: {
-      package: { type: 'string' }, shared_sha: { type: 'string' },
+      package: { type: 'string' }, shared_sha: { type: 'string' }, pre_move_sha: { type: 'string' },
       pending_dev: { type: 'array', items: { type: 'string' } },
       pending_staging: { type: 'array', items: { type: 'string' } },
       heads: HEADS,
@@ -386,6 +423,7 @@ ${DRY ? '' : `8. ${STATE} set-package <version>, then ${STATE} set-heads '<JSON 
   })
   ctx.package = ss.package || null
   ctx.shared_sha = ss.shared_sha || null
+  ctx.pre_move_sha = ss.pre_move_sha || null
   ctx.pending_dev = ss.pending_dev || []
   ctx.pending_staging = ss.pending_staging || []
   ctx.heads = ss.heads || []
@@ -441,19 +479,23 @@ Record the new heads: ${STATE} set-heads '<JSON object {"<repo>": "<sha>", ...}>
   // 8. Wait green
   phase('Wait green')
   const wg = await gate(9, DRY
-    ? `DRY RUN: no promotion MRs were created. Print the poll you would run for each preview repo (pipeline status, detailed_merge_status, head sha vs recorded head) and run nothing else. Return duo_mrs empty.`
+    ? `DRY RUN: no promotion MRs were created. Print the poll you would run for each preview repo (pipeline status, detailed_merge_status, head sha vs recorded head). Read-only: for every open promotion MR with head_pipeline.status "skipped" whose head commit message contains [skip ci] or [ci skip], print the empty commit you would push (WOULD RUN: git commit --allow-empty -m "chore: run CI after a skipped commit" ... git push origin HEAD:development in <repo>). Run nothing else. Return duo_mrs empty.`
     : `For every promotion MR in the run context: poll glab api projects/<id>/merge_requests/<iid> every 2 minutes for at most 90 minutes total (several bounded Bash calls).
 Done when every MR has head_pipeline.status=success, detailed_merge_status=mergeable and sha equal to the recorded development head of its repo.
 A failed job: retry it once (glab api -X POST projects/<id>/jobs/<job id>/retry); failed again -> halt. A moved sha -> halt. Timeout -> halt naming the MRs still waiting.
+head_pipeline.status "skipped" is not green. Read the MR head commit message (glab api projects/<id>/repository/commits/<sha>): it contains [skip ci] or [ci skip] -> once per repo, in a new worktree of the repo on origin/development: git commit --allow-empty -m "chore: run CI after a skipped commit" plus the commit trailer, git push origin HEAD:development (no force), remove the worktree, ${STATE} add-applied "phase 8: empty CI commit <sha> on <repo> development", and update that repo's recorded head to the new sha (${STATE} set-heads with the full object). Then keep polling. Still skipped after that, or skipped without such a message -> halt.
+At the end return heads: git ls-remote origin refs/heads/development for every repo in the run context heads (they include any empty CI commit pushed above), with git log old..new proof that a changed head differs only by that commit.
 An MR whose only blocker is a Duo requested_changes review (pipeline green, no conflicts): do not halt; return it in duo_mrs with every Duo finding verbatim (discussion notes from GitLabDuo).`, R.wait, {
     critics: 2,
     extra: {
+      heads: HEADS,
       duo_mrs: {
         type: 'array',
         items: { type: 'object', properties: { repo: { type: 'string' }, iid: { type: 'number' }, url: { type: 'string' }, findings: { type: 'string' } }, required: ['repo', 'iid', 'findings'] },
       },
     },
   })
+  if (!DRY && wg.heads && wg.heads.length) ctx.heads = wg.heads
   ctx.duo = []
   for (const d of (wg.duo_mrs || [])) {
     const vs = await parallel([0, 1, 2].map(i => () => agent(`You are Duo critic ${i + 1} for promotion MR ${d.url || d.repo + '!' + d.iid} of the BPP dev -> staging release (run ${RUN_ID}). GitLab Duo requested changes. Read the MR diff (glab api, read-only) and judge each finding.
@@ -485,8 +527,10 @@ Finally verify development still exists in every repo: git ls-remote origin refs
 
   // 11. Watch deploy
   phase('Watch deploy')
-  await gate(12, `For every repo merged in phase 10: wait for its latest staging pipeline (glab api projects/<id>/pipelines?ref=staging) to reach success, polling every 2 minutes, at most 60 minutes. Failed -> halt naming the job.
-Then use the Skill tool to load bpp-go-health and check staging; a service unhealthy for more than 15 minutes -> halt.${dryNote('nothing (no merge happened); still run the bpp-go-health staging check')}`, R.deploy)
+  await gate(12, `1. For every repo merged in phase 10: wait for its newest staging pipeline (glab api projects/<id>/pipelines?ref=staging) and its deploy job to reach success, polling every 2 minutes, at most 60 minutes. Failed -> halt naming the repo, job id and first error line.
+2. Health against the Preflight baseline (${BDIR}): ${HEALTH} json > ${BDIR}/statuses-now.json; ${HMAP} map ${BDIR}/statuses-now.json ${BDIR}/hosts.tsv <release repos from ${BDIR}/repos.txt, comma-separated> > ${BDIR}/map-now.json; ${HMAP} diff ${BDIR}/map.json ${BDIR}/map-now.json.
+3. new_unhealthy (healthy or absent at baseline, unhealthy now): re-run step 2 every 3 minutes. An endpoint that turns healthy is done. An endpoint still unhealthy once its fail_since + 15 minutes has passed -> halt naming endpoint, host and repos. Keep polling until every new_unhealthy endpoint is either healthy or past fail_since + 15 minutes (bounded: at most 10 rounds, each Bash call under 10 minutes; reaching the bound with one still unhealthy -> halt). You may never return ok while a new_unhealthy endpoint is still unhealthy. known_unhealthy (already unhealthy at baseline): list them in summary, no halt.
+Baseline from Preflight (run context baseline): use the files in ${BDIR}; if they are missing, halt (no baseline to compare with).${dryNote('nothing (no merge happened); still run steps 2-3 read-only')}`, R.deploy)
 
   // 12. ui_configs
   phase('ui_configs')
@@ -549,9 +593,9 @@ Return ping = the output verbatim.`, R.ping, { critics: 2, extra: { ping: { type
 
   // 16. Cleanup
   phase('Cleanup')
-  await gate(17, `1. Restore bpp-shared: in ${SHARED}: git switch development && git pull (bpp-checkout-shared-at-stage restore mode). Refused or dirty -> halt, no force.
+  await gate(17, `1. ${restoreShared()} A dirty tree or a mismatch -> halt, no force.
 2. Use the Skill tool to load bpp-cleanup-merged-worktrees; run its plan. ${DRY ? 'DRY RUN: plan only, apply nothing.' : 'Apply only the paths of its REMOVE and LANDED rows (apply <path>...); never --force, never apply-scaffold, never stale.sh.'}
-3. rm -rf ${SDIR}/sql-${RUN_ID} (only that dir).
+3. rm -rf ${SDIR}/sql-${RUN_ID} ${BDIR} ${SDIR}/pre-move-sha-${RUN_ID} (only these).
 4. ${STATE} unlock ${RUN_ID}`, R.cleanup)
 
   return {

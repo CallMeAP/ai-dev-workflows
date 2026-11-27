@@ -165,10 +165,29 @@ majority must approve) reads that result before the next phase. Any critic "bloc
 1. **Preflight** — glab auth + Maintainer rights, dotnet, psql, Keychain entries readable without a
    popup (names only, with a timeout), disk, no other release run holds the lock file, previous run
    state (resume or start fresh).
+   **Health + deploy baseline, before any write (added 2026-11-27 after the dry run):** release repos
+   = repos whose `development` head differs from `staging`, plus repos with an open promotion MR.
+   For each: its hosts (`lib/health-map.sh hosts`, from `origin/staging`'s compose file: Traefik
+   `Host()` rules plus network aliases, `container_name` and `hostname`, because Gatus checks some
+   services by internal name, e.g. `staging-bpp-mail`; repos without a clone via the compose file
+   downloaded with glab) and
+   its latest staging deploy job (newest job named like `deploy` across the last 5 staging pipelines).
+   Gatus staging statuses (`bpp-go-health/health.sh json`) are mapped to repos with
+   `lib/health-map.sh map`. **Halt before any write** when an endpoint of a release repo is unhealthy
+   or a release repo's latest staging deploy failed (reason: repo, endpoint, job id, first error line).
+   Unhealthy endpoints of other repos are "known" and only reported; release repos without a Gatus
+   endpoint are "unmapped" (report only). Promotion MRs with a `skipped` head pipeline are reported.
+   The baseline is taken before any local write (before `state.sh new`, the state archive and
+   `add-applied`); it is stored with `state.sh set-baseline` right after `state.sh new` (dry run:
+   files only) for phase 11.
+   Why: the 2026-11-27 dry run halted in phase 11 on the Agent Service, which had been down since
+   before the run (bpp-agent staging deploy never succeeded: missing Portainer secret). A real run
+   would have migrated staging and merged 27 MRs first, leaving ui_configs/StageSql undone.
 2. **Pull** — `bpp-pull-all-dev`. Halt if bpp-shared or bpp-backend were skipped.
 3. **Shared state** — resolve the newest `BPP.Shared.NET` package (the one `bpp-bump-shared-version`
    will pick) and its bpp-shared commit (`+<sha>`), check it out (same mechanism as
-   `bpp-checkout-shared-at-stage`) and list the migrations the dev and staging DBs lack (query
+   `bpp-checkout-shared-at-stage`; the HEAD before the move is recorded first as `pre_move_sha`,
+   `state.sh set-pre-move-sha`, dry run: a file) and list the migrations the dev and staging DBs lack (query
    `__EFMigrationsHistory` with `run-stage-sql.sh --readonly`). Critics check: every new migration is
    safe with the old staging code (no drop/rename of a column/table/enum value the old code uses).
 4. **Local migrate** — `migrate-stage.sh local` from that bpp-shared state. Halt on failure.
@@ -189,14 +208,23 @@ majority must approve) reads that result before the next phase. Any critic "bloc
 8. **Wait green** — poll every promotion MR: pipeline success, `detailed_merge_status=mergeable`.
    One retry of a failed job; still red → halt. Bounded wait (e.g. 90 min) → halt on timeout.
    Duo `requested_changes` on a promotion MR → Duo path from the decisions table.
+   A `skipped` head pipeline is not green. When the MR head commit message carries `[skip ci]` /
+   `[ci skip]`, one empty commit "chore: run CI after a skipped commit" is pushed to that repo's
+   `development` (worktree, no force; dry run prints it) and recorded in applied; still skipped → halt.
+   (2026-11-27: 18 promotion MRs had skipped pipelines after a `[skip ci]` docs commit.)
 9. **Staging migrate** — `migrate-stage.sh staging`, then the new bpp-backend `*.pre-deploy.sql`
    files for staging via `run-stage-sql.sh staging`, skipping files recorded as applied on staging.
    Only bpp-backend files run here. Halt on failure.
 10. **Merge** — merge all staging promotion MRs with `sha=<head recorded in phase 3>` and
     `should_remove_source_branch=false` (see memory "Staging MRs: force_remove_source_branch"), then
     verify `development` still exists in each repo.
-11. **Watch deploy** — each merged repo's `staging` pipeline to success; then `bpp-go-health` for
-    staging. Halt on a failed pipeline or a service unhealthy after a bounded wait.
+11. **Watch deploy** — each merged repo's `staging` pipeline and deploy job to success; then
+    `bpp-go-health` for staging compared with the Preflight baseline (`lib/health-map.sh diff`). Halt
+    on a failed pipeline/deploy, or on an endpoint that was healthy (or absent) at baseline and is
+    still unhealthy once its `fail_since` + 15 minutes has passed: each new failure is polled every
+    3 minutes until it is healthy or past that point (bounded); the phase never ends "done" while one
+    is still unhealthy. Endpoints already unhealthy at baseline are listed as known, no halt.
+    Wait green returns the `development` heads after any empty CI commit, so Merge uses them.
 12. **ui_configs** — run the `staging` statements marked "changed by this promotion" for `cockpit`
     and `kundenportal` (the promote skill's SQL) through `run-stage-sql.sh staging`; then the read-only
     check SELECT. **Never `stella`** — it waits for the store release.
@@ -214,7 +242,9 @@ majority must approve) reads that result before the next phase. Any critic "bloc
     needs submitting/unlocking in App Store + Play Store, and the `stella` `ui_configs` statement to
     run after the store release.
 15. **Report** — final summary; state file marked done.
-16. **Cleanup** — restore bpp-shared (`git switch development && git pull`), then
+16. **Cleanup** — restore bpp-shared by SHA (when HEAD differs from `pre_move_sha` and the tree is
+    clean: `git switch development && git pull --ff-only`, then verify HEAD == `origin/development`;
+    dirty or mismatch → halt, never stash/force; no move recorded → nothing to restore), then
     `bpp-cleanup-merged-worktrees` (plan, apply only its REMOVE/LANDED rows).
 
 ### Halt + ping
@@ -259,8 +289,10 @@ delta for main. 3. Wait: the user runs DbMigrator on prod by hand; skill asks fo
   moved, with `git log <old>..<new>` proof that the only new commits are the run's own. Merge uses
   these re-recorded heads (in dry-run nothing moves, so the phase 3 heads stay).
 - **Critic voting:** any critic "block" halts. All must approve.
-- **bpp-shared checkout on the Mac mini** is reserved for Henry; the staging skill restores it
-  (`git switch development && git pull`) at the end and on every halt.
+- **bpp-shared checkout on the Mac mini** is reserved for Henry; the staging skill restores it at
+  the end and on every halt, **by SHA** (2026-11-27): phase 3's `reset --hard` keeps the branch name
+  `development`, so "restore when not on development" would leave the checkout at the old package
+  commit. Restore whenever HEAD differs from the recorded `pre_move_sha`.
 - **Mac-safety:** shared skills are not ported. The install checklist requires Homebrew `bash` 5,
   `coreutils` (`gtimeout`, aliased as `timeout`) and `gnu-sed` first on `PATH` for the job; the
   only edit to shared skills is replacing hard-coded `/home/alex` with `$HOME` (e.g.

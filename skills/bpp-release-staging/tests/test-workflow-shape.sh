@@ -95,7 +95,9 @@ const agent = async (p, o) => {
     package: '1.0.0', shared_sha: 'abc', heads: [{ repo: 'r', sha: 'a' }], staging_heads: [{ repo: 'r', sha: 'b' }],
     mrs: [{ repo: 'r', iid: 1, url: 'u', kind: 'dotnet' }],
     changed_skills: process.argv[5] === 'changed' ? ['bpp-pull-all-dev'] : [],
-    skill_update: process.env.STUB_SKILL_UPDATE || 'on' }
+    skill_update: process.env.STUB_SKILL_UPDATE || 'on',
+    release_blockers: (o.label === 'Preflight: worker' && process.env.STUB_BLOCKERS) ? [process.env.STUB_BLOCKERS] : [],
+    ...((o.label === 'Wait green: worker' && process.env.STUB_WAIT_HEAD) ? { heads: [{ repo: 'r', sha: process.env.STUB_WAIT_HEAD }] } : {}) }
 }
 const parallel = async fns => Promise.all(fns.map(f => f()))
 wf({ mode: process.argv[3], runId: '2026-11-26-0000' }, agent, parallel, () => {}, () => {}).then(r => {
@@ -199,6 +201,63 @@ EOF
   rw=$(cat "$O/Report_worker" 2>/dev/null)
   assert_contains 'skill update report' "$rw" "report: Report records skill update report"
   assert_contains 'bpp-pull-all-dev' "$rw" "report: Report lists the differing skill"
+
+  # fix 1: health + deploy baseline in Preflight, compared in Watch deploy
+  for mode in run dry-run; do
+    pf=$(cat "$T/$mode/Preflight_worker" 2>/dev/null)
+    assert_contains 'health-map.sh" hosts' "$pf" "$mode: Preflight maps repos to Traefik hosts"
+    assert_contains 'health-map.sh" map' "$pf" "$mode: Preflight maps Gatus endpoints to repos"
+    assert_contains 'health.sh" json' "$pf" "$mode: Preflight reads Gatus statuses as JSON"
+    assert_contains 'take the newest job whose name contains "deploy"' "$pf" "$mode: Preflight checks the latest staging deploy job"
+    assert_contains '<repo>=<downloaded compose file>' "$pf" "$mode: Preflight maps repos without a local clone via the downloaded compose file"
+    assert_contains 'release_blockers' "$pf" "$mode: Preflight returns release blockers"
+    assert_contains '"skipped"' "$pf" "$mode: Preflight reports skipped head pipelines"
+    wd=$(cat "$T/$mode/Watch_deploy_worker" 2>/dev/null)
+    assert_contains 'health-map.sh" diff' "$wd" "$mode: Watch deploy compares with the baseline"
+    assert_contains 'known_unhealthy' "$wd" "$mode: Watch deploy lists baseline-unhealthy endpoints as known"
+    assert_contains 'fail_since + 15 minutes' "$wd" "$mode: Watch deploy waits until fail_since + 15 minutes per endpoint"
+    assert_contains 'never return ok while a new_unhealthy endpoint is still unhealthy' "$wd" "$mode: Watch deploy never ends ok with an endpoint still unhealthy"
+    # fix 2: skipped head pipeline is not green; empty CI commit after [skip ci]
+    assert_contains 'chore: run CI after a skipped commit' "$(cat "$T/$mode/Wait_green_worker" 2>/dev/null)" "$mode: Wait green handles a skipped pipeline with an empty commit"
+    # fix 3: restore bpp-shared by SHA
+    cl=$(cat "$T/$mode/Cleanup_worker" 2>/dev/null)
+    assert_contains 'HEAD (git rev-parse HEAD) equals the pre-move SHA -> nothing to restore' "$cl" "$mode: Cleanup task skips the restore when HEAD is the pre-move SHA"
+    assert_contains 'verify git rev-parse HEAD equals git rev-parse origin/development' "$cl" "$mode: Cleanup task verifies HEAD == origin/development"
+  done
+  assert_contains 'set-baseline' "$(cat "$T/run/Preflight_worker" 2>/dev/null)" "run: Preflight stores the baseline with state.sh set-baseline"
+  pfr=$(cat "$T/run/Preflight_worker" 2>/dev/null)
+  b=$(printf '%s\n' "$pfr" | grep -n 'Health + deploy baseline (read-only' | head -1 | cut -d: -f1)
+  n=$(printf '%s\n' "$pfr" | grep -n 'state.sh" new 2026' | head -1 | cut -d: -f1)
+  [ -n "$b" ] && [ -n "$n" ] && [ "$b" -lt "$n" ] && ord=yes || ord=no
+  assert_eq yes "$ord" "run: Preflight takes the baseline (and may halt) before state.sh new"
+  assert_not_contains 'set-baseline' "$(cat "$T/dry-run/Preflight_worker" 2>/dev/null)" "dry-run: Preflight does not touch state"
+  assert_contains 'set-pre-move-sha' "$(cat "$T/run/Shared_state_worker" 2>/dev/null)" "run: Shared state records the pre-move SHA in state"
+  assert_contains 'pre-move-sha-' "$(cat "$T/dry-run/Shared_state_worker" 2>/dev/null)" "dry-run: Shared state records the pre-move SHA in a file"
+  assert_contains 'git push origin HEAD:development' "$(cat "$T/run/Wait_green_worker" 2>/dev/null)" "run: Wait green pushes the empty commit"
+  assert_contains 'WOULD RUN' "$(cat "$T/dry-run/Wait_green_worker" 2>/dev/null)" "dry-run: Wait green only prints the empty commit"
+
+  # Wait green re-records heads after an empty CI commit; Merge uses them
+  O="$T/waithead"
+  mkdir -p "$O"
+  STUB_WAIT_HEAD=feedc0de node "$T/h.js" "$WF" run "$O" 2> "$T/err" || _fail "waithead: stub run failed: $(head -5 "$T/err")"
+  assert_contains 'feedc0de' "$(cat "$O/Merge_worker" 2>/dev/null)" "run: Merge gets the head Wait green re-recorded"
+  assert_contains 'return heads' "$(cat "$O/Wait_green_worker" 2>/dev/null)" "run: Wait green returns heads"
+  O="$T/waithead-dry"
+  mkdir -p "$O"
+  STUB_WAIT_HEAD=feedc0de node "$T/h.js" "$WF" dry-run "$O" 2> "$T/err" || _fail "waithead-dry: stub run failed: $(head -5 "$T/err")"
+  assert_not_contains 'feedc0de' "$(cat "$O/Merge_worker" 2>/dev/null)" "dry-run: heads stay the phase 3 heads"
+
+  # a release repo is unhealthy or its staging deploy failed -> halt in Preflight, before any write
+  O="$T/blocked"
+  mkdir -p "$O"
+  STUB_BLOCKERS='bpp-agent: staging deploy job 1 failed: secret not found' node "$T/h.js" "$WF" run "$O" 2> "$T/err" || _fail "blocked: stub run failed: $(head -5 "$T/err")"
+  assert_eq "halted Preflight" "$(cat "$O/status" 2>/dev/null)" "blocked: halts in Preflight"
+  [ -f "$O/Pull_worker" ] && f=yes || f=no
+  assert_eq no "$f" "blocked: no phase after Preflight runs"
+  hl=$(cat "$O/halt" 2>/dev/null)
+  assert_contains 'secret not found' "$hl" "blocked: halt reason names the blocker"
+  assert_contains 'pre-move SHA' "$hl" "blocked: halt agent restores by pre-move SHA"
+  assert_contains 'restore nothing' "$hl" "blocked: no move recorded -> nothing to restore"
 
   # any other value halts in Skill update
   O="$T/bad"

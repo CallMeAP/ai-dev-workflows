@@ -7,6 +7,7 @@
 #   bash health.sh all           every endpoint, OK and FAIL
 #   bash health.sh show <text>   details for keys containing <text>: URL, conditions, history
 #   bash health.sh config <text> the Gatus config entries mentioning <text> (brokernet-traefik, ref main)
+#   bash health.sh json          the raw /api/v1/endpoints/statuses JSON (for bpp-release-staging's health-map.sh)
 set -uo pipefail
 BASE=https://health.go-plattform.at
 PWFILE=${HEALTH_GO_PWFILE:-$HOME/.health_go_plattform}
@@ -22,10 +23,31 @@ if [ "$mode" = config ]; then
 fi
 
 tmp=$(mktemp)
-trap 'rm -f "$tmp"' EXIT
-code=$(printf 'user = "go:%s"\n' "$(tr -d '\n' < "$PWFILE")" \
-  | curl -s -K - "$BASE/api/v1/endpoints/statuses?page=1&pageSize=100" -o "$tmp" -w '%{http_code}')
-[ "$code" = 200 ] || { echo "HTTP $code from $BASE (401 = wrong password in $PWFILE)" >&2; exit 1; }
+pdir=$(mktemp -d)
+trap 'rm -f "$tmp"; rm -rf "$pdir"' EXIT
+# read every page (100 endpoints each) until a short page; at most 20 pages
+page=1
+while [ "$page" -le 20 ]; do
+  code=$(printf 'user = "go:%s"\n' "$(tr -d '\n' < "$PWFILE")" \
+    | curl -s -K - "$BASE/api/v1/endpoints/statuses?page=$page&pageSize=100" -o "$pdir/$page.json" -w '%{http_code}')
+  [ "$code" = 200 ] || { echo "HTTP $code from $BASE (401 = wrong password in $PWFILE)" >&2; exit 1; }
+  n=$(python3 -I -c 'import json,sys; print(len(json.load(open(sys.argv[1]))))' "$pdir/$page.json") || { echo "page $page is not JSON" >&2; exit 1; }
+  [ "$n" -lt 100 ] && break
+  page=$((page + 1))
+done
+python3 -I - "$pdir" "$tmp" <<'PY'
+import json, os, sys
+d, out = sys.argv[1], sys.argv[2]
+eps = []
+for name in sorted(os.listdir(d), key=lambda x: int(x.split('.')[0])):
+    eps += json.load(open(os.path.join(d, name)))
+json.dump(eps, open(out, 'w'))
+PY
+
+if [ "$mode" = json ]; then
+  cat "$tmp"
+  exit 0
+fi
 
 python3 -I - "$tmp" "$mode" "$filter" <<'PY'
 import json, sys

@@ -23,6 +23,7 @@ endpoint has a URL and conditions such as `[STATUS] == 200` and `[RESPONSE_TIME]
 | All endpoints | `bash ~/.claude/skills/bpp-go-health/health.sh all` |
 | One service: URL, conditions, history | `bash ~/.claude/skills/bpp-go-health/health.sh show austria` |
 | Its check definition | `bash ~/.claude/skills/bpp-go-health/health.sh config austria` |
+| All statuses as raw JSON (scripts, bpp-release-staging) | `bash ~/.claude/skills/bpp-go-health/health.sh json` |
 | Raw API | `GET /api/v1/endpoints/statuses?page=1&pageSize=100`, or `/api/v1/endpoints/<key>/statuses` |
 
 The API keeps only the last 100 results per endpoint (about 100 min at a 1m interval). It

@@ -152,6 +152,28 @@ assert_eq 2 "$RC" "set-package empty -> 2"
 run_cmd bash "$STATE" set-package 'a b'
 assert_eq 2 "$RC" "set-package with a space -> 2"
 
+# --- baseline and pre-move sha ---
+assert_eq "null" "$(jq -c .baseline "$SDIR/state.json")" "new: baseline null"
+assert_eq "null" "$(jq -c .pre_move_sha "$SDIR/state.json")" "new: pre_move_sha null"
+run_cmd bash "$STATE" set-baseline '{"health":{"release_unhealthy":[]},"deploys":[{"repo":"bpp-agent","status":"failed"}]}'
+assert_eq 0 "$RC" "set-baseline -> 0"
+run_cmd bash "$STATE" get baseline
+assert_eq '{"health":{"release_unhealthy":[]},"deploys":[{"repo":"bpp-agent","status":"failed"}]}' "$OUT" "get baseline"
+for bad in '[1]' 'not json' '"text"' ''; do
+  run_cmd bash "$STATE" set-baseline "$bad"
+  assert_eq 2 "$RC" "set-baseline '$bad' -> 2"
+done
+run_cmd bash "$STATE" set-pre-move-sha 9905c1c0197415db8680335f3052013732ba8b2a
+assert_eq 0 "$RC" "set-pre-move-sha -> 0"
+run_cmd bash "$STATE" get pre_move_sha
+assert_eq 9905c1c0197415db8680335f3052013732ba8b2a "$OUT" "get pre_move_sha"
+for bad in '' 'xyz' '9905c1' '9905c1c0197415db8680335f3052013732ba8b2a00' 'abc;rm'; do
+  run_cmd bash "$STATE" set-pre-move-sha "$bad"
+  assert_eq 2 "$RC" "set-pre-move-sha '$bad' -> 2"
+done
+run_cmd bash "$STATE" set-pre-move-sha 9905c1c0
+assert_eq 0 "$RC" "set-pre-move-sha: short sha (8+ hex) -> 0"
+
 run_cmd bash "$STATE" set-heads '{"bpp-backend":"abc123","bpp-auth":"def456"}'
 assert_eq 0 "$RC" "set-heads -> 0"
 run_cmd bash "$STATE" get heads

@@ -20,23 +20,23 @@ Phases, in order:
 | # | Phase | What happens |
 |---|---|---|
 | 0 | Skill update | switch `BPP_RELEASE_SKILL_UPDATE` (`on`, `off` or `report`, default `on`). `on`: every run pulls + installs the skills mirror; only changed skills this run uses get a critic diff review first. `off`: no pull, no install, the report says "skill update off". `report`: pulls into a temp clone and lists which used skills differ, never installs |
-| 1 | Preflight | glab auth + Maintainer rights, dotnet, psql, secrets readable (with a timeout), disk, lock, previous state |
+| 1 | Preflight | glab auth + Maintainer rights, dotnet, psql, secrets readable (with a timeout), disk, lock, previous state; health + deploy baseline: halt **before any write** if a release repo's endpoint is unhealthy or its last staging deploy failed (`lib/health-map.sh`) |
 | 2 | Pull | `bpp-pull-all-dev`; halt if bpp-shared or bpp-backend were skipped |
-| 3 | Shared state | newest `BPP.Shared.NET` package → its bpp-shared commit; checkout; pending migrations for dev + staging; record each repo's `development` head |
+| 3 | Shared state | newest `BPP.Shared.NET` package → its bpp-shared commit; record the pre-move SHA, then checkout; pending migrations for dev + staging; record each repo's `development` head |
 | 4 | Local migrate | `lib/migrate-stage.sh local` |
 | 5 | Dev migrate | `lib/migrate-stage.sh development`, then new bpp-backend StageSql files whose header lists `development` (pre-deploy, then post-deploy) via `lib/run-stage-sql.sh development` |
 | 5b | Bump shared | `bpp-bump-shared-version` to exactly the phase 3 package |
 | 6 | Promote | `bpp-promote-dev-to-staging` dev→staging; the go is given after critics approve the preview; restart guard |
 | 7 | UI versions | package.json version on `development` > `staging` (and > `main`) in every UI promotion MR |
-| 8 | Wait green | every promotion MR: pipeline success + `mergeable`; one retry; bounded wait; Duo path |
+| 8 | Wait green | every promotion MR: pipeline success + `mergeable`; one retry; bounded wait; Duo path; a `skipped` pipeline after `[skip ci]` gets one empty CI commit on `development` |
 | 9 | Staging migrate | `lib/migrate-stage.sh staging`, then new bpp-backend `*.pre-deploy.sql` via `lib/run-stage-sql.sh staging` |
 | 10 | Merge | merge with `sha=<head from phase 3>` and `should_remove_source_branch=false`; check `development` still exists |
-| 11 | Watch deploy | `staging` pipelines green, then `bpp-go-health` for staging |
+| 11 | Watch deploy | `staging` pipelines + deploy jobs green, then `bpp-go-health` vs the Preflight baseline: polls each new failure until healthy or fail_since + 15 min, then halts; never done while one is still unhealthy; baseline failures are listed as known |
 | 12 | ui_configs | `cockpit` + `kundenportal` statements changed by this promotion; never `stella` |
 | 13 | Manual SQL | `lib/find-stage-sql.sh`: bpp-backend post-deploy files run; StageSql files outside bpp-backend and all other SQL are fallback, run only when all critics approve |
 | 14 | Henry ping | released MRs + versions, go-stella store version, the `stella` ui_configs statement for later |
 | 15 | Report | final summary; state marked done |
-| 16 | Cleanup | restore bpp-shared (`git switch development && git pull`), then `bpp-cleanup-merged-worktrees` |
+| 16 | Cleanup | restore bpp-shared by SHA (HEAD ≠ pre-move SHA → `git switch development && git pull --ff-only`, verify HEAD = `origin/development`), then `bpp-cleanup-merged-worktrees` |
 
 Scripts in `lib/` (bash 3.2-safe, macOS + Linux):
 
@@ -44,8 +44,13 @@ Scripts in `lib/` (bash 3.2-safe, macOS + Linux):
 - `migrate-stage.sh <local|development|staging>` — bpp-shared DbMigrator with the injected connection string.
 - `run-stage-sql.sh [--readonly] <development|staging> (<file.sql> | --check | --query 'SQL')` — psql in one transaction.
 - `find-stage-sql.sh` — SQL candidates (convention / diff / MR description) as JSON.
+- `health-map.sh` — `hosts <repo>=<dir|compose file>…` (Traefik hosts, network aliases, container_name and
+  hostname from `origin/staging`'s compose file; a downloaded compose file for repos without a clone),
+  `map <statuses.json> <hosts.tsv> <repos>` (Gatus endpoint ↔ repo, release_unhealthy / known /
+  unmapped), `diff <baseline map> <now map>` (new vs known unhealthy). Gatus JSON comes from
+  `bpp-go-health/health.sh json`.
 - `state.sh` — run state and lock: `set-phase <spec label>` (`0` … `5b` … `16`), `set-heads <json>`,
-  `set-package <version>`, `add-sql` / `has-sql <stage> <file-id>`, `get [key]`.
+  `set-package <version>`, `set-baseline <json>`, `set-pre-move-sha <sha>`, `add-sql` / `has-sql <stage> <file-id>`, `get [key]`.
   `henry-ping.sh <info|blocker> <title> <body>` — prints the ping block.
 
 ## Rules
@@ -105,7 +110,8 @@ Lint: `shellcheck -x "$HOME/.claude/skills/bpp-release-staging/lib/"*.sh` (`-x` 
   Lock: `~/.claude/state/bpp-release/lock` (holds the runId; every phase refreshes it).
 - Read it with `bash "$HOME/.claude/skills/bpp-release-staging/lib/state.sh" get`.
 - On a halt the halt agent runs `state.sh halt <reason>`, `henry-ping.sh blocker …`, restores
-  bpp-shared and runs `state.sh unlock <runId>`. The workflow returns `halted`.
+  bpp-shared by SHA (only when HEAD differs from the recorded pre-move SHA; a dirty tree is reported,
+  never stashed or forced) and runs `state.sh unlock <runId>`. The workflow returns `halted`.
 - Rerun the workflow (new `runId`) to continue. A rerun starts again at phase 0 and re-checks every
   phase; there is no jump to the halted phase. Preflight archives the old state and reports when a
   human must decide first (pass `args.ack` once decided). Migrations are idempotent, open promotion

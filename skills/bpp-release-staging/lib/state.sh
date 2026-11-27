@@ -9,6 +9,8 @@
 #   state.sh get [key]      print the state JSON, or one key of it (exit 3 if no state file)
 #   state.sh set-phase <spec label: 0 1 2 3 4 5 5b 6 ... 16>
 #   state.sh set-heads <json object {repo: sha}> | set-package <version>
+#   state.sh set-baseline <json object>   health + staging deploy baseline taken in Preflight
+#   state.sh set-pre-move-sha <sha>       bpp-shared HEAD before phase 3 moved it (8-40 hex)
 #   state.sh add-sql <development|staging> <file-id>   record a SQL file run on that stage
 #   state.sh has-sql <development|staging> <file-id>   exit 0 if recorded, 1 if not
 #   state.sh add-applied <text> | halt <reason> | done
@@ -110,7 +112,7 @@ case "$cmd" in
         die 1 "cannot read $STATE"
     fi
     if ! jq -n --arg id "$1" --argjson sql "$sql" \
-      '{run_id: $id, phase: "0", status: "running", applied: [], halt_reason: null, heads: {}, package: null, sql_applied: $sql}' \
+      '{run_id: $id, phase: "0", status: "running", applied: [], halt_reason: null, heads: {}, package: null, baseline: null, pre_move_sha: null, sql_applied: $sql}' \
       > "$STATE.tmp.$$" || ! mv "$STATE.tmp.$$" "$STATE"; then
       rm -f "$STATE.tmp.$$"
       die 1 "cannot write $STATE"
@@ -120,9 +122,9 @@ case "$cmd" in
     [ -f "$STATE" ] || die 3 "no state file: $STATE"
     case "${1:-}" in
       '') cat "$STATE" ;;
-      run_id|phase|status|applied|halt_reason|heads|package|sql_applied)
+      run_id|phase|status|applied|halt_reason|heads|package|baseline|pre_move_sha|sql_applied)
         jq -r --arg k "$1" '.[$k] | if type == "string" then . else tojson end' "$STATE" ;;
-      *) die 2 "unknown key: $1 (run_id|phase|status|applied|halt_reason|heads|package|sql_applied)" ;;
+      *) die 2 "unknown key: $1 (run_id|phase|status|applied|halt_reason|heads|package|baseline|pre_move_sha|sql_applied)" ;;
     esac
     ;;
   set-phase)
@@ -142,6 +144,20 @@ case "$cmd" in
       ''|*[!A-Za-z0-9.+_-]*) die 2 "usage: state.sh set-package <version> (letters, digits and .+_- only)" ;;
     esac
     update --arg v "$1" '.package = $v'
+    ;;
+  set-baseline)
+    printf '%s' "${1:-}" | jq -e 'type == "object"' >/dev/null 2>&1 ||
+      die 2 "usage: state.sh set-baseline '<json object>'"
+    update --argjson b "$1" '.baseline = $b'
+    ;;
+  set-pre-move-sha)
+    case "${1:-}" in
+      *[!0-9a-f]*|'') die 2 "usage: state.sh set-pre-move-sha <sha> (8-40 lowercase hex)" ;;
+    esac
+    if [ "${#1}" -lt 8 ] || [ "${#1}" -gt 40 ]; then
+      die 2 "usage: state.sh set-pre-move-sha <sha> (8-40 lowercase hex)"
+    fi
+    update --arg v "$1" '.pre_move_sha = $v'
     ;;
   add-sql|has-sql)
     case "${1:-}" in
@@ -167,5 +183,5 @@ case "$cmd" in
     update --arg r "$1" '.status = "halted" | .halt_reason = $r'
     ;;
   done) update '.status = "done"' ;;
-  *) die 2 "unknown command: $cmd (lock|unlock|new|get|set-phase|set-heads|set-package|add-sql|has-sql|add-applied|halt|done)" ;;
+  *) die 2 "unknown command: $cmd (lock|unlock|new|get|set-phase|set-heads|set-package|set-baseline|set-pre-move-sha|add-sql|has-sql|add-applied|halt|done)" ;;
 esac
